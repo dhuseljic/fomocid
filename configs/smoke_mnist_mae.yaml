@@ -1,0 +1,72 @@
+seed: 7
+
+dataset:
+  name: mnist
+  data_dir: /tmp/fomocid-data
+  image_size: 28
+  batch_size: 8
+  eval_batch_size: 8
+  num_workers: 0
+  download: false
+  use_fake_data: true
+  fake_data_size: 32
+  pretrain_split: train
+  train_split: train
+  test_split: test
+
+ssl:
+  method: mae
+  patch_size: 4
+  mask_ratio: 0.75
+  min_scale: 0.8
+  encoder_depth: 2
+  encoder_num_heads: 2
+  encoder_hidden_dim: 64
+  encoder_mlp_dim: 128
+  embedding_pool: cls
+  decoder_depth: 1
+  decoder_num_heads: 2
+  decoder_hidden_dim: 64
+  decoder_mlp_dim: 128
+  normalize_pixel_targets: true
+  dropout: 0.0
+  attention_dropout: 0.0
+
+optimizer:
+  lr: 1.0e-4
+  weight_decay: 0.01
+  scheduler:
+    enabled: true
+    name: cosine_with_warmup
+    warmup_epochs: 0.25
+    min_lr: 1.0e-5
+    interval: step
+
+trainer:
+  accelerator: cpu
+  devices: 1
+  max_epochs: 1
+  limit_train_batches: 2
+  log_every_n_steps: 1
+  enable_logging: true
+  enable_progress_bar: false
+  progress_bar: auto
+  progress_refresh_rate: 1
+  deterministic: true
+  fast_dev_run: false
+
+evaluation:
+  max_feature_batches: 2
+  linear_probe:
+    epochs: 2
+    lr: 0.01
+    weight_decay: 0.0
+    batch_size: 8
+  knn:
+    k: 3
+    chunk_size: 8
+
+analysis:
+  projection_method: pca
+  num_query_images: 4
+  num_neighbors: 3
