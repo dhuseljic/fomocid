@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fomocid"
+version = "0.1.0"
+description = "Tutorial-first self-supervised learning workflows for image benchmark SSL experiments."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "torch",
+  "torchvision",
+  "pytorch-lightning",
+  "lightly",
+  "PyYAML",
+  "Pillow",
+  "numpy",
+  "scikit-learn",
+]
+
+[project.optional-dependencies]
+dev = []
+docs = [
+  "sphinx>=7,<9",
+  "myst-parser>=3,<5",
+  "myst-nb>=1,<2",
+  "furo>=2024.8.6",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

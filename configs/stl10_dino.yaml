@@ -1,0 +1,79 @@
+seed: 7
+
+dataset:
+  name: stl10
+  data_dir: /home/datasets
+  image_size: 96
+  batch_size: 64
+  eval_batch_size: 256
+  num_workers: 4
+  download: true
+  use_fake_data: false
+  fake_data_size: 128
+  pretrain_split: train+unlabeled
+  train_split: train
+  test_split: test
+
+ssl:
+  method: dino
+  backbone: resnet18
+  global_crop_size: 96
+  global_crop_scale: [0.5, 1.0]
+  local_crop_size: 48
+  local_crop_scale: [0.2, 0.5]
+  n_local_views: 2
+  projection_hidden_dim: 1024
+  projection_bottleneck_dim: 256
+  projection_output_dim: 4096
+  projection_batch_norm: true
+  freeze_last_layer_epochs: 1
+  norm_last_layer: true
+  teacher_momentum_start: 0.996
+  teacher_momentum_end: 1.0
+  warmup_teacher_temp: 0.04
+  teacher_temp: 0.04
+  warmup_teacher_temp_epochs: 10
+  student_temp: 0.1
+  center_momentum: 0.9
+  color_jitter_strength: 0.5
+  random_gray_scale: 0.2
+  gaussian_blur: [1.0, 0.1, 0.5]
+  solarization_prob: 0.0
+
+optimizer:
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  scheduler:
+    enabled: true
+    name: cosine_with_warmup
+    warmup_epochs: 10.0
+    min_lr: 1.0e-5
+    interval: step
+
+trainer:
+  accelerator: auto
+  devices: auto
+  max_epochs: 200
+  limit_train_batches: 1.0
+  log_every_n_steps: 10
+  enable_logging: true
+  enable_progress_bar: true
+  progress_bar: auto
+  progress_refresh_rate: 1
+  deterministic: false
+  fast_dev_run: false
+
+evaluation:
+  linear_probe:
+    epochs: 50
+    lr: 0.01
+    weight_decay: 0.0
+    batch_size: 256
+  knn:
+    k: 5
+    chunk_size: 512
+
+analysis:
+  projection_method: pca
+  num_query_images: 8
+  num_neighbors: 5
