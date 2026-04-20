@@ -1,0 +1,16 @@
+name: fomocid_scattering_calculator_env
+channels:
+  - conda-forge
+dependencies:
+  - ipympl
+  - ipywidgets
+  - isort
+  - numba
+  - numpy
+  - pyfai
+  - scikit-image
+  - scipy
+  - tqdm
+  - ca-certificates
+  - certifi
+  - openssl
