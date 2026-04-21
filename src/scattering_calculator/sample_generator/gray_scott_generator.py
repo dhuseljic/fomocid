@@ -353,6 +353,17 @@ class GrayScottBatch:
     """Batched Gray-Scott simulator producing continuous (A, B) fields."""
 
     def __init__(self, cfg: GrayScottConfig):
+        """Initialise the simulator from a :class:`GrayScottConfig`.
+
+        Draws per-sample (f, k) parameters, builds spatially-varying parameter
+        fields and anisotropy tensors if requested, seeds the initial B field,
+        and allocates the A field (uniform 1).
+
+        Parameters
+        ----------
+        cfg : GrayScottConfig
+            Full simulation configuration.
+        """
         self.cfg = cfg
         self.xp = _xp(cfg.use_gpu)
         self._rng = _np.random.default_rng(cfg.seed)
@@ -442,6 +453,17 @@ class GrayScottBatch:
         return _laplacian_iso(u, self.xp)
 
     def step(self, n: int = 1):
+        """Advance the simulation by ``n`` Euler steps.
+
+        Updates ``self.A`` and ``self.B`` in-place. If ``random_stop`` is
+        enabled, freezes individual samples once their scheduled stop step
+        is reached.
+
+        Parameters
+        ----------
+        n : int, optional
+            Number of time steps to perform. Default is ``1``.
+        """
         xp = self.xp
         A, B = self.A, self.B
         D_A, D_B, dt = self.cfg.D_A, self.cfg.D_B, self.cfg.dt
@@ -513,10 +535,46 @@ def generate(
     use_gpu: bool = True,
     **overrides,
 ) -> Tuple[_np.ndarray, _np.ndarray, dict]:
-    """One-call generator. Returns (A, B, meta).
+    """Generate a batch of Gray-Scott reaction-diffusion patterns.
 
-    `meta` is a dict of per-sample parameters (f, k, theta, alpha, stop_step)
-    so you can log/condition on them downstream.
+    Convenience wrapper around :class:`GrayScottBatch` that constructs the
+    config, runs the simulation, and returns results together with metadata.
+
+    Parameters
+    ----------
+    batch : int, optional
+        Number of samples to generate in parallel. Default is ``16``.
+    H, W : int, optional
+        Spatial dimensions of each sample in pixels. Default is ``256``.
+    n_steps : int, optional
+        Number of Euler integration steps. Default is ``8000``.
+    region : str or list of str or None, optional
+        Named morphology region(s) from :data:`MORPHOLOGY_REGIONS` to draw
+        (f, k) parameters from. ``None`` samples broadly across the
+        interesting crescent.
+    anisotropic : bool, optional
+        Enable per-sample anisotropic diffusion. Default is ``False``.
+    fk_spatial : bool, optional
+        Use spatially-varying (f, k) fields. Default is ``False``.
+    random_stop : bool, optional
+        Stop each sample at a randomly chosen step to produce diverse
+        transient states. Default is ``False``.
+    seed : int or None, optional
+        Global RNG seed for reproducibility. Default is ``None``.
+    use_gpu : bool, optional
+        Use CuPy (GPU) if available; falls back to NumPy. Default is ``True``.
+    **overrides
+        Any additional :class:`GrayScottConfig` fields to override.
+
+    Returns
+    -------
+    A : ndarray of shape (batch, H, W)
+        Activator field, values in ``[0, 1]``.
+    B : ndarray of shape (batch, H, W)
+        Inhibitor field, values in ``[0, 1]``.
+    meta : dict
+        Per-sample simulation metadata with keys ``f``, ``k``, ``theta``,
+        ``alpha``, ``stop_steps``, ``n_steps``, ``H``, ``W``.
     """
     cfg = GrayScottConfig(
         H=H, W=W, batch=batch, n_steps=n_steps,

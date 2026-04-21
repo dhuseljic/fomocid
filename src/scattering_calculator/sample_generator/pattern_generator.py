@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import numpy as np
+from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 from scipy.ndimage import gaussian_filter
@@ -6,42 +9,41 @@ from scattering_calculator.utils.masking import circle_mask
 
 
 def create_skyrmion_pattern(
-    sz_array,
-    skyr_diameter,
-    screening_diameter,
-    number_skyr,
-    number_iter,
-    sigma="none",
-    plot=False,
-):
-    """
-    Creates random skyrmion pattern
+    sz_array: list[int],
+    skyr_diameter: float,
+    screening_diameter: float,
+    number_skyr: int,
+    number_iter: int,
+    sigma: float | str = "none",
+    plot: bool = False,
+) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
+    """Create a random skyrmion pattern using Poisson-disk-like placement.
 
-    Parameter
-    =========
-    sz_array : list
-        shape of output array [vert,horz]
-    skyr_diameter : scalar
-        diameter of skyrmions in px
-    screening_diameter : scalar
-        minimum distance between two skyrmions in px
+    Parameters
+    ----------
+    sz_array : list of int
+        Output array shape ``[rows, cols]`` in pixels.
+    skyr_diameter : float
+        Diameter of individual skyrmions in pixels.
+    screening_diameter : float
+        Minimum centre-to-centre distance between any two skyrmions in pixels.
     number_skyr : int
-        number of created skyrmions
+        Target number of skyrmions to place.
     number_iter : int
-        number of maximal interations
-    smoothing : bool
-        Activate or deactive smoothing of skyrmions
-    sigma: scalar
-        standard deviation (?) of gaussian filter for smoothing of skyrmions, if sigma == 'none' no filter will be applied
-    plot: bool
-        if true magnetic pattern will be plotted
+        Maximum number of placement attempts.
+    sigma : float or "none", optional
+        Standard deviation of the Gaussian smoothing filter applied after
+        placement. Pass ``"none"`` to skip smoothing. Default is ``"none"``.
+    plot : bool, optional
+        If ``True``, plot the screening kernel and the final pattern.
+        Default is ``False``.
 
-    Output
-    ======
-    pattern : array
-        Random skyrmion pattern
-    ======
-    author: ck 2022/23
+    Returns
+    -------
+    pattern : ndarray of shape ``sz_array``
+        Normalised skyrmion pattern with values in ``[-1, 1]``.
+    coordinates : ndarray of shape ``(N, 2)``
+        Centre coordinates of placed skyrmions, sorted by row index.
     """
 
     # Screening

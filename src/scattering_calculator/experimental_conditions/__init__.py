@@ -1,11 +1,12 @@
 """Experimental setup configuration for coherent scattering simulations."""
 
-from .experimental_detector import beamstop, detector_layout
-from .light_beam import gauss_beam, wavefield
+from .detector import beamstop, detector_layout
+from .light_beam import beam_parameters, gauss_beam, illumination
 
 __all__ = [
+    "beam_parameters",
     "beamstop",
     "detector_layout",
     "gauss_beam",
-    "wavefield",
+    "illumination",
 ]

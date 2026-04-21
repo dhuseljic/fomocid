@@ -1,13 +1,34 @@
+from __future__ import annotations
+
 import numpy as np
+from numpy.typing import ArrayLike
 import matplotlib.pyplot as plt
+import matplotlib.figure
+import matplotlib.axes
 import ipywidgets
 from ipywidgets import FloatRangeSlider, FloatSlider, Button, interact, IntSlider
 
 
-def cimshow(im, **kwargs):
-    """Simple 2d image plot with adjustable contrast.
+def cimshow(
+    im: ArrayLike,
+    **kwargs,
+) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
+    """Display a 2-D image with an interactive contrast slider.
 
-    Returns matplotlib figure and axis created.
+    For 3-D arrays an additional integer slider selects the frame to display.
+    All extra keyword arguments are forwarded to ``ax.imshow``.
+
+    Parameters
+    ----------
+    im : array-like
+        2-D image of shape ``(H, W)`` or stack of shape ``(N, H, W)``.
+    **kwargs
+        Additional keyword arguments passed to :func:`matplotlib.axes.Axes.imshow`.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+    ax : matplotlib.axes.Axes
     """
     im = np.array(im).astype("float")
     fig, ax = plt.subplots(figsize=(7, 7))
@@ -15,7 +36,6 @@ def cimshow(im, **kwargs):
     mm = ax.imshow(im0, **kwargs)
 
     cmin, cmax, vmin, vmax = np.nanpercentile(im, [0.1, 99.9, 0.001, 99.999])
-    # vmin, vmax = np.nanmin(im), np.nanmax(im)
     sl_contrast = FloatRangeSlider(
         value=(cmin, cmax),
         min=vmin,

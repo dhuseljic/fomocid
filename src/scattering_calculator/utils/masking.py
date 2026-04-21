@@ -1,28 +1,34 @@
+from __future__ import annotations
+
 import numpy as np
+from numpy.typing import NDArray
 from scipy.ndimage.filters import gaussian_filter
 
 
-def circle_mask(shape, center, radius, sigma=None):
-    """
-    Draws circle mask with option to apply gaussian filter for smoothing
+def circle_mask(
+    shape: tuple[int, int],
+    center: tuple[float, float],
+    radius: float,
+    sigma: float | None = None,
+) -> NDArray[np.float64]:
+    """Draw a circular mask with optional Gaussian edge smoothing.
 
-    Parameter
-    =========
-    shape : int tuple
-        shape/dimension of output array
-    center : int tuple
-        center coordinates (ycenter,xcenter)
-    radius : scalar
-        radius of mask in px. Care: diameter is always (2*radius+1) px
-    sigma : scalar
-        std of gaussian filter
+    Parameters
+    ----------
+    shape : tuple of int
+        Shape (rows, cols) of the output array.
+    center : tuple of float
+        Centre coordinates ``(y_center, x_center)`` in pixels.
+    radius : float
+        Radius of the mask in pixels. Diameter is always ``2*radius + 1`` px.
+    sigma : float or None, optional
+        Standard deviation of the Gaussian smoothing filter.
+        No smoothing when ``None`` or ``0``.
 
-    Output
-    ======
-    mask: array
-        binary mask, or smoothed binary mask
-    ======
-    author: ck 2022
+    Returns
+    -------
+    mask : ndarray of shape ``shape``
+        Binary mask, or smoothed binary mask if ``sigma`` is given.
     """
 
     # setup array
@@ -41,24 +47,23 @@ def circle_mask(shape, center, radius, sigma=None):
     return mask
 
 
-def create_set_of_circle_masks(circle_coordinates, shape):
-    """
-    Create cdi support mask from a combination of multiple circular apertures
+def create_set_of_circle_masks(
+    circle_coordinates: list[list[float]],
+    shape: tuple[int, int],
+) -> NDArray[np.float64]:
+    """Create a support mask from a combination of multiple circular apertures.
 
-    Parameter
-    =========
-    circle_coordinates: nested list
-        Contains center coordinates and radius of each aperture [[yc_1,xc_1,r_1],[yc_2,xc_2,r_2],...]
-    shape : int tuple
-        shape/dimension of output array
+    Parameters
+    ----------
+    circle_coordinates : list of [y_center, x_center, radius]
+        Centre coordinates and radius of each aperture in pixels.
+    shape : tuple of int
+        Shape (rows, cols) of the output array.
 
-    Output
-    ======
-    supportmask: array
-        composed binary mask where circular apertures are "1"
-    ======
-    author: ck 2023
-
+    Returns
+    -------
+    supportmask : ndarray of shape ``shape``
+        Composite binary mask where circular apertures are ``1``.
     """
 
     # Create support mask

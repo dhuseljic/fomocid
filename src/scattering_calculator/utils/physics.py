@@ -1,26 +1,28 @@
+from __future__ import annotations
+
 import scipy.constants
+from typing import Literal
 
 
-def photon_energy_wavelength(value, unit="eV"):
-    """
-    Conversion of different "photon energy" units
+def photon_energy_wavelength(
+    value: float,
+    unit: Literal["eV", "nm"] = "eV",
+) -> float:
+    """Convert between photon energy and wavelength.
 
-    Parameter
-    =========
-    value : scalar
-        values that needs to be converted
-    unit :
-        Start unit, either 'eV' for energy in eV or 'nm' for wavelength in nm
+    Parameters
+    ----------
+    value : float
+        Value to convert.
+    unit : {"eV", "nm"}
+        Unit of the input value. Pass ``"eV"`` to convert energy to wavelength
+        in metres; pass ``"nm"`` to convert wavelength in nm to energy in eV.
 
     Returns
-    =======
-    lambda_Xray : scalar
-        x-ray wavelength in nm
-    energy_Xray : scalar
-        x-ray energie in eV
-
-    =======
-    author: ck 2022
+    -------
+    result : float
+        Wavelength in metres (when ``unit="eV"``) or energy in eV
+        (when ``unit="nm"``).
     """
 
     if unit == "nm":

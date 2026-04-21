@@ -1,32 +1,40 @@
+from __future__ import annotations
+
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from scattering_calculator.utils import physics
 
 
-def gauss_beam(sz, px_size, center, distance, fwhm, wlambda):
-    """
-    Cross-Section of gaussian beam in optics at 'distance' from focus
+def gauss_beam(
+    sz: tuple[int, int],
+    px_size: float,
+    center: ArrayLike,
+    distance: float,
+    fwhm: float,
+    wlambda: float,
+) -> NDArray[np.complex128]:
+    """Compute the cross-section of a Gaussian beam at a given propagation distance.
 
-    Parameter
-    =========
-    sz: tuple of int
-        Shape of new array, e.g., (2,3)
-    px_size: scalar
-        real-space pixel size in sample plane in m
-    center: list
-        Center coordiantes of beam [ycenter,xcenter] in px
-    distance: scalar
-        Distance between focus and plane of gaussian in m
-    fwhm: scalar
-        Full-width-half-maximum (FWHM) of gaussian in m
-    wlambda: scalar
-        photon wavelength in m
+    Parameters
+    ----------
+    sz : tuple of int
+        Output array shape (rows, cols), e.g. ``(512, 512)``.
+    px_size : float
+        Real-space pixel size in the sample plane in metres.
+    center : array-like of float
+        Beam centre coordinates ``[y_center, x_center]`` in pixels.
+    distance : float
+        Propagation distance from the beam waist in metres.
+        Pass ``0`` to evaluate at the focus.
+    fwhm : float
+        Full-width at half-maximum of the beam at the waist in metres.
+    wlambda : float
+        Photon wavelength in metres.
 
     Returns
-    =======
-    Gauss: complex array
-        Cross-section Gaussian beam
-    =======
-    author: ck 2022
+    -------
+    Gauss : complex ndarray of shape ``sz``
+        Complex-valued transverse beam cross-section including phase.
     """
 
     ycenter = center[0]
@@ -54,7 +62,6 @@ def gauss_beam(sz, px_size, center, distance, fwhm, wlambda):
 
     # wavevector
     k = 2 * np.pi / wlambda
-    # wavevector
 
     # Transversal gaussian
     Gauss_trans = np.exp(-((rho / w) ** 2))
@@ -76,44 +83,146 @@ def gauss_beam(sz, px_size, center, distance, fwhm, wlambda):
     return Gauss
 
 
-class wavefield:
+class beam_parameters:
+    """Incoming X-ray beam for a coherent scattering experiment.
+
+    Stores photon energy, derived wavelength, and photon flux. Provides a
+    convenience method to compute the Gaussian beam cross-section using the
+    stored wavelength.
+
+    Parameters
+    ----------
+    photon_energy : float
+        Photon energy in eV. Used to compute ``self.wavelength``.
+    photon_flux : float
+        Photon flux in photons/s.
+
+    Attributes
+    ----------
+    energy : float
+        Photon energy in eV.
+    wavelength : float
+        Photon wavelength in metres derived from ``photon_energy``.
+    photon_flux : float
+        Photon flux in photons/s.
+    illumination : complex ndarray
+        Beam cross-section set by :meth:`gauss_beam`.
     """
-    Class to define the wavefield of the incoming light beam in scattering experiment
 
-    Parameter
-    =========
-    photon_energy: scalar
-        photon energy in eV, used to calculate wavelength
-     =======
+    def __init__(self, photon_energy: float, photon_flux: float) -> None:
+        self.energy: float = photon_energy  # in eV
+        self.wavelength: float = physics.photon_energy_wavelength(photon_energy, unit="eV")
+        self.photon_flux: float = photon_flux  # in photons/s
+
+
+class illumination:
+    """Illumination field in the sample plane for a coherent scattering experiment.
+
+    Computes and stores the complex-valued wavefield incident on the sample,
+    given a set of beam parameters and the sample-plane geometry.
+
+    Parameters
+    ----------
+    beam_parameters : beam_parameters
+        Photon energy, wavelength, and flux of the incoming beam.
+    sample_shape : tuple of int
+        Shape of the sample plane array (rows, cols) in pixels.
+    real_space_pixel_size : float
+        Physical pixel size in the sample plane in metres.
+
+    Attributes
+    ----------
+    beam_parameters : beam_parameters
+        Reference to the beam parameter object.
+    shape : tuple of int
+        Sample plane dimensions in pixels.
+    pixel_size : float
+        Physical pixel size in metres.
+    illumination : complex ndarray or None
+        Complex wavefield; set by :meth:`gauss_beam` or :meth:`plane_wave`.
+    x, y : ndarray
+        2-D real-space coordinate grids in metres, set by
+        :meth:`calc_real_space_coordinates`.
     """
 
-    def __init__(self, photon_energy=50, photon_flux=1e12):
-        self.energy = photon_energy  # in eV
-        self.wavelength = physics.photon_energy_wavelength(photon_energy, unit="eV")
-        self.photon_flux = photon_flux  # in photons/s
+    def __init__(
+        self,
+        beam_parameters: beam_parameters,
+        sample_shape: tuple[int, int],
+        real_space_pixel_size: float,
+    ) -> None:
+        self.beam_parameters = beam_parameters
+        self.shape = sample_shape
+        self.pixel_size = real_space_pixel_size
+        self.illumination: NDArray[np.complex128] | None = None
 
-    def gauss_beam(self, sz, px_size, center, distance, fwhm):
-        """Cross-Section of gaussian beam in optics at 'distance' from focus
+        # Calculate real-space coordinates of illumination plane in meters
+        self.calc_real_space_coordinates()
 
-        Parameter
-        =========
-        sz: tuple of int
-            Shape of new array, e.g., (2,3)
-        px_size: scalar
-            real-space pixel size in sample plane in m
-        center: list
-            Center coordiantes of beam [ycenter,xcenter] in px
-        distance: scalar
-            Distance between focus and plane of gaussian in m
-        fwhm: scalar
-            Full-width-half-maximum (FWHM) of gaussian in m
+    def calc_real_space_coordinates(self) -> None:
+        """Compute real-space (x, y) coordinate grids for the illumination plane.
+
+        Sets ``self.x`` and ``self.y`` as 2-D arrays of physical
+        coordinates in metres, centred on the optical axis.
+        """
+
+        x = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.pixel_size
+        y = (np.arange(self.shape[0]) - self.shape[0] / 2) * self.pixel_size
+        X, Y = np.meshgrid(x, y)
+        self.x = X
+        self.y = Y
+
+    def get_illumination_extent_real_space(self) -> NDArray[np.float64]:
+        """Calculate the physical extent of the illumination plane in metres.
 
         Returns
-        =======
-        Gauss: complex array
-            Cross-section Gaussian beam
-        =======
+        -------
+        extent : tuple of float
+            Physical size of the detector plane in metres as (min_x, max_x, min_y, max_y).
+        """
+
+        extent_det_real = np.array(
+            [
+                np.min(self.x),
+                np.max(self.x),
+                np.min(self.y),
+                np.max(self.y),
+            ]
+        )
+        return extent_det_real
+
+    def plane_wave(self, shape: tuple[int, int]) -> None:
+        """Set the beam cross-section to a plane wave with uniform amplitude and zero phase."""
+        self.illumination = np.ones(shape, dtype=complex)
+
+    def gauss_beam(
+        self,
+        center: ArrayLike,
+        distance: float,
+        fwhm: float,
+    ) -> None:
+        """Compute the Gaussian beam cross-section and store in ``self.illumination``.
+
+        Uses the wavelength stored in ``self.wavelength``.
+
+        Parameters
+        ----------
+        center : array-like of float
+            Beam centre coordinates ``[y_center, x_center]`` in pixels.
+        distance : float
+            Propagation distance from the beam waist in metres.
+        fwhm : float
+            Full-width at half-maximum of the beam at the waist in metres.
         """
         self.illumination = gauss_beam(
-            sz, px_size, center, distance, fwhm, self.wavelength
+            self.shape,
+            self.pixel_size,
+            center,
+            distance,
+            fwhm,
+            self.beam_parameters.wavelength,
         )
+
+    def return_illumination(self) -> NDArray[np.complex128] | None:
+        """Return the current beam cross-section array."""
+        return self.illumination

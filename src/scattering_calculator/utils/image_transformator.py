@@ -1,27 +1,28 @@
+from __future__ import annotations
+
 import scipy as scp
 from scipy.ndimage import fourier_shift
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 
-def shift_image(image, shift):
-    """
-    Shifts image with sub-pixel precission in Fourier space
-
+def shift_image(
+    image: NDArray[np.floating],
+    shift: ArrayLike,
+) -> NDArray[np.float64]:
+    """Shift an image with sub-pixel precision using Fourier-space translation.
 
     Parameters
     ----------
-    image: array
-        Moving image, will be shifted by shift vector
-
-    shift: vector
-        x and y translation in px
+    image : ndarray
+        Input 2-D image to be shifted.
+    shift : array-like of float
+        Translation vector ``[dy, dx]`` in pixels (sub-pixel values allowed).
 
     Returns
     -------
-    image_shifted: array
-        Shifted image
-    -------
-    author: CK 2021
+    image_shifted : ndarray
+        Real-valued shifted image.
     """
 
     # Shift Image
@@ -32,24 +33,30 @@ def shift_image(image, shift):
     return shift_image
 
 
-def binning(array, binning_factor):
-    """
-    Bins images: new_shape = old_shape/binning_factor
+def binning(
+    array: NDArray[np.floating],
+    binning_factor: int,
+) -> NDArray[np.float64]:
+    """Bin an array by averaging blocks of pixels.
 
-    Parameter
-    =========
-    array : numpy array ndim > 1
-        last two dimension will be binned
+    The last two dimensions are reduced: ``new_shape = old_shape // binning_factor``.
+
+    Parameters
+    ----------
+    array : ndarray, ndim >= 2
+        Input array. Only the last two dimensions are binned.
     binning_factor : int
-        new_shape = old_shape/binning_factor for last two dimensions
+        Downsampling factor. Pass ``1`` to return the array unchanged.
 
-    Output
-    ======
-    new_array : numpy array
-        binned array
-    ======
-    author: ck 2023/24
+    Returns
+    -------
+    new_array : ndarray
+        Binned array with last two dimensions divided by ``binning_factor``.
 
+    Raises
+    ------
+    ValueError
+        If ``array`` has fewer than 2 dimensions.
     """
 
     # Only if binning factor is relevant
@@ -75,23 +82,46 @@ def binning(array, binning_factor):
         return array
 
 
-def make_square_shape(images):
-    """Crops last two dimenions of n-d images to square shape"""
+def make_square_shape(images: NDArray[np.floating]) -> NDArray[np.floating]:
+    """Crop the last two dimensions of an N-D array to a square.
+
+    The smaller of the last two dimension sizes is used as the side length.
+
+    Parameters
+    ----------
+    images : ndarray
+        Input array with at least 2 dimensions.
+
+    Returns
+    -------
+    images : ndarray
+        Array with last two dimensions cropped to ``(min_dim, min_dim)``.
+    """
     crop = np.min(np.array([images.shape[-2], images.shape[-1]]))
     images = images[..., :crop, :crop]
 
     return images
 
 
-def hls_to_rgb(hls_array: np.ndarray) -> np.ndarray:
-    """
-    Expects an array of shape (X, 3), each row being HLS colours.
-    Returns an array of same size, each row being RGB colours.
-    Like `colorsys` python module, all values are between 0 and 1.
+def hls_to_rgb(hls_array: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Convert an HLS colour array to RGB.
 
-    NOTE: like `colorsys`, this uses HLS rather than the more usual HSL
+    Follows the same HLS convention as Python's ``colorsys`` module (hue,
+    *lightness*, saturation — not HSL).
 
-    from: https://gist.github.com/reinhrst/2d693a16c04861a8fbc5253938312410
+    Parameters
+    ----------
+    hls_array : ndarray of shape (H, W, 3)
+        Array of HLS values, all in ``[0, 1]``.
+
+    Returns
+    -------
+    rgb : ndarray of shape (H, W, 3)
+        Corresponding RGB values in ``[0, 1]``.
+
+    Notes
+    -----
+    Adapted from https://gist.github.com/reinhrst/2d693a16c04861a8fbc5253938312410
     """
 
     y, x, z = hls_array.shape
@@ -130,7 +160,28 @@ def hls_to_rgb(hls_array: np.ndarray) -> np.ndarray:
     return rgb
 
 
-def complex_to_color(array, abs_range=[0, 100]):
+def complex_to_color(
+    array: NDArray[np.complexfloating],
+    abs_range: list[float] = [0, 100],
+) -> NDArray[np.float64]:
+    """Encode a complex-valued array as an RGB image using the HLS colour system.
+
+    Phase maps to hue (colour) and magnitude maps to lightness (brightness),
+    giving an intuitive visual representation of complex wavefields.
+
+    Parameters
+    ----------
+    array : complex ndarray of shape (H, W)
+        Input complex array.
+    abs_range : list of two floats, optional
+        Percentile range ``[p_low, p_high]`` used to normalise the magnitude
+        to ``[0, 1]`` before mapping to lightness. Default is ``[0, 100]``.
+
+    Returns
+    -------
+    rgb : ndarray of shape (H, W, 3)
+        RGB image with values in ``[0, 1]``.
+    """
     # In HLS color system: hue (color), lightness, saturation
     # Angle should represent color
     hue = (np.angle(array) + np.pi) / (2 * np.pi)
