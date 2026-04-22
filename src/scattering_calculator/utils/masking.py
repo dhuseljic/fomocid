@@ -41,7 +41,7 @@ def circle_mask(
     mask = mask.astype(float)
 
     # smooth aperture
-    if np.logical_and(sigma != None, sigma != 0):
+    if sigma is not None and sigma != 0:
         mask = gaussian_filter(mask, sigma)
 
     return mask
@@ -68,11 +68,7 @@ def create_set_of_circle_masks(
 
     # Create support mask
     supportmask = np.zeros(shape)
-    for i in range(len(circle_coordinates)):
-        supportmask += circle_mask(
-            supportmask.shape,
-            [circle_coordinates[i][0], circle_coordinates[i][1]],
-            circle_coordinates[i][2],
-        )
+    for yc, xc, r in circle_coordinates:
+        supportmask += circle_mask(supportmask.shape, [yc, xc], r)
 
     return supportmask

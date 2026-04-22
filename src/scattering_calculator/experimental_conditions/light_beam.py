@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scattering_calculator.utils import physics
+import matplotlib.pyplot as plt
 
 
 def gauss_beam(
@@ -40,11 +41,8 @@ def gauss_beam(
     ycenter = center[0]
     xcenter = center[1]
 
-    # Calc radius rho with respect to center
-    rho = np.zeros(sz)
-    # radius zylinder coordinates
-
-    [y, x] = xs, ys = np.meshgrid(
+    # Radial distance from beam centre in metres
+    y, x = np.meshgrid(
         np.linspace(0, sz[0] - 1, sz[0]), np.linspace(0, sz[1] - 1, sz[1])
     )
     y = y - ycenter
@@ -111,7 +109,9 @@ class beam_parameters:
 
     def __init__(self, photon_energy: float, photon_flux: float) -> None:
         self.energy: float = photon_energy  # in eV
-        self.wavelength: float = physics.photon_energy_wavelength(photon_energy, unit="eV")
+        self.wavelength: float = physics.photon_energy_wavelength(
+            photon_energy, unit="eV"
+        )
         self.photon_flux: float = photon_flux  # in photons/s
 
 
@@ -158,6 +158,7 @@ class illumination:
 
         # Calculate real-space coordinates of illumination plane in meters
         self.calc_real_space_coordinates()
+        self.extent_real = self.get_illumination_extent_real_space()
 
     def calc_real_space_coordinates(self) -> None:
         """Compute real-space (x, y) coordinate grids for the illumination plane.
@@ -181,7 +182,7 @@ class illumination:
             Physical size of the detector plane in metres as (min_x, max_x, min_y, max_y).
         """
 
-        extent_det_real = np.array(
+        self.extent_real = np.array(
             [
                 np.min(self.x),
                 np.max(self.x),
@@ -189,7 +190,7 @@ class illumination:
                 np.max(self.y),
             ]
         )
-        return extent_det_real
+        return self.extent_real
 
     def plane_wave(self, shape: tuple[int, int]) -> None:
         """Set the beam cross-section to a plane wave with uniform amplitude and zero phase."""
@@ -226,3 +227,15 @@ class illumination:
     def return_illumination(self) -> NDArray[np.complex128] | None:
         """Return the current beam cross-section array."""
         return self.illumination
+
+    def visualize_illumination(self) -> None:
+        # Plot Gaussian beam
+        fig, ax = plt.subplots(1, 2, figsize=(10, 5), sharex=True, sharey=True)
+        ax[0].imshow(np.abs(self.illumination) ** 2, extent=1e3 * self.extent_real)
+        ax[0].set_title("Intensity")
+        ax[0].set_xlabel("x in µm")
+        ax[0].set_ylabel("y in µm")
+        ax[1].imshow(np.angle(self.illumination), extent=1e3 * self.extent_real)
+        ax[1].set_title("Phase")
+        ax[1].set_xlabel("x in µm")
+        ax[1].set_ylabel("y in µm")
