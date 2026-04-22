@@ -17,6 +17,7 @@ def create_skyrmion_pattern(
     number_iter: int,
     sigma: float | None = None,
     plot: bool = False,
+    real_space_pixel_size: float = 1,
     seed: int | None = None,
     batch_size: int = 256,
 ) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
@@ -58,6 +59,24 @@ def create_skyrmion_pattern(
         Centre coordinates ``(row, col)`` of placed skyrmions, sorted by row.
     """
     rng = np.random.default_rng(seed)
+
+    if real_space_pixel_size != 1:
+        sample_y = (np.arange(sz_array[0]) - sz_array[0] / 2) * real_space_pixel_size
+        sample_x = (np.arange(sz_array[1]) - sz_array[1] / 2) * real_space_pixel_size
+        scale = 1e6
+    else:
+        sample_y = np.arange(sz_array[0])
+        sample_x = np.arange(sz_array[1])
+        scale = 1
+
+    extent_real = scale * np.array(
+        [
+            sample_x[0],
+            sample_x[-1],
+            sample_y[0],
+            sample_y[-1],
+        ]
+    )
 
     sz = np.ceil(2 * screening_radius).astype(int)
     sky_px = sz + 1
@@ -134,133 +153,162 @@ def create_skyrmion_pattern(
         _, ax = plt.subplots(1, 2, figsize=(8, 4))
         ax[0].imshow(screening_mask + skyrmion_kernel, cmap="gray")
         ax[0].set_title("Screening sanity check")
-        ax[1].imshow(pattern, vmin=-1, vmax=1, cmap="gray")
+        ax[1].imshow(pattern, vmin=-1, vmax=1, cmap="gray", extent=extent_real)
         ax[1].set_title("Skyrmion pattern")
+
+        if real_space_pixel_size != 1:
+            ax[1].set_xlabel("x in µm")
+            ax[1].set_ylabel("y in µm")
 
     return pattern, coordinates
 
 
-def create_lattice(sample, scattering, setup, plot=True):
-    """
-    creates lattice coordinates in real and pixel space based on the lattice constant, filling and shift parameters defined in the sample xarray. The lattice points are stored in a dict called lattice. The function also plots the lattice points and the distribution of random shifts if plot is set to True.
+def create_lattice(
+    shape: tuple[int, int],
+    real_space_pixel_size: float,
+    lattice_constant: float | tuple[float, float],
+    lattice_filling: float,
+    lattice_shift: float | None,
+    plot: bool = True,
+    seed: int | None = None,
+) -> dict:
+    """Create a 2-D rectangular lattice of sites in real and pixel space.
 
-    Parameter
-    =========
-    scattering : xarray
-        Stores information about illumination, substrate, front wave, back wave and an optional reference mask
-    sample : xarray
-        Stores information about lattice like lattice constant, random shift of lattice points etc.
-    plot: bool
-        if true lattice will be plotted as array
+    Parameters
+    ----------
+    shape : tuple of int
+        Array shape ``(rows, cols)`` in pixels.
+    real_space_pixel_size : float
+        Physical size of one pixel in metres.
+    lattice_constant : float or tuple of float
+        Centre-to-centre distance between neighbouring sites in metres.
+        Pass a single ``float`` for a square lattice, or a tuple
+        ``(constant_y, constant_x)`` for a rectangular lattice with
+        different spacings along each axis.
+    lattice_filling : float
+        Fraction of lattice sites to keep, in ``(0, 1]``. Pass ``1`` to keep
+        all sites.
+    lattice_shift : float or None
+        FWHM of the Gaussian positional disorder applied to each site in
+        metres. Pass ``None`` for a perfect lattice.
+    plot : bool, optional
+        If ``True``, plot the lattice point array and shift histograms.
+        Default is ``True``.
+    seed : int or None, optional
+        Random seed for reproducibility of filling and shift. Default is
+        ``None``.
 
-    Output
-    ======
+    Returns
+    -------
     lattice : dict
-        Stores lattice coordinates in px and real space coordinates
-    ======
-    author: ck 2023
+        Dictionary with keys:
+
+        ``"lattice_constant"``, ``"lattice_filling"``, ``"lattice_shift"``
+            Input parameters stored for reference.
+        ``"sample_y"``, ``"sample_x"`` : ndarray
+            Real-space coordinate axes of the pixel grid in metres.
+        ``"extent_real"`` : ndarray of shape (4,)
+            ``[x_min, x_max, y_min, y_max]`` in metres for use with
+            ``imshow(extent=...)``.
+        ``"x"``, ``"y"`` : ndarray
+            Real-space lattice axes in metres.
+        ``"coordinates"`` : ndarray of shape ``(N, 2)``
+            Real-space ``(y, x)`` positions of occupied sites in metres,
+            after filling and disorder.
+        ``"coordinates_px"`` : ndarray of shape ``(N, 2)``
+            Nearest-pixel ``(row, col)`` indices for each occupied site.
+        ``"point_array"`` : ndarray of shape ``shape``
+            Binary image with ``1`` at each occupied lattice site.
     """
+    rng = np.random.default_rng(seed)
 
-    # Setup lattice dict
-    lattice = {}
+    # Unpack lattice constants for each axis
+    if isinstance(lattice_constant, tuple) or isinstance(lattice_constant, list):
+        lc_y, lc_x = lattice_constant
+    else:
+        lc_y = lc_x = lattice_constant
 
-    # Takeover lattice constant
-    lattice["lattice_constant"] = float(sample["lattice_constant"].values.copy())
+    lattice: dict = {
+        "lattice_constant": lattice_constant,
+        "lattice_filling": lattice_filling,
+        "lattice_shift": lattice_shift,
+    }
 
-    # Number of lattice sites
-    lattice["nr_sites"] = int(
-        (scattering["x"][-1] - scattering["x"][0]) / lattice["lattice_constant"]
+    # Real-space coordinate axes of the pixel grid
+    lattice["sample_y"] = (np.arange(shape[0]) - shape[0] / 2) * real_space_pixel_size
+    lattice["sample_x"] = (np.arange(shape[1]) - shape[1] / 2) * real_space_pixel_size
+    lattice["extent_real"] = np.array(
+        [
+            lattice["sample_x"][0],
+            lattice["sample_x"][-1],
+            lattice["sample_y"][0],
+            lattice["sample_y"][-1],
+        ]
     )
 
-    # this needs to be an even number to start with respect to center pixel
-    if lattice["nr_sites"] % 2 == 1:
-        lattice["nr_sites"] = lattice["nr_sites"] - 1
+    # Number of lattice sites along each axis (force even for centre symmetry)
+    nr_sites_y = shape[0] * real_space_pixel_size / lc_y
+    if nr_sites_y % 2 == 1:
+        nr_sites_y -= 1
 
-    # Create real space coordinates of lattice in x and y direction
-    lattice["x"] = (
-        np.arange(-lattice["nr_sites"] / 2, lattice["nr_sites"] / 2 + 1, 1)
-        * lattice["lattice_constant"]
-    )
-    lattice["y"] = lattice["x"].copy()
+    nr_sites_x = shape[1] * real_space_pixel_size / lc_x
+    if nr_sites_x % 2 == 1:
+        nr_sites_x -= 1
 
-    # Combine all different combinations in coordinates
-    lattice["coordinates"] = np.zeros((len(lattice["y"]) * len(lattice["x"]), 2))
-    it = 0
-    for i in range(len(lattice["y"])):
-        # y coordinate
-        y = lattice["y"][i]
+    axis_y = np.arange(-nr_sites_y / 2, nr_sites_y / 2 + 1) * lc_y
+    axis_x = np.arange(-nr_sites_x / 2, nr_sites_x / 2 + 1) * lc_x
+    lattice["y"] = axis_y
+    lattice["x"] = axis_x
 
-        for k in range(len(lattice["x"])):
-            # x coordinate
-            x = lattice["x"][k]
+    # All (y, x) site combinations via meshgrid
+    grid_y, grid_x = np.meshgrid(axis_y, axis_x, indexing="ij")
+    lattice["coordinates"] = np.column_stack([grid_y.ravel(), grid_x.ravel()])
 
-            # Combine in coordinates variable
-            lattice["coordinates"][it, 0] = y
-            lattice["coordinates"][it, 1] = x
-
-            it = it + 1
-
-    # Remove random lattice points
-    if sample["lattice_filling"] != 1:
-        idx = np.random.choice(
-            np.arange(0, len(lattice["coordinates"]), 1),
-            size=np.floor(
-                len(lattice["coordinates"]) * sample["lattice_filling"].values
-            ).astype(int),
-        )
+    # Random sub-filling
+    if lattice_filling != 1:
+        n_keep = int(np.floor(len(lattice["coordinates"]) * lattice_filling))
+        idx = rng.choice(len(lattice["coordinates"]), size=n_keep, replace=False)
         lattice["coordinates"] = lattice["coordinates"][idx]
 
-    # Add random shift in x and y direction
-    shift_y = 0
-    shift_x = 0
-    if sample["lattice_shift"] != "none":
-        # Create gaussian random shift
-        shift_y = np.random.normal(
-            loc=0,
-            scale=sample["lattice_shift"].values / (2 * np.sqrt(2 * np.log(2))),
-            size=len(lattice["coordinates"][:, 0]),
-        )
-        shift_x = np.random.normal(
-            loc=0,
-            scale=sample["lattice_shift"].values / (2 * np.sqrt(2 * np.log(2))),
-            size=len(lattice["coordinates"][:, 1]),
-        )
+    # Gaussian positional disorder
+    shift_y = np.zeros(len(lattice["coordinates"]))
+    shift_x = np.zeros(len(lattice["coordinates"]))
+    if lattice_shift is not None:
+        sigma_shift = lattice_shift / (2 * np.sqrt(2 * np.log(2)))
+        shift_y = rng.normal(0, sigma_shift, size=len(lattice["coordinates"]))
+        shift_x = rng.normal(0, sigma_shift, size=len(lattice["coordinates"]))
+        lattice["coordinates"][:, 0] += shift_y
+        lattice["coordinates"][:, 1] += shift_x
 
-        # Add shift
-        lattice["coordinates"][:, 0] = lattice["coordinates"][:, 0] + shift_y
-        lattice["coordinates"][:, 1] = lattice["coordinates"][:, 1] + shift_x
+    # Vectorised nearest-pixel lookup — replaces per-row loop
+    lattice["coordinates_px"] = np.column_stack(
+        [
+            np.argmin(
+                np.abs(lattice["coordinates"][:, 0:1] - lattice["sample_y"]), axis=1
+            ),
+            np.argmin(
+                np.abs(lattice["coordinates"][:, 1:2] - lattice["sample_x"]), axis=1
+            ),
+        ]
+    )
 
-    # Find closest matching pixel real space coordinates from real space coordinate pixel grid
-    lattice["coordinates_px"] = np.zeros(lattice["coordinates"].shape, dtype=int)
-    for i in range(lattice["coordinates_px"].shape[0]):
-        lattice["coordinates_px"][i, 0] = np.argmin(
-            np.abs(lattice["coordinates"][i, 0] - scattering["y"].values)
-        )
-        lattice["coordinates_px"][i, 1] = np.argmin(
-            np.abs(lattice["coordinates"][i, 1] - scattering["x"].values)
-        )
+    point_array = np.zeros(shape)
+    point_array[lattice["coordinates_px"][:, 0], lattice["coordinates_px"][:, 1]] = 1
+    lattice["point_array"] = point_array
 
-    # Plot full array
-    tmp = np.zeros((setup["sz"], setup["sz"]))
-    tmp[lattice["coordinates_px"][:, 0], lattice["coordinates_px"][:, 1]] = 1
-    lattice["point_array"] = tmp.copy()
+    print(f"Created {len(lattice['coordinates_px'])} lattice points.")
 
-    print("Created %d lattice points!" % len(lattice["coordinates_px"]))
-
-    # Plot
-    if plot is True:
-        fig, ax = plt.subplots(1, 3, figsize=(12, 4))
+    if plot:
+        _, ax = plt.subplots(1, 3, figsize=(12, 4))
         ax[0].set_title("Lattice points")
-        ax[0].imshow(lattice["point_array"], extent=setup["extent_real"])
+        ax[0].imshow(lattice["point_array"], extent=1e6 * lattice["extent_real"])
         ax[0].set_xlabel("x in µm")
         ax[0].set_ylabel("y in µm")
-        ax[1].hist(np.ceil(shift_x / setup["px"]) * setup["px"], 50)
+        ax[1].hist(np.ceil(shift_x / real_space_pixel_size) * real_space_pixel_size, 50)
         ax[1].set_xlabel("Shift in µm")
         ax[1].set_title("Shift x")
-        ax[2].hist(np.ceil(shift_y / setup["px"]) * setup["px"], 50)
+        ax[2].hist(np.ceil(shift_y / real_space_pixel_size) * real_space_pixel_size, 50)
         ax[2].set_xlabel("Shift in µm")
         ax[2].set_title("Shift y")
-
-        plt.tight_layout()
 
     return lattice
