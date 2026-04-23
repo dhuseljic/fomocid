@@ -467,16 +467,16 @@ class material_params:
         if db_path is None:
             # Try to find database relative to current working directory
             db_path = Path(
-                "/Users/riccardo/fomocid/src/scattering_calculator/database/material_parameter/refractive_indexes"
+                "../src/scattering_calculator/database/material_parameter/refractive_indexes"
             )
         else:
             db_path = Path(db_path)
 
         # Special cases
         if material_name == "vacuum":
-            return 1.0 + 0j
+            return (1.0 + 0j, 0j, 0j)
         elif material_name == "perfect_absorption_mask":
-            return -1j * 1e6
+            return (-1j * 1e6, 0j, 0j)
 
         # Map material names to folder names
         material_mapping = {
@@ -506,10 +506,26 @@ class material_params:
         #        raise FileNotFoundError(f"No refractive index data found for {material_name} in {material_dir}")
 
         if material_name == "Co" and energy > 770 and energy < 805:
+            txt_file = material_dir / f"{folder_name}_delta_c.txt"
+            data = np.loadtxt(txt_file, skiprows=2)
+            energies = data[:, 0]
+            delta_c = data[:, 1] * 1e-3  # real part
+            interp_delta_c = interp1d(
+                energies, delta_c, kind="linear", fill_value="extrapolate"
+            )
+
+            txt_file = material_dir / f"{folder_name}_beta_c.txt"
+            data = np.loadtxt(txt_file, skiprows=2)
+            energies = data[:, 0]
+            beta_c = data[:, 1] * 1e-3  # imaginary part
+            interp_beta_c = interp1d(
+                energies, beta_c, kind="linear", fill_value="extrapolate"
+            )
+
             txt_file = material_dir / f"{folder_name}_delta.txt"
             data = np.loadtxt(txt_file, skiprows=2)
             energies = data[:, 0]
-            delta = data[:, 1]  # real part
+            delta = data[:, 1] * 1e-3  # real part
             interp_delta = interp1d(
                 energies, delta, kind="linear", fill_value="extrapolate"
             )
@@ -517,25 +533,9 @@ class material_params:
             txt_file = material_dir / f"{folder_name}_beta.txt"
             data = np.loadtxt(txt_file, skiprows=2)
             energies = data[:, 0]
-            beta = data[:, 1]  # imaginary part
+            beta = data[:, 1] * 1e-3  # imaginary part
             interp_beta = interp1d(
                 energies, beta, kind="linear", fill_value="extrapolate"
-            )
-
-            txt_file = material_dir / f"{folder_name}_delta_delta.txt"
-            data = np.loadtxt(txt_file, skiprows=2)
-            energies = data[:, 0]
-            delta_delta = data[:, 1]  # real part
-            interp_delta_delta = interp1d(
-                energies, delta_delta, kind="linear", fill_value="extrapolate"
-            )
-
-            txt_file = material_dir / f"{folder_name}_delta_beta.txt"
-            data = np.loadtxt(txt_file, skiprows=2)
-            energies = data[:, 0]
-            delta_beta = data[:, 1]  # imaginary part
-            interp_delta_beta = interp1d(
-                energies, delta_beta, kind="linear", fill_value="extrapolate"
             )
 
         else:
@@ -554,24 +554,32 @@ class material_params:
             interp_beta = interp1d(
                 energies, beta, kind="linear", fill_value="extrapolate"
             )
-            interp_delta_delta = interp1d(
+            interp_delta_c = interp1d(
                 energies, delta * 0, kind="linear", fill_value="extrapolate"
             )
-            interp_delta_beta = interp1d(
+            interp_beta_c = interp1d(
                 energies, beta * 0, kind="linear", fill_value="extrapolate"
             )
+
+        # interp_delta_l = interp1d(energies, delta*0, kind='linear', fill_value='extrapolate')
+        # interp_beta_l = interp1d(energies, beta*0, kind='linear', fill_value='extrapolate')
 
         # Get values at the requested energy
         delta_at_energy = float(interp_delta(energy))
         beta_at_energy = float(interp_beta(energy))
-        delta_delta_at_energy = float(interp_delta_delta(energy))
-        delta_beta_at_energy = float(interp_delta_beta(energy))
+        delta_c_at_energy = float(interp_delta_c(energy))
+        beta_c_at_energy = float(interp_beta_c(energy))
+        delta_l_at_energy = 0  # float(interp_delta_l(energy))
+        beta_l_at_energy = 0  # float(interp_beta_l(energy))
 
         # Return complex refractive index
         # n = 1 - delta - i*beta (following X-ray optics convention)
-        return (
-            1.0 - delta_at_energy - 1j * beta_at_energy,
-            -delta_delta_at_energy - 1j * delta_beta_at_energy,
+        return np.array(
+            [
+                1.0 - delta_at_energy - 1j * beta_at_energy,
+                -delta_c_at_energy - 1j * beta_c_at_energy,
+                -delta_l_at_energy - 1j * beta_l_at_energy,
+            ]
         )
 
     def _load_refractive_indices_from_db(
@@ -601,10 +609,10 @@ class material_params:
                     material, x_ray_energy, db_path=db_path
                 )
                 # Handle both single and tuple returns
-                if isinstance(result, tuple):
-                    refractive_indices[material] = result[0]
-                else:
-                    refractive_indices[material] = result
+                # if isinstance(result, tuple):
+                #    refractive_indices[material] = result[0]
+                # else:
+                refractive_indices[material] = result
             except FileNotFoundError as e:
                 print(f"Warning: {e}")
 
@@ -706,6 +714,51 @@ class Structure:
         self.layer_thicknesses: list[float] = []
         self.layer_refractive_indices: list[complex] = []
         self.effective_refractive_indices: list[complex] = []
+        self.dielectric_tensors: list[NDArray[np.complex128]] = (
+            []
+        )  # Optional: store dielectric tensors if needed
+        self.effective_dielectric_tensors: list[NDArray[np.complex128]] = (
+            []
+        )  # Optional: store effective dielectric tensors if needed
+
+    def dielectric_tensor_mixed(self, n, theta=0.0):
+        """
+        Build a 2x2 transverse dielectric tensor from:
+        n=(n0,dn_l,dn_c)
+        - n0: baseline isotropic refractive index
+        - dn_lin: linear anisotropy contribution
+        - dn_circ: circular anisotropy contribution
+        - theta: rotation angle (radians) of the linear principal axes
+
+        Small-anisotropy approximation:
+            eps0      = n0^2
+            eps_l   = 2 n0 dn_l
+            eps_c  = 2 n0 dn_c
+        """
+        n0 = n[0]
+        dn_c = n[1]
+        dn_l = n[2]
+
+        eps0 = n0**2
+        eps_l = 2.0 * n0 * dn_l
+        eps_c = 2.0 * n0 * dn_c
+
+        # Linear anisotropy tensor in its own principal basis
+        eps_l_tensor = np.array([[eps_l, 0.0], [0.0, -eps_l]], dtype=complex)
+
+        # Rotate linear anisotropy tensor by theta
+        c, s = np.cos(theta), np.sin(theta)
+        R = np.array([[c, -s], [s, c]], dtype=complex)
+
+        eps_l_rot = R @ eps_l_tensor @ R.T
+
+        # Circular anisotropy tensor
+        eps_c_tensor = np.array(
+            [[0.0, 1.0j * eps_c], [-1.0j * eps_c, 0.0]], dtype=complex
+        )
+
+        eps_total = np.array([eps0 * np.eye(2, dtype=complex), eps_c_tensor, eps_l_rot])
+        return eps_total
 
     def calc_effective_refractive_indices(
         self, refractive_index: complex, thickness: float
@@ -739,6 +792,7 @@ class Structure:
             Physical thickness of the layer in nanometres.
         """
         refractive_index = self.material_params.get_refractive_index(element)
+        dielectric_tensor = self.dielectric_tensor_mixed(n=refractive_index, theta=0.0)
         effective_index = self.calc_effective_refractive_indices(
             refractive_index, thickness
         )
@@ -748,6 +802,7 @@ class Structure:
         self.layer_names.append(element)
         self.layer_thicknesses.append(thickness)
         self.layer_refractive_indices.append(refractive_index)
+        self.dielectric_tensors.append(dielectric_tensor)
         self.effective_refractive_indices.append(effective_index)
 
     def return_layer_refractive_indices(self) -> NDArray[np.complex128]:
@@ -760,6 +815,17 @@ class Structure:
             each layer in deposition order.
         """
         return np.array(self.layer_refractive_indices)
+
+    def return_layer_dielectric_tensors(self) -> NDArray[np.complex128]:
+        """Return all layer dielectric tensors as a NumPy array.
+
+        Returns
+        -------
+        NDArray[np.complex128]
+            Array of shape ``(N,)`` with the complex dielectric tensors of
+            each layer in deposition order.
+        """
+        return np.array(self.dielectric_tensors)
 
     def remove_layer(self, index: int) -> None:
         """Remove a layer from the structure by its position index.
@@ -783,6 +849,7 @@ class Structure:
         self.layer_names.pop(index)
         self.layer_thicknesses.pop(index)
         self.layer_refractive_indices.pop(index)
+        self.dielectric_tensors.pop(index)
         self.effective_refractive_indices.pop(index)
 
     def remove_layers_by_element(self, element: str) -> int:
@@ -810,6 +877,7 @@ class Structure:
             self.layer_names.pop(i)
             self.layer_thicknesses.pop(i)
             self.layer_refractive_indices.pop(i)
+            self.dielectric_tensors.pop(i)
             self.effective_refractive_indices.pop(i)
         return len(indices)
 
@@ -858,6 +926,32 @@ class Structure:
         self.refractive_index_map = (
             np.ones(shape, dtype=np.complex128) * self.effective_refractive_index
         )
+
+    def return_total_effective_dielectric_tensor(self):
+        """
+        Thickness-weighted effective transverse dielectric tensor.
+
+        Parameters
+        ----------
+        layer_tensors : list of (2,2) complex arrays
+            Dielectric tensors of the layers.
+        layer_thicknesses : list of float
+            Thicknesses of the layers.
+
+        Returns
+        -------
+        eps_eff : (2,2) complex array
+            Effective dielectric tensor.
+        """
+
+        D = np.sum(self.layer_thicknesses)
+        eps_eff = np.zeros_like(np.asarray(self.dielectric_tensors[0], dtype=complex))
+
+        for eps, d in zip(self.dielectric_tensors, self.layer_thicknesses):
+            eps_eff += d * np.asarray(eps, dtype=complex)
+        eps_eff /= D
+
+        return eps_eff
 
     def visualize_structure(self) -> None:
         """Plot the layer stack coloured by real and imaginary refractive index.
