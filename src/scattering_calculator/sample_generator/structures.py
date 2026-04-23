@@ -967,10 +967,11 @@ class Apertures:
     None
     """
 
-    def __init__(self, shape, real_space_pixel_size) -> None:
+    def __init__(self, shape, real_space_pixel_size,layer_thicknesses) -> None:
         self.shape = shape
         self.aperture_design = np.ones(shape)
         self.pixel_size = real_space_pixel_size
+        self.layer_thicknesses = np.array(layer_thicknesses)
 
         self.calc_real_space_coordinates()
         self.extent_real = self.get_illumination_extent_real_space()
@@ -982,11 +983,13 @@ class Apertures:
         coordinates in metres, centred on the optical axis.
         """
 
-        x = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.pixel_size
-        y = (np.arange(self.shape[0]) - self.shape[0] / 2) * self.pixel_size
-        X, Y = np.meshgrid(x, y)
+        x = (np.arange(self.shape[2]) - self.shape[2] / 2) * self.pixel_size
+        y = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.pixel_size
+        z = np.cumsum(self.layer_thicknesses)
+        X, Y,Z = np.meshgrid(x, y,z)
         self.x = X
         self.y = Y
+        self.z = Z
 
     def get_illumination_extent_real_space(self) -> NDArray[np.float64]:
         """Calculate the physical extent of the aperture plane in metres.
@@ -1003,6 +1006,8 @@ class Apertures:
                 np.max(self.x),
                 np.min(self.y),
                 np.max(self.y),
+                np.min(self.z),
+                np.max(self.z),
             ]
         )
         return self.extent_real
@@ -1011,6 +1016,7 @@ class Apertures:
         self,
         center: tuple[float, float],
         radius: float,
+        depth: float,
         use_real_space_coordinates: bool = False,
         sigma: float | None = None,
     ) -> None:
@@ -1022,6 +1028,8 @@ class Apertures:
             Mask centre coordinates (y, x) in pixels.
         radius : float
             Aperture radius in metres.
+        depth : float
+            depth of the aperture in metres
         use_real_space_coordinates : bool, optional
             If ``True``, convert the effective radius from metres to pixels
             using the real-space coordinate grid. Otherwise, treat the radius
@@ -1033,10 +1041,14 @@ class Apertures:
         if use_real_space_coordinates:
             # Convert radius from metres to pixels using the real-space grid
             pixel_radius = radius / np.abs(self.x[0, 1] - self.x[0, 0])
+            pixel_depth = np.argmin(np.abs(np.append(0, self.layer_thicknesses) - depth))
         else:
             pixel_radius = radius
+            pixel_depth = radius
 
-        self.aperture_design = circle_mask(self.shape, center, pixel_radius, sigma)
+        self.aperture_design = np.ones(self.shape)
+        for i in range(0,pixel_depth):
+            self.aperture_design[i, :, :] = 1-circle_mask(self.shape[1:], center, pixel_radius, sigma)
 
     def return_aperture_mask(self) -> NDArray[np.float64]:
         """Return the current aperture design as a NumPy array.
@@ -1052,9 +1064,9 @@ class Apertures:
     def visualize_aperture(self) -> None:
         """Display the current aperture design as an image."""
         fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-        ax[0].imshow(self.aperture_design)
+        ax[0].imshow(np.average(self.aperture_design, axis=0))
         ax[0].set_title("Beamstop in px")
-        ax[1].imshow(self.aperture_design, extent=1e6 * self.extent_real)
+        ax[1].imshow(np.average(self.aperture_design, axis=0), extent=1e6 * self.extent_real)
         ax[1].set_title("Beamstop in mm")
         ax[1].set_xlabel("x in µm")
         ax[1].set_ylabel("y in µm")
