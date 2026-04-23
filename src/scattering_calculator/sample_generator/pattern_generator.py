@@ -53,6 +53,11 @@ def map_magnetization_to_3d(
     mx = magnetic_pattern_x if magnetic_pattern_x is not None else np.zeros(ref_shape)
 
     magnetization = np.stack((mz, my, mx), axis=-1)
+
+    print(magnetization.shape)
+    magnetization=np.repeat(magnetization, repeats=sample_shape[0],axis=-1)
+    print(magnetization.shape)
+
     return magnetization
 
 
