@@ -312,3 +312,104 @@ def create_lattice(
         ax[2].set_title("Shift y")
 
     return lattice
+
+
+def skyrmions_on_lattice(
+    shape: tuple[int, int],
+    lattice: dict,
+    skyr_radius: float,
+    skyr_smoothing: float,
+    diameter_spread_fwhm: float | None,
+    real_space_pixel_size: float,
+    plot: bool = True,
+) -> NDArray[np.float64]:
+    """Place skyrmions on a pre-computed lattice and return the magnetisation pattern.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        Output array shape ``(rows, cols)`` in pixels.
+    lattice : dict
+        Lattice dictionary returned by :func:`create_lattice`. Updated
+        in-place with a ``"skyr_radius"`` key (per-site radii in pixels).
+    skyr_radius : float
+        Nominal skyrmion radius in pixels.
+    skyr_smoothing : float
+        Standard deviation of the Gaussian smoothing filter in pixels.
+        Pass ``0`` to skip smoothing.
+    diameter_spread_fwhm : float or None
+        FWHM of the Gaussian diameter disorder in metres. Each site gets an
+        independent radius drawn from ``Normal(skyr_radius, sigma_px)`` where
+        ``sigma_px = diameter_spread_fwhm / real_space_pixel_size / (2*sqrt(2*ln2))``.
+        Pass ``None`` for uniform radii.
+    real_space_pixel_size : float
+        Physical size of one pixel in metres. Used only when
+        ``diameter_spread_fwhm`` is not ``None``.
+    plot : bool, optional
+        If ``True``, plot the single skyrmion kernel, the full pattern, and
+        the diameter histogram. Default is ``True``.
+
+    Returns
+    -------
+    pattern : ndarray of shape ``shape``
+        Normalised magnetisation pattern with values in ``[-1, 1]``.
+    """
+    n_sites = lattice["coordinates_px"].shape[0]
+
+    if diameter_spread_fwhm is None:
+        lattice["skyr_radius"] = np.full(n_sites, skyr_radius)
+    else:
+        scale_px = (
+            diameter_spread_fwhm / real_space_pixel_size / (2 * np.sqrt(2 * np.log(2)))
+        )
+        lattice["skyr_radius"] = np.random.normal(
+            loc=skyr_radius, scale=scale_px, size=n_sites
+        )
+
+    pattern_ext = np.ceil(2 * np.max(lattice["skyr_radius"])).astype(int) + 2
+
+    pattern = np.zeros((shape[0] + 2 * pattern_ext, shape[1] + 2 * pattern_ext))
+
+    skyrmion_kernel = None
+    for i in range(n_sites):
+        r = lattice["skyr_radius"][i]
+        sz = np.ceil(2 * r).astype(int)
+        skyrmion_kernel = circle_mask(
+            (sz + 1, sz + 1), (0.5 * sz, 0.5 * sz), np.floor(r)
+        )
+        x = lattice["coordinates_px"][i, 0] + pattern_ext
+        y = lattice["coordinates_px"][i, 1] + pattern_ext
+        pattern[
+            x : x + skyrmion_kernel.shape[0], y : y + skyrmion_kernel.shape[1]
+        ] += skyrmion_kernel
+
+    sigma = float(skyr_smoothing)
+    if sigma != 0:
+        pattern = gaussian_filter(pattern, sigma)
+        max_val = np.max(pattern)
+        if max_val > 0:
+            pattern = pattern / max_val
+        pattern = -(2 * (pattern - 0.5))
+
+    pattern = pattern[
+        pattern_ext : shape[0] + pattern_ext,
+        pattern_ext : shape[1] + pattern_ext,
+    ]
+
+    if plot:
+        _, ax = plt.subplots(1, 3, figsize=(12, 4))
+        if skyrmion_kernel is not None:
+            half_nm = skyrmion_kernel.shape[0] / 2 * real_space_pixel_size * 1e9
+            ax[0].imshow(skyrmion_kernel, cmap="gray", extent=[-half_nm, half_nm, half_nm, -half_nm])
+            ax[0].set_xlabel("x in nm")
+            ax[0].set_ylabel("y in nm")
+        ax[0].set_title("Single Binary Skyrmion")
+        ax[1].imshow(pattern, cmap="gray", extent=1e6 * lattice["extent_real"])
+        ax[1].set_title("Skyrmion lattice")
+        ax[1].set_xlabel("x in µm")
+        ax[1].set_ylabel("y in µm")
+        ax[2].hist(np.ceil(lattice["skyr_radius"]) * real_space_pixel_size * 1e9, 50)
+        ax[2].set_title("Skyrmion Diameter")
+        ax[2].set_xlabel("Diameter in nm")
+
+    return pattern
