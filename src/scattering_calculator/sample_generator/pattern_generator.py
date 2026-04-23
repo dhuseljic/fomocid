@@ -13,7 +13,7 @@ def map_magnetization_to_3d(
     magnetic_pattern_z: NDArray[np.float64] | None = None,
     magnetic_pattern_y: NDArray[np.float64] | None = None,
     magnetic_pattern_x: NDArray[np.float64] | None = None,
-    sample_shape: tuple[int,int, int] | None = None,
+    nr_repeats: tuple[int, int, int] | None = None,
     sample_layer_names: list[str] | None = None,
     sample_layer_thicknesses: list[float] | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
@@ -34,7 +34,11 @@ def map_magnetization_to_3d(
         3-D vector components of the magnetisation pattern.
     """
 
-    shapes = [a.shape for a in (magnetic_pattern_z, magnetic_pattern_y, magnetic_pattern_x) if a is not None]
+    shapes = [
+        a.shape
+        for a in (magnetic_pattern_z, magnetic_pattern_y, magnetic_pattern_x)
+        if a is not None
+    ]
 
     if not shapes:
         raise ValueError(
@@ -52,11 +56,12 @@ def map_magnetization_to_3d(
     my = magnetic_pattern_y if magnetic_pattern_y is not None else np.zeros(ref_shape)
     mx = magnetic_pattern_x if magnetic_pattern_x is not None else np.zeros(ref_shape)
 
-    magnetization = np.stack((mz, my, mx), axis=-1)
+    magnetization = np.stack((mz, my, mx))
 
-    print(magnetization.shape)
-    magnetization=np.repeat(magnetization, repeats=sample_shape[0],axis=-1)
-    print(magnetization.shape)
+    if nr_repeats is not None:
+        magnetization = np.repeat(
+            magnetization[np.newaxis, ...], repeats=nr_repeats, axis=0
+        )
 
     return magnetization
 
