@@ -8,25 +8,613 @@ import matplotlib.colors as mcolors
 from scattering_calculator.utils.masking import circle_mask
 
 
+from pathlib import Path
+from scipy.interpolate import interp1d
+
+import argparse
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Tuple
+
+
+# ============================================================
+# Data structures
+# ============================================================
+
+@dataclass(frozen=True)
+class Layer:
+    material: str
+    thickness: float
+
+
+    #@property
+    #def thickness(self) -> float:
+    #    return self.thickness_nm * 1e-9
+
+    def to_txt_line(self) -> str:
+        return f"{self.material} {format_nm_as_meter_string(self.thickness_)}"
+
+
+@dataclass
+class MultilayerRecipe:
+    recipe_string: str
+    layers: List[Layer]
+    sample_name: str | None = None
+    comments: List[str] = field(default_factory=list)
+
+    #@property
+    #def total_thickness_nm(self) -> float:
+    #    return sum(layer.thickness_nm for layer in self.layers)
+
+    @property
+    def total_thickness(self) -> float:
+        return sum(layer.thickness for layer in self.layers)
+
+    def add_comment(self, text: str) -> None:
+        self.comments.append(text)
+
+    def summary(self) -> str:
+        lines = []
+        if self.sample_name:
+            lines.append(f"Sample: {self.sample_name}")
+        lines.append(f"Recipe: {self.recipe_string}")
+        lines.append(f"Number of layers: {len(self.layers)}")
+        #lines.append(f"Total thickness: {self.total_thickness_nm:.6g} nm")
+        lines.append(f"Total thickness: {self.total_thickness:.6g} m")
+        if self.comments:
+            lines.append("Comments:")
+            for comment in self.comments:
+                lines.append(f"  - {comment}")
+        return "\n".join(lines)
+
+    def to_txt(
+        self,
+        include_header: bool = False,
+        include_metadata: bool = True,
+    ) -> str:
+        """
+        Return expanded multilayer stack as plain text.
+
+        If include_header is False:
+            Pt 5e-9
+            Pt 2e-9
+            Co 1e-9
+            ...
+
+        If include_header is True:
+            # Sample: ...
+            # Recipe: ...
+            # Total thickness (nm): ...
+            # Comment: ...
+            Pt 5e-9
+            ...
+        """
+        lines: List[str] = []
+
+        if include_header and include_metadata:
+            if self.sample_name:
+                lines.append(f"# Sample: {self.sample_name}")
+            lines.append(f"# Recipe: {self.recipe_string}")
+            #lines.append(f"# Total thickness (nm): {self.total_thickness_nm:.6g}")
+            lines.append(f"# Total thickness (m): {self.total_thickness:.6g}")
+            for comment in self.comments:
+                lines.append(f"# Comment: {comment}")
+
+        lines.extend(layer.to_txt_line() for layer in self.layers)
+        return "\n".join(lines) + "\n"
+
+    def write_txt(
+        self,
+        filename: str | Path,
+        include_header: bool = False,
+        include_metadata: bool = True,
+    ) -> Path:
+        path = Path(filename)
+        path.write_text(
+            self.to_txt(
+                include_header=include_header,
+                include_metadata=include_metadata,
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+
+# ============================================================
+# Formatting helpers
+# ============================================================
+
+def format_nm_as_meter_string(value_nm: float) -> str:
+    """
+    Convert thickness in nm to a compact string in meters.
+    Examples:
+        5    -> '5e-9'
+        1.5  -> '1.5e-9'
+        0.25 -> '0.25e-9'
+    """
+    if float(value_nm).is_integer():
+        return f"{int(value_nm)}e-9"
+    return f"{value_nm:g}e-9"
+
+
+# ============================================================
+# Parser
+# ============================================================
+
+class RecipeParser:
+    """
+    Parser for multilayer recipes.
+
+    Supported syntax:
+        Pt(5)
+        Pt(5)/Co(1)
+        Pt(5)/[Pt(2)/Co(1)]x10/Ta(5)
+        [Pt(2)/[Co(1)/Ni(0.5)]x3]x5
+
+    Conventions:
+    - Thickness is assumed to be in nm
+    - Layers are separated by '/'
+    - Repeated blocks use [ ... ]xN
+    - Nested repeated blocks are supported
+    """
+
+    def __init__(self, text: str):
+        self.text = text.replace(" ", "")
+        self.pos = 0
+
+    def parse(self) -> List[Layer]:
+        layers = self._parse_sequence(stop_char=None)
+        if self.pos != len(self.text):
+            raise ValueError(
+                f"Unexpected trailing content at position {self.pos}: "
+                f"{self.text[self.pos:]}"
+            )
+        return layers
+
+    def _parse_sequence(self, stop_char: str | None) -> List[Layer]:
+        layers: List[Layer] = []
+
+        while self.pos < len(self.text):
+            char = self.text[self.pos]
+
+            if stop_char is not None and char == stop_char:
+                break
+
+            if char == "/":
+                self.pos += 1
+                continue
+
+            if char == "[":
+                block_layers = self._parse_block()
+                layers.extend(block_layers)
+                continue
+
+            layer = self._parse_layer()
+            layers.append(layer)
+
+        return layers
+
+    def _parse_block(self) -> List[Layer]:
+        self._expect("[")
+        inner_layers = self._parse_sequence(stop_char="]")
+        self._expect("]")
+
+        self._expect("x")
+        repeat = self._parse_integer()
+
+        return inner_layers * repeat
+
+    def _parse_layer(self) -> Layer:
+        material = self._parse_material()
+        self._expect("(")
+        thickness_nm = self._parse_number()
+        self._expect(")")
+
+        if thickness_nm <= 0:
+            raise ValueError(
+                f"Thickness must be positive for material '{material}', "
+                f"got {thickness_nm}"
+            )
+
+        return Layer(material=material, thickness=thickness_nm*1e-9)
+
+    def _parse_material(self) -> str:
+        start = self.pos
+        while self.pos < len(self.text):
+            char = self.text[self.pos]
+            if char.isalnum() or char == "_":
+                self.pos += 1
+            else:
+                break
+
+        if self.pos == start:
+            raise ValueError(f"Expected material at position {self.pos}")
+
+        return self.text[start:self.pos]
+
+    def _parse_number(self) -> float:
+        start = self.pos
+        dot_count = 0
+
+        while self.pos < len(self.text):
+            char = self.text[self.pos]
+            if char.isdigit():
+                self.pos += 1
+            elif char == ".":
+                dot_count += 1
+                if dot_count > 1:
+                    raise ValueError(f"Invalid number at position {start}")
+                self.pos += 1
+            else:
+                break
+
+        if self.pos == start:
+            raise ValueError(f"Expected number at position {self.pos}")
+
+        value_str = self.text[start:self.pos]
+        try:
+            return float(value_str)
+        except ValueError as exc:
+            raise ValueError(f"Invalid number '{value_str}'") from exc
+
+    def _parse_integer(self) -> int:
+        start = self.pos
+        while self.pos < len(self.text) and self.text[self.pos].isdigit():
+            self.pos += 1
+
+        if self.pos == start:
+            raise ValueError(f"Expected integer at position {self.pos}")
+
+        value = int(self.text[start:self.pos])
+        if value <= 0:
+            raise ValueError(f"Repeat count must be positive, got {value}")
+        return value
+
+    def _expect(self, token: str) -> None:
+        if self.pos >= len(self.text) or self.text[self.pos] != token:
+            found = self.text[self.pos] if self.pos < len(self.text) else "EOF"
+            raise ValueError(
+                f"Expected '{token}' at position {self.pos}, found '{found}'"
+            )
+        self.pos += 1
+
+
+# ============================================================
+# Public API
+# ============================================================
+
+def parse_recipe(
+    recipe: str,
+    sample_name: str | None = None,
+    comments: List[str] | None = None,
+) -> MultilayerRecipe:
+    parser = RecipeParser(recipe)
+    layers = parser.parse()
+
+    return MultilayerRecipe(
+        recipe_string=recipe,
+        layers=layers,
+        sample_name=sample_name,
+        comments=comments[:] if comments else [],
+    )
+
+
+def recipe_to_txt_file(
+    recipe: str,
+    filename: str | Path,
+    sample_name: str | None = None,
+    comments: List[str] | None = None,
+    include_header: bool = False,
+) -> Path:
+    multilayer = parse_recipe(
+        recipe=recipe,
+        sample_name=sample_name,
+        comments=comments,
+    )
+    return multilayer.write_txt(
+        filename=filename,
+        include_header=include_header,
+        include_metadata=True,
+    )
+
+
+# ============================================================
+# CLI
+# ============================================================
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Parse and export multilayer recipes to expanded txt files."
+    )
+
+    parser.add_argument(
+        "recipe",
+        type=str,
+        help='Recipe string, e.g. "Pt(5)/[Pt(2)/Co(1)]x10/Ta(5)"',
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default="multilayer_recipe.txt",
+        help="Output txt filename",
+    )
+    parser.add_argument(
+        "--sample",
+        type=str,
+        default=None,
+        help="Optional sample name",
+    )
+    parser.add_argument(
+        "--comment",
+        action="append",
+        default=[],
+        help="Optional comment. Can be passed multiple times.",
+    )
+    parser.add_argument(
+        "--header",
+        action="store_true",
+        help="Include metadata header in txt output",
+    )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print recipe summary to terminal",
+    )
+
+    return parser
+
+
+def main() -> None:
+    parser = build_arg_parser()
+    args = parser.parse_args()
+
+    multilayer = parse_recipe(
+        recipe=args.recipe,
+        sample_name=args.sample,
+        comments=args.comment,
+    )
+
+    multilayer.write_txt(
+        filename=args.output,
+        include_header=args.header,
+        include_metadata=True,
+    )
+
+    if args.summary:
+        print(multilayer.summary())
+
+    print(f"Wrote txt file: {args.output}")
+
+
+if __name__ == "__main__":
+    main()
+
+
+
 class material_params:
     """Database of complex refractive indices for a set of materials.
 
+    Can be initialized either with a pre-computed dictionary of refractive indices,
+    or with material names and x-ray energy to load indices from the database.
+
     Parameters
     ----------
-    refractive_indices : dict[str, complex]
+    refractive_indices : dict[str, complex], optional
         Mapping from element/material name to its complex refractive index.
-
+    materials : list[str], optional
+        List of material names to load from database.
+    x_ray_energy : float, optional
+        X-ray energy in eV for database lookups.
+    
     Attributes
     ----------
     elements : KeysView[str]
         Names of all materials in the database.
     database : dict[str, complex]
         Full refractive index lookup table.
+    x_ray_energy : float or None
+        The x-ray energy used to load indices from database.
     """
 
-    def __init__(self, refractive_indices: dict[str, complex]) -> None:
-        self.elements = refractive_indices.keys()
-        self.database = refractive_indices
+    def __init__(self, refractive_indices: dict[str, complex] = None, 
+                 materials: list[str] = None, 
+                 x_ray_energy: float = None) -> None:
+        
+        # If both refractive_indices and materials are provided, use refractive_indices (backward compatible)
+        if refractive_indices is not None:
+            self.database = refractive_indices
+            self.x_ray_energy = None
+        elif materials is not None and x_ray_energy is not None:
+            # Load from database using material names and energy
+            self.x_ray_energy = x_ray_energy
+            self.database = self._load_refractive_indices_from_db(materials, x_ray_energy)
+        else:
+            raise ValueError(
+                "Either provide 'refractive_indices' dict, or both 'materials' list and 'x_ray_energy'"
+            )
+        
+        self.elements = self.database.keys()
+
+
+    @staticmethod
+    def load_refractive_index(material_name, energy, db_path=None):
+        """
+        Load refractive index from database for a given material and energy.
+        Uses interpolation if energy falls between database values.
+        
+        Parameters:
+        -----------
+        material_name : str
+            Name of the material (e.g., 'Co', 'Ta', 'SiN')
+        energy : float
+            X-ray energy in eV
+        db_path : str or Path, optional
+            Path to the database directory. If None, looks for it in the project.
+        
+        Returns:
+        --------
+        complex
+            Refractive index n = 1 - delta - i*beta
+        """
+        if db_path is None:
+            # Try to find database relative to current working directory
+            db_path = Path("/Users/riccardo/fomocid/src/scattering_calculator/database/material_parameter/refractive_indexes")
+        else:
+            db_path = Path(db_path)
+        
+        # Special cases
+        if material_name == "vacuum":
+            return 1.0 + 0j
+        elif material_name == "perfect_absorption_mask":
+            return -1j * 1e6
+        
+        # Map material names to folder names
+        material_mapping = {
+            "SiN": "Si3N4",
+            "Si3N4": "Si3N4",
+            "Co": "Co",
+            "Ta": "Ta",
+            "Pt": "Pt",
+            "Au": "Au",
+            "Fe": "Fe",
+            "Ni": "Ni",
+            "Cr": "Cr",
+            "Cu": "Cu",
+            "Ir": "Ir",
+            "MgO": "MgO",
+        }
+        
+        folder_name = material_mapping.get(material_name, material_name)
+        material_dir = db_path / folder_name
+        
+        
+        #if not txt_file.exists():
+        #    # Try to find any .txt file in the directory
+        #    txt_files = list(material_dir.glob("*.txt"))
+        #    if txt_files:
+        #        txt_file = txt_files[0]
+        #    else:
+        #        raise FileNotFoundError(f"No refractive index data found for {material_name} in {material_dir}")
+        
+        if material_name=="Co" and energy > 770 and energy < 805:
+            txt_file = material_dir / f"{folder_name}_delta.txt"
+            data = np.loadtxt(txt_file, skiprows=2)
+            energies = data[:, 0]
+            delta = data[:, 1]  # real part
+            interp_delta = interp1d(energies, delta, kind='linear', fill_value='extrapolate')
+
+            txt_file = material_dir / f"{folder_name}_beta.txt"
+            data = np.loadtxt(txt_file, skiprows=2)
+            energies = data[:, 0]
+            beta = data[:, 1]  # imaginary part
+            interp_beta = interp1d(energies, beta, kind='linear', fill_value='extrapolate')
+
+            txt_file = material_dir / f"{folder_name}_delta_delta.txt"
+            data = np.loadtxt(txt_file, skiprows=2)
+            energies = data[:, 0]
+            delta_delta = data[:, 1]  # real part
+            interp_delta_delta = interp1d(energies, delta_delta, kind='linear', fill_value='extrapolate')
+
+            txt_file = material_dir / f"{folder_name}_delta_beta.txt"
+            data = np.loadtxt(txt_file, skiprows=2)
+            energies = data[:, 0]
+            delta_beta = data[:, 1]  # imaginary part
+            interp_delta_beta = interp1d(energies, delta_beta, kind='linear', fill_value='extrapolate')
+
+        else:
+            # Find the txt file - look for one with just the material name
+            txt_file = material_dir / f"{folder_name}.txt"
+
+            # Load the data, skipping header lines
+            data = np.loadtxt(txt_file, skiprows=2)
+            energies = data[:, 0]
+            delta = data[:, 1]  # real part
+            beta = data[:, 2]   # imaginary part
+            # Create interpolation functions
+            interp_delta = interp1d(energies, delta, kind='linear', fill_value='extrapolate')
+            interp_beta = interp1d(energies, beta, kind='linear', fill_value='extrapolate')
+            interp_delta_delta = interp1d(energies, delta*0, kind='linear', fill_value='extrapolate')
+            interp_delta_beta = interp1d(energies, beta*0, kind='linear', fill_value='extrapolate')
+        
+        # Get values at the requested energy
+        delta_at_energy = float(interp_delta(energy))
+        beta_at_energy = float(interp_beta(energy))
+        delta_delta_at_energy = float(interp_delta_delta(energy))
+        delta_beta_at_energy = float(interp_delta_beta(energy))
+        
+        # Return complex refractive index
+        # n = 1 - delta - i*beta (following X-ray optics convention)
+        return 1.0 - delta_at_energy - 1j * beta_at_energy, - delta_delta_at_energy - 1j * delta_beta_at_energy
+
+
+    def _load_refractive_indices_from_db(self, materials: list[str], x_ray_energy: float, db_path=None) -> dict:
+        """
+        Load refractive indices for multiple materials from the database.
+        
+        Parameters
+        ----------
+        materials : list[str]
+            List of material names to load.
+        x_ray_energy : float
+            X-ray energy in eV.
+        db_path : str or Path, optional
+            Path to the database directory.
+        
+        Returns
+        -------
+        dict
+            Dictionary with material names as keys and refractive indices as values.
+        """
+        refractive_indices = {}
+        for material in materials:
+            try:
+                result = self.load_refractive_index(material, x_ray_energy, db_path=db_path)
+                # Handle both single and tuple returns
+                if isinstance(result, tuple):
+                    refractive_indices[material] = result[0]
+                else:
+                    refractive_indices[material] = result
+            except FileNotFoundError as e:
+                print(f"Warning: {e}")
+        
+        return refractive_indices
+
+    def get_refractive_indices_dict(self, x_ray_energy, materials=None, db_path=None):
+        """
+        Get refractive indices for all materials at a specific X-ray energy.
+        
+        Parameters:
+        -----------
+        x_ray_energy : float
+            X-ray energy in eV
+        materials : list, optional
+            List of material names. If None, uses default set.
+        db_path : str or Path, optional
+            Path to the database directory.
+        
+        Returns:
+        --------
+        dict
+            Dictionary with material names as keys and complex refractive indices as values
+        """
+        if materials is None:
+            materials = ["vacuum", "perfect_absorption_mask", "SiN", "Ta", "Co"]
+        
+        refractive_indices = {}
+        for material in materials:
+            try:
+                result = self.load_refractive_index(material, x_ray_energy, db_path=db_path)
+                # Handle both single and tuple returns
+                if isinstance(result, tuple):
+                    refractive_indices[material] = result[0]
+                else:
+                    refractive_indices[material] = result
+            except FileNotFoundError as e:
+                print(f"Warning: {e}")
+        
+        return refractive_indices
+
 
     def get_refractive_index(
         self, elements: str | list[str]
@@ -116,11 +704,15 @@ class Structure:
             Material name, must exist in ``self.material_params.database``.
         thickness : float
             Physical thickness of the layer in metres.
+        thickness_nm : float
+            Physical thickness of the layer in nanometres.
         """
         refractive_index = self.material_params.get_refractive_index(element)
         effective_index = self.calc_effective_refractive_indices(
             refractive_index, thickness
         )
+
+        #NEED TO FIX THIS THICKNESS_NM BUSINESS
 
         self.layer_names.append(element)
         self.layer_thicknesses.append(thickness)
@@ -221,10 +813,10 @@ class Structure:
         ax[1].set_title("Imaginary (Absorption)")
 
         y_bottom = 0
-        for name, thickness_m, refractive_index in zip(
+        for name, thickness, refractive_index in zip(
             self.layer_names, self.layer_thicknesses, self.layer_refractive_indices
         ):
-            thickness = thickness_m * 1e9  # convert to nm for visualization
+            thickness = thickness * 1e9  # convert to nm for visualization
             y_center = y_bottom + thickness / 2
             for a, norm, val in [
                 (ax[0], norm_real, refractive_index.real),
