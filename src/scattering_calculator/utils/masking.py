@@ -103,9 +103,9 @@ def circle_mask3D(
     # setup array
     x = np.linspace(0, shape[2] - 1, shape[2])
     y = np.linspace(0, shape[1] - 1, shape[1])
-    print(shape, x,y)
     X, Y = np.meshgrid(x, y)
 
+    print(radius, X.max())
     # define circle
     mask = np.sqrt(((X - center[1]) ** 2 + (Y - center[0]) ** 2)) <= (radius)
     mask = mask.astype(float)
