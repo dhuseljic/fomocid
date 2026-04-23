@@ -572,6 +572,8 @@ class material_params:
 
         # Return complex refractive index
         # n = 1 - delta - i*beta (following X-ray optics convention)
+
+        
         return np.array(
             [
                 1.0 - delta_at_energy - 1j * beta_at_energy,
@@ -1207,15 +1209,17 @@ class Apertures3D:
             pixel_depth = np.argmin(
                 np.abs(np.append(0, self.layer_thicknesses) - depth)
             )
+            pixel_sigma =sigma/ np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
         else:
             pixel_radius = radius
             pixel_depth = radius
+            pixel_sigma = sigma
 
         self.aperture_design = np.ones(self.shape)
 
         for i in range(0, pixel_depth + 1):
             self.aperture_design[i, :, :] = 1 - circle_mask3D(
-                self.shape, center, pixel_radius, sigma
+                self.shape, center, pixel_radius, pixel_sigma
             )
 
     def return_aperture_mask(self) -> NDArray[np.float64]:
