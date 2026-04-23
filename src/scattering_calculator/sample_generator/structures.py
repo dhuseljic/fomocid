@@ -700,7 +700,6 @@ class Structure:
             eps_l   = 2 n0 dn_l
             eps_c  = 2 n0 dn_c
         """
-        print(n)
         n0=n[0]
         dn_c=n[1]
         dn_l=n[2]
@@ -770,7 +769,6 @@ class Structure:
         effective_index = self.calc_effective_refractive_indices(
             refractive_index, thickness
         )
-        print(thickness)
 
         #NEED TO FIX THIS THICKNESS_NM BUSINESS
 
