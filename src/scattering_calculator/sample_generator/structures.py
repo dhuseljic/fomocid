@@ -18,384 +18,6 @@ from pathlib import Path
 from typing import List, Tuple
 
 
-# ============================================================
-# Data structures
-# ============================================================
-
-
-@dataclass(frozen=True)
-class Layer:
-    material: str
-    thickness: float
-
-    # @property
-    # def thickness(self) -> float:
-    #    return self.thickness_nm * 1e-9
-
-    def to_txt_line(self) -> str:
-        return f"{self.material} {format_nm_as_meter_string(self.thickness_)}"
-
-
-@dataclass
-class MultilayerRecipe:
-    recipe_string: str
-    layers: List[Layer]
-    sample_name: str | None = None
-    comments: List[str] = field(default_factory=list)
-
-    # @property
-    # def total_thickness_nm(self) -> float:
-    #    return sum(layer.thickness_nm for layer in self.layers)
-
-    @property
-    def total_thickness(self) -> float:
-        return sum(layer.thickness for layer in self.layers)
-
-    def add_comment(self, text: str) -> None:
-        self.comments.append(text)
-
-    def summary(self) -> str:
-        lines = []
-        if self.sample_name:
-            lines.append(f"Sample: {self.sample_name}")
-        lines.append(f"Recipe: {self.recipe_string}")
-        lines.append(f"Number of layers: {len(self.layers)}")
-        # lines.append(f"Total thickness: {self.total_thickness_nm:.6g} nm")
-        lines.append(f"Total thickness: {self.total_thickness:.6g} m")
-        if self.comments:
-            lines.append("Comments:")
-            for comment in self.comments:
-                lines.append(f"  - {comment}")
-        return "\n".join(lines)
-
-    def to_txt(
-        self,
-        include_header: bool = False,
-        include_metadata: bool = True,
-    ) -> str:
-        """
-        Return expanded multilayer stack as plain text.
-
-        If include_header is False:
-            Pt 5e-9
-            Pt 2e-9
-            Co 1e-9
-            ...
-
-        If include_header is True:
-            # Sample: ...
-            # Recipe: ...
-            # Total thickness (nm): ...
-            # Comment: ...
-            Pt 5e-9
-            ...
-        """
-        lines: List[str] = []
-
-        if include_header and include_metadata:
-            if self.sample_name:
-                lines.append(f"# Sample: {self.sample_name}")
-            lines.append(f"# Recipe: {self.recipe_string}")
-            # lines.append(f"# Total thickness (nm): {self.total_thickness_nm:.6g}")
-            lines.append(f"# Total thickness (m): {self.total_thickness:.6g}")
-            for comment in self.comments:
-                lines.append(f"# Comment: {comment}")
-
-        lines.extend(layer.to_txt_line() for layer in self.layers)
-        return "\n".join(lines) + "\n"
-
-    def write_txt(
-        self,
-        filename: str | Path,
-        include_header: bool = False,
-        include_metadata: bool = True,
-    ) -> Path:
-        path = Path(filename)
-        path.write_text(
-            self.to_txt(
-                include_header=include_header,
-                include_metadata=include_metadata,
-            ),
-            encoding="utf-8",
-        )
-        return path
-
-
-# ============================================================
-# Formatting helpers
-# ============================================================
-
-
-def format_nm_as_meter_string(value_nm: float) -> str:
-    """
-    Convert thickness in nm to a compact string in meters.
-    Examples:
-        5    -> '5e-9'
-        1.5  -> '1.5e-9'
-        0.25 -> '0.25e-9'
-    """
-    if float(value_nm).is_integer():
-        return f"{int(value_nm)}e-9"
-    return f"{value_nm:g}e-9"
-
-
-# ============================================================
-# Parser
-# ============================================================
-
-
-class RecipeParser:
-    """
-    Parser for multilayer recipes.
-
-    Supported syntax:
-        Pt(5)
-        Pt(5)/Co(1)
-        Pt(5)/[Pt(2)/Co(1)]x10/Ta(5)
-        [Pt(2)/[Co(1)/Ni(0.5)]x3]x5
-
-    Conventions:
-    - Thickness is assumed to be in nm
-    - Layers are separated by '/'
-    - Repeated blocks use [ ... ]xN
-    - Nested repeated blocks are supported
-    """
-
-    def __init__(self, text: str):
-        self.text = text.replace(" ", "")
-        self.pos = 0
-
-    def parse(self) -> List[Layer]:
-        layers = self._parse_sequence(stop_char=None)
-        if self.pos != len(self.text):
-            raise ValueError(
-                f"Unexpected trailing content at position {self.pos}: "
-                f"{self.text[self.pos:]}"
-            )
-        return layers
-
-    def _parse_sequence(self, stop_char: str | None) -> List[Layer]:
-        layers: List[Layer] = []
-
-        while self.pos < len(self.text):
-            char = self.text[self.pos]
-
-            if stop_char is not None and char == stop_char:
-                break
-
-            if char == "/":
-                self.pos += 1
-                continue
-
-            if char == "[":
-                block_layers = self._parse_block()
-                layers.extend(block_layers)
-                continue
-
-            layer = self._parse_layer()
-            layers.append(layer)
-
-        return layers
-
-    def _parse_block(self) -> List[Layer]:
-        self._expect("[")
-        inner_layers = self._parse_sequence(stop_char="]")
-        self._expect("]")
-
-        self._expect("x")
-        repeat = self._parse_integer()
-
-        return inner_layers * repeat
-
-    def _parse_layer(self) -> Layer:
-        material = self._parse_material()
-        self._expect("(")
-        thickness_nm = self._parse_number()
-        self._expect(")")
-
-        if thickness_nm <= 0:
-            raise ValueError(
-                f"Thickness must be positive for material '{material}', "
-                f"got {thickness_nm}"
-            )
-
-        return Layer(material=material, thickness=thickness_nm * 1e-9)
-
-    def _parse_material(self) -> str:
-        start = self.pos
-        while self.pos < len(self.text):
-            char = self.text[self.pos]
-            if char.isalnum() or char == "_":
-                self.pos += 1
-            else:
-                break
-
-        if self.pos == start:
-            raise ValueError(f"Expected material at position {self.pos}")
-
-        return self.text[start : self.pos]
-
-    def _parse_number(self) -> float:
-        start = self.pos
-        dot_count = 0
-
-        while self.pos < len(self.text):
-            char = self.text[self.pos]
-            if char.isdigit():
-                self.pos += 1
-            elif char == ".":
-                dot_count += 1
-                if dot_count > 1:
-                    raise ValueError(f"Invalid number at position {start}")
-                self.pos += 1
-            else:
-                break
-
-        if self.pos == start:
-            raise ValueError(f"Expected number at position {self.pos}")
-
-        value_str = self.text[start : self.pos]
-        try:
-            return float(value_str)
-        except ValueError as exc:
-            raise ValueError(f"Invalid number '{value_str}'") from exc
-
-    def _parse_integer(self) -> int:
-        start = self.pos
-        while self.pos < len(self.text) and self.text[self.pos].isdigit():
-            self.pos += 1
-
-        if self.pos == start:
-            raise ValueError(f"Expected integer at position {self.pos}")
-
-        value = int(self.text[start : self.pos])
-        if value <= 0:
-            raise ValueError(f"Repeat count must be positive, got {value}")
-        return value
-
-    def _expect(self, token: str) -> None:
-        if self.pos >= len(self.text) or self.text[self.pos] != token:
-            found = self.text[self.pos] if self.pos < len(self.text) else "EOF"
-            raise ValueError(
-                f"Expected '{token}' at position {self.pos}, found '{found}'"
-            )
-        self.pos += 1
-
-
-# ============================================================
-# Public API
-# ============================================================
-
-
-def parse_recipe(
-    recipe: str,
-    sample_name: str | None = None,
-    comments: List[str] | None = None,
-) -> MultilayerRecipe:
-    parser = RecipeParser(recipe)
-    layers = parser.parse()
-
-    return MultilayerRecipe(
-        recipe_string=recipe,
-        layers=layers,
-        sample_name=sample_name,
-        comments=comments[:] if comments else [],
-    )
-
-
-def recipe_to_txt_file(
-    recipe: str,
-    filename: str | Path,
-    sample_name: str | None = None,
-    comments: List[str] | None = None,
-    include_header: bool = False,
-) -> Path:
-    multilayer = parse_recipe(
-        recipe=recipe,
-        sample_name=sample_name,
-        comments=comments,
-    )
-    return multilayer.write_txt(
-        filename=filename,
-        include_header=include_header,
-        include_metadata=True,
-    )
-
-
-# ============================================================
-# CLI
-# ============================================================
-
-
-def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Parse and export multilayer recipes to expanded txt files."
-    )
-
-    parser.add_argument(
-        "recipe",
-        type=str,
-        help='Recipe string, e.g. "Pt(5)/[Pt(2)/Co(1)]x10/Ta(5)"',
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        type=str,
-        default="multilayer_recipe.txt",
-        help="Output txt filename",
-    )
-    parser.add_argument(
-        "--sample",
-        type=str,
-        default=None,
-        help="Optional sample name",
-    )
-    parser.add_argument(
-        "--comment",
-        action="append",
-        default=[],
-        help="Optional comment. Can be passed multiple times.",
-    )
-    parser.add_argument(
-        "--header",
-        action="store_true",
-        help="Include metadata header in txt output",
-    )
-    parser.add_argument(
-        "--summary",
-        action="store_true",
-        help="Print recipe summary to terminal",
-    )
-
-    return parser
-
-
-def main() -> None:
-    parser = build_arg_parser()
-    args = parser.parse_args()
-
-    multilayer = parse_recipe(
-        recipe=args.recipe,
-        sample_name=args.sample,
-        comments=args.comment,
-    )
-
-    multilayer.write_txt(
-        filename=args.output,
-        include_header=args.header,
-        include_metadata=True,
-    )
-
-    if args.summary:
-        print(multilayer.summary())
-
-    print(f"Wrote txt file: {args.output}")
-
-
-if __name__ == "__main__":
-    main()
-
-
 class material_params:
     """Database of complex refractive indices for a set of materials.
 
@@ -1016,8 +638,6 @@ class Structure:
         plt.show()
 
 
-
-
 class Apertures:
     """Class for generating masks from circular apertures.
 
@@ -1123,8 +743,6 @@ class Apertures:
         ax[1].set_ylabel("y in µm")
 
 
-
-
 class Apertures3D:
     """Class for generating masks from circular apertures.
 
@@ -1137,7 +755,7 @@ class Apertures3D:
     None
     """
 
-    def __init__(self, shape, real_space_pixel_size,layer_thicknesses) -> None:
+    def __init__(self, shape, real_space_pixel_size, layer_thicknesses) -> None:
         self.shape = shape
         self.aperture_design = np.ones(shape)
         self.pixel_size = real_space_pixel_size
@@ -1156,7 +774,7 @@ class Apertures3D:
         x = (np.arange(self.shape[2]) - self.shape[2] / 2) * self.pixel_size
         y = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.pixel_size
         z = np.cumsum(self.layer_thicknesses)
-        X, Y,Z = np.meshgrid(x, y,z)
+        X, Y, Z = np.meshgrid(x, y, z)
         self.x = X
         self.y = Y
         self.z = Z
@@ -1210,18 +828,20 @@ class Apertures3D:
         """
         if use_real_space_coordinates:
             # Convert radius from metres to pixels using the real-space grid
-            pixel_radius = radius / np.abs(self.x[0,1,0] - self.x[0,0, 0])
-            pixel_depth = np.argmin(np.abs(np.append(0, self.layer_thicknesses) - depth))
+            pixel_radius = radius / np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
+            pixel_depth = np.argmin(
+                np.abs(np.append(0, self.layer_thicknesses) - depth)
+            )
         else:
             pixel_radius = radius
             pixel_depth = radius
 
         self.aperture_design = np.ones(self.shape)
 
-
-        for i in range(0,pixel_depth+1):
-            self.aperture_design[i, :, :] = 1-circle_mask3D(self.shape, center, pixel_radius, sigma)
-
+        for i in range(0, pixel_depth + 1):
+            self.aperture_design[i, :, :] = 1 - circle_mask3D(
+                self.shape, center, pixel_radius, sigma
+            )
 
     def return_aperture_mask(self) -> NDArray[np.float64]:
         """Return the current aperture design as a NumPy array.
@@ -1239,7 +859,9 @@ class Apertures3D:
         fig, ax = plt.subplots(1, 2, figsize=(8, 4))
         ax[0].imshow(np.average(self.aperture_design, axis=0))
         ax[0].set_title("Beamstop in px")
-        ax[1].imshow(np.average(self.aperture_design, axis=0), extent=1e6 * self.extent_real)
+        ax[1].imshow(
+            np.average(self.aperture_design, axis=0), extent=1e6 * self.extent_real
+        )
         ax[1].set_title("Beamstop in mm")
         ax[1].set_xlabel("x in µm")
         ax[1].set_ylabel("y in µm")
