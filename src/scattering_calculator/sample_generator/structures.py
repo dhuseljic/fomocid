@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
 from scattering_calculator.utils.masking import circle_mask
+from scattering_calculator.utils.masking import circle_mask3D
 
 
 from pathlib import Path
@@ -1015,7 +1016,116 @@ class Structure:
         plt.show()
 
 
+
+
 class Apertures:
+    """Class for generating masks from circular apertures.
+
+    Parameters
+    ----------
+    None
+
+    Attributes
+    ----------
+    None
+    """
+
+    def __init__(self, shape, real_space_pixel_size) -> None:
+        self.shape = shape
+        self.aperture_design = np.ones(shape)
+        self.pixel_size = real_space_pixel_size
+
+        self.calc_real_space_coordinates()
+        self.extent_real = self.get_illumination_extent_real_space()
+
+    def calc_real_space_coordinates(self) -> None:
+        """Compute real-space (x, y) coordinate grids for the aperture.
+
+        Sets ``self.x`` and ``self.y`` as 2-D arrays of physical
+        coordinates in metres, centred on the optical axis.
+        """
+
+        x = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.pixel_size
+        y = (np.arange(self.shape[0]) - self.shape[0] / 2) * self.pixel_size
+        X, Y = np.meshgrid(x, y)
+        self.x = X
+        self.y = Y
+
+    def get_illumination_extent_real_space(self) -> NDArray[np.float64]:
+        """Calculate the physical extent of the aperture plane in metres.
+
+        Returns
+        -------
+        extent : tuple of float
+            Physical size of the detector plane in metres as (min_x, max_x, min_y, max_y).
+        """
+
+        self.extent_real = np.array(
+            [
+                np.min(self.x),
+                np.max(self.x),
+                np.min(self.y),
+                np.max(self.y),
+            ]
+        )
+        return self.extent_real
+
+    def create_circle_aperture(
+        self,
+        center: tuple[float, float],
+        radius: float,
+        use_real_space_coordinates: bool = False,
+        sigma: float | None = None,
+    ) -> None:
+        """Create a circular aperture mask and store it in ``self.aperture_design``.
+
+        Parameters
+        ----------
+        center : tuple of int
+            Mask centre coordinates (y, x) in pixels.
+        radius : float
+            Aperture radius in metres.
+        use_real_space_coordinates : bool, optional
+            If ``True``, convert the effective radius from metres to pixels
+            using the real-space coordinate grid. Otherwise, treat the radius
+            as already given in pixels.
+        sigma : float or None, optional
+            Standard deviation of the Gaussian smoothing filter in pixels.
+            No smoothing when ``None`` or ``0``.
+        """
+        if use_real_space_coordinates:
+            # Convert radius from metres to pixels using the real-space grid
+            pixel_radius = radius / np.abs(self.x[0, 1] - self.x[0, 0])
+        else:
+            pixel_radius = radius
+
+        self.aperture_design = circle_mask(self.shape, center, pixel_radius, sigma)
+
+    def return_aperture_mask(self) -> NDArray[np.float64]:
+        """Return the current aperture design as a NumPy array.
+
+        Returns
+        -------
+        NDArray[np.float64]
+            2-D array of shape ``self.shape`` with values in [0, 1] representing
+            the aperture mask.
+        """
+        return self.aperture_design
+
+    def visualize_aperture(self) -> None:
+        """Display the current aperture design as an image."""
+        fig, ax = plt.subplots(1, 2, figsize=(8, 4))
+        ax[0].imshow(self.aperture_design)
+        ax[0].set_title("Beamstop in px")
+        ax[1].imshow(self.aperture_design, extent=1e6 * self.extent_real)
+        ax[1].set_title("Beamstop in mm")
+        ax[1].set_xlabel("x in µm")
+        ax[1].set_ylabel("y in µm")
+
+
+
+
+class Apertures3D:
     """Class for generating masks from circular apertures.
 
     Parameters
@@ -1108,7 +1218,10 @@ class Apertures:
 
         self.aperture_design = np.ones(self.shape)
         for i in range(0,pixel_depth):
-            self.aperture_design[i, :, :] = 1-circle_mask(self.shape[1:], center, pixel_radius, sigma)
+            self.aperture_design[i, :, :] = 1-circle_mask3D(self.shape, center, pixel_radius, sigma)
+
+
+
 
     def return_aperture_mask(self) -> NDArray[np.float64]:
         """Return the current aperture design as a NumPy array.
