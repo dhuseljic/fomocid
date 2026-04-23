@@ -13,6 +13,9 @@ def map_magnetization_to_3d(
     magnetic_pattern_z: NDArray[np.float64] | None = None,
     magnetic_pattern_y: NDArray[np.float64] | None = None,
     magnetic_pattern_x: NDArray[np.float64] | None = None,
+    sample_shape: tuple[int,int, int] | None = None,
+    sample_layer_names: list[str] | None = None,
+    sample_layer_thicknesses: list[float] | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     """Combine three 2-D scalar magnetisation patterns into 3-D vector components.
 
