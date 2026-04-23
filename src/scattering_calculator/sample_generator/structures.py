@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
@@ -21,14 +21,14 @@ from typing import List, Tuple
 # Data structures
 # ============================================================
 
+
 @dataclass(frozen=True)
 class Layer:
     material: str
     thickness: float
 
-
-    #@property
-    #def thickness(self) -> float:
+    # @property
+    # def thickness(self) -> float:
     #    return self.thickness_nm * 1e-9
 
     def to_txt_line(self) -> str:
@@ -42,8 +42,8 @@ class MultilayerRecipe:
     sample_name: str | None = None
     comments: List[str] = field(default_factory=list)
 
-    #@property
-    #def total_thickness_nm(self) -> float:
+    # @property
+    # def total_thickness_nm(self) -> float:
     #    return sum(layer.thickness_nm for layer in self.layers)
 
     @property
@@ -59,7 +59,7 @@ class MultilayerRecipe:
             lines.append(f"Sample: {self.sample_name}")
         lines.append(f"Recipe: {self.recipe_string}")
         lines.append(f"Number of layers: {len(self.layers)}")
-        #lines.append(f"Total thickness: {self.total_thickness_nm:.6g} nm")
+        # lines.append(f"Total thickness: {self.total_thickness_nm:.6g} nm")
         lines.append(f"Total thickness: {self.total_thickness:.6g} m")
         if self.comments:
             lines.append("Comments:")
@@ -95,7 +95,7 @@ class MultilayerRecipe:
             if self.sample_name:
                 lines.append(f"# Sample: {self.sample_name}")
             lines.append(f"# Recipe: {self.recipe_string}")
-            #lines.append(f"# Total thickness (nm): {self.total_thickness_nm:.6g}")
+            # lines.append(f"# Total thickness (nm): {self.total_thickness_nm:.6g}")
             lines.append(f"# Total thickness (m): {self.total_thickness:.6g}")
             for comment in self.comments:
                 lines.append(f"# Comment: {comment}")
@@ -124,6 +124,7 @@ class MultilayerRecipe:
 # Formatting helpers
 # ============================================================
 
+
 def format_nm_as_meter_string(value_nm: float) -> str:
     """
     Convert thickness in nm to a compact string in meters.
@@ -140,6 +141,7 @@ def format_nm_as_meter_string(value_nm: float) -> str:
 # ============================================================
 # Parser
 # ============================================================
+
 
 class RecipeParser:
     """
@@ -216,7 +218,7 @@ class RecipeParser:
                 f"got {thickness_nm}"
             )
 
-        return Layer(material=material, thickness=thickness_nm*1e-9)
+        return Layer(material=material, thickness=thickness_nm * 1e-9)
 
     def _parse_material(self) -> str:
         start = self.pos
@@ -230,7 +232,7 @@ class RecipeParser:
         if self.pos == start:
             raise ValueError(f"Expected material at position {self.pos}")
 
-        return self.text[start:self.pos]
+        return self.text[start : self.pos]
 
     def _parse_number(self) -> float:
         start = self.pos
@@ -251,7 +253,7 @@ class RecipeParser:
         if self.pos == start:
             raise ValueError(f"Expected number at position {self.pos}")
 
-        value_str = self.text[start:self.pos]
+        value_str = self.text[start : self.pos]
         try:
             return float(value_str)
         except ValueError as exc:
@@ -265,7 +267,7 @@ class RecipeParser:
         if self.pos == start:
             raise ValueError(f"Expected integer at position {self.pos}")
 
-        value = int(self.text[start:self.pos])
+        value = int(self.text[start : self.pos])
         if value <= 0:
             raise ValueError(f"Repeat count must be positive, got {value}")
         return value
@@ -282,6 +284,7 @@ class RecipeParser:
 # ============================================================
 # Public API
 # ============================================================
+
 
 def parse_recipe(
     recipe: str,
@@ -321,6 +324,7 @@ def recipe_to_txt_file(
 # ============================================================
 # CLI
 # ============================================================
+
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -391,7 +395,6 @@ if __name__ == "__main__":
     main()
 
 
-
 class material_params:
     """Database of complex refractive indices for a set of materials.
 
@@ -406,7 +409,7 @@ class material_params:
         List of material names to load from database.
     x_ray_energy : float, optional
         X-ray energy in eV for database lookups.
-    
+
     Attributes
     ----------
     elements : KeysView[str]
@@ -417,10 +420,13 @@ class material_params:
         The x-ray energy used to load indices from database.
     """
 
-    def __init__(self, refractive_indices: dict[str, complex] = None, 
-                 materials: list[str] = None, 
-                 x_ray_energy: float = None) -> None:
-        
+    def __init__(
+        self,
+        refractive_indices: dict[str, complex] = None,
+        materials: list[str] = None,
+        x_ray_energy: float = None,
+    ) -> None:
+
         # If both refractive_indices and materials are provided, use refractive_indices (backward compatible)
         if refractive_indices is not None:
             self.database = refractive_indices
@@ -428,21 +434,22 @@ class material_params:
         elif materials is not None and x_ray_energy is not None:
             # Load from database using material names and energy
             self.x_ray_energy = x_ray_energy
-            self.database = self._load_refractive_indices_from_db(materials, x_ray_energy)
+            self.database = self._load_refractive_indices_from_db(
+                materials, x_ray_energy
+            )
         else:
             raise ValueError(
                 "Either provide 'refractive_indices' dict, or both 'materials' list and 'x_ray_energy'"
             )
-        
-        self.elements = self.database.keys()
 
+        self.elements = self.database.keys()
 
     @staticmethod
     def load_refractive_index(material_name, energy, db_path=None):
         """
         Load refractive index from database for a given material and energy.
         Uses interpolation if energy falls between database values.
-        
+
         Parameters:
         -----------
         material_name : str
@@ -451,7 +458,7 @@ class material_params:
             X-ray energy in eV
         db_path : str or Path, optional
             Path to the database directory. If None, looks for it in the project.
-        
+
         Returns:
         --------
         complex
@@ -459,16 +466,18 @@ class material_params:
         """
         if db_path is None:
             # Try to find database relative to current working directory
-            db_path = Path("../src/scattering_calculator/database/material_parameter/refractive_indexes")
+            db_path = Path(
+                "../src/scattering_calculator/database/material_parameter/refractive_indexes"
+            )
         else:
             db_path = Path(db_path)
-        
+
         # Special cases
         if material_name == "vacuum":
-            return (1.0 + 0j, 0j,0j)
+            return (1.0 + 0j, 0j, 0j)
         elif material_name == "perfect_absorption_mask":
             return (-1j * 1e6, 0j, 0j)
-        
+
         # Map material names to folder names
         material_mapping = {
             "SiN": "Si3N4",
@@ -484,44 +493,50 @@ class material_params:
             "Ir": "Ir",
             "MgO": "MgO",
         }
-        
+
         folder_name = material_mapping.get(material_name, material_name)
         material_dir = db_path / folder_name
-        
-        
-        #if not txt_file.exists():
+
+        # if not txt_file.exists():
         #    # Try to find any .txt file in the directory
         #    txt_files = list(material_dir.glob("*.txt"))
         #    if txt_files:
         #        txt_file = txt_files[0]
         #    else:
         #        raise FileNotFoundError(f"No refractive index data found for {material_name} in {material_dir}")
-        
-        if material_name=="Co" and energy > 770 and energy < 805:
+
+        if material_name == "Co" and energy > 770 and energy < 805:
             txt_file = material_dir / f"{folder_name}_delta_c.txt"
             data = np.loadtxt(txt_file, skiprows=2)
             energies = data[:, 0]
-            delta_c = data[:, 1]*1e-3  # real part
-            interp_delta_c = interp1d(energies, delta_c, kind='linear', fill_value='extrapolate')
+            delta_c = data[:, 1] * 1e-3  # real part
+            interp_delta_c = interp1d(
+                energies, delta_c, kind="linear", fill_value="extrapolate"
+            )
 
             txt_file = material_dir / f"{folder_name}_beta_c.txt"
             data = np.loadtxt(txt_file, skiprows=2)
             energies = data[:, 0]
-            beta_c = data[:, 1]*1e-3  # imaginary part
-            interp_beta_c = interp1d(energies, beta_c, kind='linear', fill_value='extrapolate')
-
+            beta_c = data[:, 1] * 1e-3  # imaginary part
+            interp_beta_c = interp1d(
+                energies, beta_c, kind="linear", fill_value="extrapolate"
+            )
 
             txt_file = material_dir / f"{folder_name}_delta.txt"
             data = np.loadtxt(txt_file, skiprows=2)
             energies = data[:, 0]
-            delta = data[:, 1]*1e-3  # real part
-            interp_delta = interp1d(energies, delta, kind='linear', fill_value='extrapolate')
+            delta = data[:, 1] * 1e-3  # real part
+            interp_delta = interp1d(
+                energies, delta, kind="linear", fill_value="extrapolate"
+            )
 
             txt_file = material_dir / f"{folder_name}_beta.txt"
             data = np.loadtxt(txt_file, skiprows=2)
             energies = data[:, 0]
-            beta = data[:, 1]*1e-3  # imaginary part
-            interp_beta = interp1d(energies, beta, kind='linear', fill_value='extrapolate')
+            beta = data[:, 1] * 1e-3  # imaginary part
+            interp_beta = interp1d(
+                energies, beta, kind="linear", fill_value="extrapolate"
+            )
 
         else:
             # Find the txt file - look for one with just the material name
@@ -531,34 +546,48 @@ class material_params:
             data = np.loadtxt(txt_file, skiprows=2)
             energies = data[:, 0]
             delta = data[:, 1]  # real part
-            beta = data[:, 2]   # imaginary part
+            beta = data[:, 2]  # imaginary part
             # Create interpolation functions
-            interp_delta = interp1d(energies, delta, kind='linear', fill_value='extrapolate')
-            interp_beta = interp1d(energies, beta, kind='linear', fill_value='extrapolate')
-            interp_delta_c = interp1d(energies, delta*0, kind='linear', fill_value='extrapolate')
-            interp_beta_c = interp1d(energies, beta*0, kind='linear', fill_value='extrapolate')
+            interp_delta = interp1d(
+                energies, delta, kind="linear", fill_value="extrapolate"
+            )
+            interp_beta = interp1d(
+                energies, beta, kind="linear", fill_value="extrapolate"
+            )
+            interp_delta_c = interp1d(
+                energies, delta * 0, kind="linear", fill_value="extrapolate"
+            )
+            interp_beta_c = interp1d(
+                energies, beta * 0, kind="linear", fill_value="extrapolate"
+            )
 
-        
-        #interp_delta_l = interp1d(energies, delta*0, kind='linear', fill_value='extrapolate')
-        #interp_beta_l = interp1d(energies, beta*0, kind='linear', fill_value='extrapolate')
-    
+        # interp_delta_l = interp1d(energies, delta*0, kind='linear', fill_value='extrapolate')
+        # interp_beta_l = interp1d(energies, beta*0, kind='linear', fill_value='extrapolate')
+
         # Get values at the requested energy
         delta_at_energy = float(interp_delta(energy))
         beta_at_energy = float(interp_beta(energy))
         delta_c_at_energy = float(interp_delta_c(energy))
         beta_c_at_energy = float(interp_beta_c(energy))
-        delta_l_at_energy = 0#float(interp_delta_l(energy))
-        beta_l_at_energy = 0#float(interp_beta_l(energy))
-        
+        delta_l_at_energy = 0  # float(interp_delta_l(energy))
+        beta_l_at_energy = 0  # float(interp_beta_l(energy))
+
         # Return complex refractive index
         # n = 1 - delta - i*beta (following X-ray optics convention)
-        return np.array([1.0 - delta_at_energy - 1j * beta_at_energy, - delta_c_at_energy - 1j * beta_c_at_energy, - delta_l_at_energy - 1j * beta_l_at_energy])
+        return np.array(
+            [
+                1.0 - delta_at_energy - 1j * beta_at_energy,
+                -delta_c_at_energy - 1j * beta_c_at_energy,
+                -delta_l_at_energy - 1j * beta_l_at_energy,
+            ]
+        )
 
-
-    def _load_refractive_indices_from_db(self, materials: list[str], x_ray_energy: float, db_path=None) -> dict:
+    def _load_refractive_indices_from_db(
+        self, materials: list[str], x_ray_energy: float, db_path=None
+    ) -> dict:
         """
         Load refractive indices for multiple materials from the database.
-        
+
         Parameters
         ----------
         materials : list[str]
@@ -567,7 +596,7 @@ class material_params:
             X-ray energy in eV.
         db_path : str or Path, optional
             Path to the database directory.
-        
+
         Returns
         -------
         dict
@@ -576,21 +605,23 @@ class material_params:
         refractive_indices = {}
         for material in materials:
             try:
-                result = self.load_refractive_index(material, x_ray_energy, db_path=db_path)
+                result = self.load_refractive_index(
+                    material, x_ray_energy, db_path=db_path
+                )
                 # Handle both single and tuple returns
-                #if isinstance(result, tuple):
+                # if isinstance(result, tuple):
                 #    refractive_indices[material] = result[0]
-                #else:
+                # else:
                 refractive_indices[material] = result
             except FileNotFoundError as e:
                 print(f"Warning: {e}")
-        
+
         return refractive_indices
 
     def get_refractive_indices_dict(self, x_ray_energy, materials=None, db_path=None):
         """
         Get refractive indices for all materials at a specific X-ray energy.
-        
+
         Parameters:
         -----------
         x_ray_energy : float
@@ -599,7 +630,7 @@ class material_params:
             List of material names. If None, uses default set.
         db_path : str or Path, optional
             Path to the database directory.
-        
+
         Returns:
         --------
         dict
@@ -607,11 +638,13 @@ class material_params:
         """
         if materials is None:
             materials = ["vacuum", "perfect_absorption_mask", "SiN", "Ta", "Co"]
-        
+
         refractive_indices = {}
         for material in materials:
             try:
-                result = self.load_refractive_index(material, x_ray_energy, db_path=db_path)
+                result = self.load_refractive_index(
+                    material, x_ray_energy, db_path=db_path
+                )
                 # Handle both single and tuple returns
                 if isinstance(result, tuple):
                     refractive_indices[material] = result[0]
@@ -619,9 +652,8 @@ class material_params:
                     refractive_indices[material] = result
             except FileNotFoundError as e:
                 print(f"Warning: {e}")
-        
-        return refractive_indices
 
+        return refractive_indices
 
     def get_refractive_index(
         self, elements: str | list[str]
@@ -682,9 +714,12 @@ class Structure:
         self.layer_thicknesses: list[float] = []
         self.layer_refractive_indices: list[complex] = []
         self.effective_refractive_indices: list[complex] = []
-        self.dielectric_tensors: list[NDArray[np.complex128]] = []  # Optional: store dielectric tensors if needed
-        self.effective_dielectric_tensors: list[NDArray[np.complex128]] = []  # Optional: store effective dielectric tensors if needed
-
+        self.dielectric_tensors: list[NDArray[np.complex128]] = (
+            []
+        )  # Optional: store dielectric tensors if needed
+        self.effective_dielectric_tensors: list[NDArray[np.complex128]] = (
+            []
+        )  # Optional: store effective dielectric tensors if needed
 
     def dielectric_tensor_mixed(self, n, theta=0.0):
         """
@@ -700,38 +735,30 @@ class Structure:
             eps_l   = 2 n0 dn_l
             eps_c  = 2 n0 dn_c
         """
-        n0=n[0]
-        dn_c=n[1]
-        dn_l=n[2]
+        n0 = n[0]
+        dn_c = n[1]
+        dn_l = n[2]
 
         eps0 = n0**2
         eps_l = 2.0 * n0 * dn_l
         eps_c = 2.0 * n0 * dn_c
 
         # Linear anisotropy tensor in its own principal basis
-        eps_l_tensor = np.array([
-            [eps_l, 0.0],
-            [0.0, -eps_l]
-        ], dtype=complex)
+        eps_l_tensor = np.array([[eps_l, 0.0], [0.0, -eps_l]], dtype=complex)
 
         # Rotate linear anisotropy tensor by theta
         c, s = np.cos(theta), np.sin(theta)
-        R = np.array([
-            [c, -s],
-            [s,  c]
-        ], dtype=complex)
+        R = np.array([[c, -s], [s, c]], dtype=complex)
 
         eps_l_rot = R @ eps_l_tensor @ R.T
 
         # Circular anisotropy tensor
-        eps_c_tensor = np.array([
-            [0.0,  1.0j * eps_c],
-            [-1.0j * eps_c, 0.0]
-        ], dtype=complex)
+        eps_c_tensor = np.array(
+            [[0.0, 1.0j * eps_c], [-1.0j * eps_c, 0.0]], dtype=complex
+        )
 
-        eps_total = np.array([eps0 * np.eye(2, dtype=complex) , eps_c_tensor,eps_l_rot])
+        eps_total = np.array([eps0 * np.eye(2, dtype=complex), eps_c_tensor, eps_l_rot])
         return eps_total
-
 
     def calc_effective_refractive_indices(
         self, refractive_index: complex, thickness: float
@@ -770,7 +797,7 @@ class Structure:
             refractive_index, thickness
         )
 
-        #NEED TO FIX THIS THICKNESS_NM BUSINESS
+        # NEED TO FIX THIS THICKNESS_NM BUSINESS
 
         self.layer_names.append(element)
         self.layer_thicknesses.append(thickness)
@@ -788,7 +815,7 @@ class Structure:
             each layer in deposition order.
         """
         return np.array(self.layer_refractive_indices)
-    
+
     def return_layer_dielectric_tensors(self) -> NDArray[np.complex128]:
         """Return all layer dielectric tensors as a NumPy array.
 
@@ -862,8 +889,43 @@ class Structure:
         complex
             Sum of ``n * thickness`` over all layers.
         """
-        return sum(self.effective_refractive_indices)
-    
+        self.effective_refractive_index = sum(self.effective_refractive_indices)
+
+        return self.effective_refractive_index
+
+    def return_total_thickness(self) -> float:
+        """Return the total physical thickness of the structure.
+
+        Returns
+        -------
+        float
+            Sum of layer thicknesses in metres.
+        """
+        return sum(self.layer_thicknesses)
+
+    def create_2d_refractive_index_map(self, shape: tuple) -> np.ndarray:
+        """Create a 2D array representing the refractive index profile of the structure.
+
+        Parameters
+        ----------
+        shape : tuple of int
+            Desired shape of the output array (height, width).
+
+        Returns
+        -------
+        np.ndarray
+            2D array of shape `shape` where each row corresponds to a layer's
+            refractive index, repeated across the width.
+        """
+        n_layers = len(self.layer_refractive_indices)
+        if n_layers == 0:
+            raise ValueError(
+                "Structure has no layers to create refractive index array."
+            )
+
+        self.refractive_index_map = (
+            np.ones(shape, dtype=np.complex128) * self.effective_refractive_index
+        )
 
     def return_total_effective_dielectric_tensor(self):
         """
@@ -890,8 +952,6 @@ class Structure:
         eps_eff /= D
 
         return eps_eff
-
-
 
     def visualize_structure(self) -> None:
         """Plot the layer stack coloured by real and imaginary refractive index.
@@ -1070,3 +1130,107 @@ class Apertures:
         ax[1].set_title("Beamstop in mm")
         ax[1].set_xlabel("x in µm")
         ax[1].set_ylabel("y in µm")
+
+
+class Magnetic_Structure:
+    """Extension of the Structure class to include magnetic properties.
+
+    Parameters
+    ----------
+    name : str
+        Human-readable label for the structure.
+    material_params : material_params
+        Material database providing refractive indices for each element.
+
+    Attributes
+    ----------
+    name : str
+        Structure label.
+    material_params : material_params
+        Reference to the material database.
+    layer_names : list of str
+        Element name of each layer in deposition order.
+    layer_thicknesses : list of float
+        Physical thickness of each layer in metres.
+    layer_refractive_indices : list of complex
+        Complex refractive index of each layer.
+    effective_refractive_indices : list of complex
+        Effective index (``n * thickness``) of each layer.
+    magnetization_profiles : list of complex
+        Complex magnetization profile for each layer, representing the magnetic contribution to the refractive index.
+    """
+
+    def __init__(self, magnetic_structure, magnetic_pattern) -> None:
+        self.magnetic_structure = magnetic_structure
+        self.magnetic_refractive_index = magnetic_structure.effective_refractive_index
+        self.magnetic_pattern = magnetic_pattern
+
+    def calc_projection_approximation(self) -> ArrayLike:
+        """Calculate the projection approximation for a given magnetic refractive index.
+
+        Parameters
+        ----------
+        magnetic_refractive_index : complex
+            Complex magnetization profile for a layer.
+
+        Returns
+        -------
+        """
+        if self.magnetic_pattern.ndim > 2:
+            self.magnetic_projection = np.sum(self.magnetic_pattern, axis=0)
+        else:
+            self.magnetic_projection = self.magnetic_pattern
+
+    def visualize_magnetic_projection(self) -> None:
+        """Visualize the magnetic projection approximation."""
+        if hasattr(self, "magnetic_projection"):
+            _, ax = plt.subplots()
+            m = ax.imshow(self.magnetic_projection, cmap="gray")
+            plt.colorbar(m, label="Magnetic Projection")
+            ax.set_title("Projection Approximation of Magnetic Pattern")
+            ax.set_xlabel("X (pixels)")
+            ax.set_ylabel("Y (pixels)")
+            plt.show()
+        else:
+            print(
+                "Magnetic projection not calculated yet. Call calc_projection_approximation() first."
+            )
+
+    def calc_magnetic_dichroism_birefringence(self):
+        """Calculate the magnetic dichroism and birefringence contributions to the refractive index."""
+        self.magnetic_dichroism = (
+            self.magnetic_refractive_index.imag * self.magnetic_pattern
+        )
+        self.magnetic_birefringence = (
+            self.magnetic_refractive_index.real * self.magnetic_pattern
+        )
+        self.magnetic_refractive_index_map = (
+            self.magnetic_dichroism + 1j * self.magnetic_birefringence
+        )
+
+    def visualize_magnetic_contributions(self):
+        """Visualize the magnetic dichroism and birefringence contributions."""
+        if hasattr(self, "magnetic_dichroism") and hasattr(
+            self, "magnetic_birefringence"
+        ):
+            vmin, vmax = np.min(
+                [self.magnetic_dichroism, self.magnetic_birefringence]
+            ), np.max([self.magnetic_dichroism, self.magnetic_birefringence])
+
+            fig, ax = plt.subplots(1, 2, figsize=(11, 4))
+            im1 = ax[0].imshow(self.magnetic_dichroism, vmin=vmin, vmax=vmax)
+            fig.colorbar(im1, ax=ax[0], label="Magnetic Dichroism (a.u.)")
+            ax[0].set_title("Magnetic Dichroism Contribution")
+            ax[0].set_xlabel("X (pixels)")
+            ax[0].set_ylabel("Y (pixels)")
+
+            im2 = ax[1].imshow(self.magnetic_birefringence, vmin=vmin, vmax=vmax)
+            fig.colorbar(im2, ax=ax[1], label="Magnetic Birefringence (a.u.)")
+            ax[1].set_title("Magnetic Birefringence Contribution")
+            ax[1].set_xlabel("X (pixels)")
+            ax[1].set_ylabel("Y (pixels)")
+            plt.show()
+        else:
+            print(
+                "Magnetic contributions not calculated yet. Call calc_magnetic_dichroism_birefringence() first."
+            )

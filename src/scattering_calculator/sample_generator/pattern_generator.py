@@ -9,6 +9,50 @@ from scipy.spatial import KDTree
 from scattering_calculator.utils.masking import circle_mask
 
 
+def map_magnetization_to_3d(
+    magnetic_pattern_z: NDArray[np.float64] | None = None,
+    magnetic_pattern_y: NDArray[np.float64] | None = None,
+    magnetic_pattern_x: NDArray[np.float64] | None = None,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Combine three 2-D scalar magnetisation patterns into 3-D vector components.
+
+    Parameters
+    ----------
+    magnetic_pattern_z : ndarray of shape (rows, cols)
+        2-D array with values in [-1, 1] representing the z-component of the magnetisation pattern.
+    magnetic_pattern_y : ndarray of shape (rows, cols)
+        2-D array with values in [-1, 1] representing the y-component of the magnetisation pattern.
+    magnetic_pattern_x : ndarray of shape (rows, cols)
+        2-D array with values in [-1, 1] representing the x-component of the magnetisation pattern.
+
+    Returns
+    -------
+    mz, my, mx : ndarray of shape (rows, cols)
+        3-D vector components of the magnetisation pattern.
+    """
+
+    shapes = [a.shape for a in (magnetic_pattern_z, magnetic_pattern_y, magnetic_pattern_x) if a is not None]
+
+    if not shapes:
+        raise ValueError(
+            "At least one of magnetic_pattern_z, magnetic_pattern_y, or "
+            "magnetic_pattern_x must be provided."
+        )
+
+    if len(set(shapes)) > 1:
+        raise ValueError(
+            f"All provided arrays must have the same shape, got shapes: {shapes}"
+        )
+
+    ref_shape = shapes[0]
+    mz = magnetic_pattern_z if magnetic_pattern_z is not None else np.zeros(ref_shape)
+    my = magnetic_pattern_y if magnetic_pattern_y is not None else np.zeros(ref_shape)
+    mx = magnetic_pattern_x if magnetic_pattern_x is not None else np.zeros(ref_shape)
+
+    magnetization = np.stack((mz, my, mx), axis=-1)
+    return magnetization
+
+
 def create_skyrmion_pattern(
     sz_array: list[int],
     skyr_radius: float,
@@ -400,7 +444,11 @@ def skyrmions_on_lattice(
         _, ax = plt.subplots(1, 3, figsize=(12, 4))
         if skyrmion_kernel is not None:
             half_nm = skyrmion_kernel.shape[0] / 2 * real_space_pixel_size * 1e9
-            ax[0].imshow(skyrmion_kernel, cmap="gray", extent=[-half_nm, half_nm, half_nm, -half_nm])
+            ax[0].imshow(
+                skyrmion_kernel,
+                cmap="gray",
+                extent=[-half_nm, half_nm, half_nm, -half_nm],
+            )
             ax[0].set_xlabel("x in nm")
             ax[0].set_ylabel("y in nm")
         ax[0].set_title("Single Binary Skyrmion")
