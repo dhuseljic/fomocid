@@ -120,7 +120,6 @@ class wavefronts:
         
         Optimized: Detects isotropic pixels (diagonal with equal elements)
         and computes their Jones matrix directly without eigendecomposition.
-        Uses eig for general complex matrices and avoids explicit inversion.
         """
         k0 = 2 * np.pi / wavelength
         Ny, Nx = eps_slice.shape[:2]
@@ -132,6 +131,7 @@ class wavefronts:
         off_10 = eps_slice[..., 1, 0]   # (Ny, Nx)
         
         # Check which pixels are isotropic: diagonal with equal elements
+        # Tolerance for floating point comparison
         tol = 1e-10
         is_isotropic = (
             (np.abs(off_01) < tol) & 
@@ -154,9 +154,8 @@ class wavefronts:
         # Handle anisotropic pixels with eigendecomposition
         if np.any(~is_isotropic):
             eps_aniso = eps_slice[~is_isotropic]
-            N_aniso = len(eps_aniso)
             
-            # Use eig for general complex matrices (handles non-Hermitian case with complex diagonals)
+            # Eigen-decomposition for anisotropic pixels only
             vals, vecs = np.linalg.eig(eps_aniso)  # vals: (N_aniso, 2), vecs: (N_aniso, 2, 2)
             
             # Refractive indices
@@ -165,13 +164,14 @@ class wavefronts:
             # Propagation phases
             phase = np.exp(-1j * k0 * n * thickness)  # (N_aniso, 2)
             
-            # Compute J = V @ diag(phase) @ V^{-1} efficiently
-            # Use solve instead of explicit inversion (much faster)
-            eye = np.eye(2, dtype=complex)
-            vecs_inv = np.linalg.solve(vecs, np.tile(eye[np.newaxis, :, :], (N_aniso, 1, 1)))
+            # Build diagonal phase matrices
+            D = np.zeros((len(eps_aniso), 2, 2), dtype=complex)
+            D[:, 0, 0] = phase[:, 0]
+            D[:, 1, 1] = phase[:, 1]
             
-            # Efficient computation using einsum: J[i,a,b] = sum_c V[i,a,c] * phase[i,c] * V_inv[i,c,b]
-            J_aniso = np.einsum('ijk,ik,ikl->ijl', vecs, phase, vecs_inv)
+            # J = V D V^{-1}
+            vecs_inv = np.linalg.inv(vecs)
+            J_aniso = vecs @ D @ vecs_inv
             
             # Place anisotropic results in output
             J_field[~is_isotropic] = J_aniso

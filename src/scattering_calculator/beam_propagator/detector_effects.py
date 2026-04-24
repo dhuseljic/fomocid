@@ -31,6 +31,7 @@ class detector_hologram:
         self.counts_per_photon=100
         self.number_frames=1
         self.detector_threshold=64e3
+        self.sigma_photon=0.5
 
 
     def gnomonic_projection(self) -> NDArray[np.float64]:
@@ -57,7 +58,6 @@ class detector_hologram:
         #QX, QY = np.meshgrid(qx, qy)
         # how much is a pixel in q space
         Dq=np.pi/self.real_space_pixel_size
-        print(Dq, Dq*self.hologram.shape[0], np.amax(detqx), np.amax(detqy))
 
         # we can use detx and dety to calculate the qx, qy coordinates in the far field corresponding to the real-space coordinates of the detector pixels
         # and then we can use these to decide where to sample hologram to have a gnomonic projection effect.
@@ -101,8 +101,6 @@ class detector_hologram:
 
         # 6. adjust the maximum count to 64000 for a single image
         factor_holo=(self.max_counts_per_image)/np.amax((1.-self.beamstop.beamstop)*holo)
-        
-        print("amax",np.amax((1.-self.beamstop.beamstop)*holo),np.amax(holo))
         holo*=factor_holo
 
         # consider you will have more than one frame
@@ -112,19 +110,35 @@ class detector_hologram:
         holo /= self.counts_per_photon
         holo = np.random.poisson(holo).astype(np.float64)
 
-
-        # 8. round to integer number of photons and convert back to counts
-        holo = np.round(holo,0)*self.counts_per_photon
+        # 8. round to integer number of photons and 
+        holo = np.round(holo,0)
         
-        # 9. add gaussian readout noise from detector
+        # 8.b I guess here we should have a SPF for a single photon
+        if self.sigma_photon > 0:
+            kernel = np.outer(signal.windows.gaussian(npx, self.sigma_photon), signal.windows.gaussian(npx, self.sigma_photon))
+            if kernel.max() > 0:
+                # Normalize by max to preserve peak values (not total signal)
+                kernel /= kernel.max()
+                holo = signal.fftconvolve(holo, kernel, mode='same')
+
+
+        # 9. convert back to counts and re-rounding
+        holo=holo*self.counts_per_photon
+
+        holo = np.round(holo,0)
+
+        # 10. add gaussian readout noise from detector
         if (self.readout_noise_average > 0 or self.readout_noise_sigma > 0):
-            holo += np.random.normal(self.readout_noise_average*self.number_frames,self.readout_noise_sigma*np.sqrt(self.number_frames),holo.shape)
+            holo += np.random.normal(
+                self.readout_noise_average*self.number_frames,
+                self.readout_noise_sigma*np.sqrt(self.number_frames),
+                holo.shape)
             
-        # 9.b cap image at thresholding camera value
-        holo=np.minimum(holo, self.detector_threshold)
+        # 11 cap image at thresholding camera value
+        holo=np.minimum(holo, self.number_frames*self.detector_threshold)
 
 
-        # 10 divide by frame number: it is an average
+        # 12 divide by frame number: it is an average
         holo/= self.number_frames
             
         # just making sure the final product is positive
