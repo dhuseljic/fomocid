@@ -3,6 +3,9 @@ import scipy as scp
 from scattering_calculator.utils import physics, image_transformator
 from scattering_calculator.experimental_conditions import light_beam
 
+def reconstruct(holo):
+    return np.fft.fftshift(np.fft.fft2(np.fft.fftshift(holo)))
+
 class wavefronts:
     def __init__(self, beam_parameters,eps_stack,layer_thicknesses,real_space_pixel_size,E_in, propagate=False):
         self.E_in=E_in

@@ -44,6 +44,7 @@ class detector_layout:
         """
         x = (np.arange(self.detector_shape[1]) - self.detector_center[1]) * self.pixel_size
         y = (np.arange(self.detector_shape[0]) - self.detector_center[0]) * self.pixel_size
+        print(np.amin(x), np.amax(x), self.detector_center, self.pixel_size)
         X, Y = np.meshgrid(x, y)
         self.detx = X
         self.dety = Y
@@ -57,11 +58,9 @@ class detector_layout:
         
         r = np.sqrt(self.detx**2 + self.dety**2)
         theta=np.arctan2(self.dety, self.detx)
-        qx = beam_parameters.k*np.sin(np.arctan(r/self.distance_sample_detector))*np.cos(theta)
-        qy = beam_parameters.k*np.sin(np.arctan(r/self.distance_sample_detector))*np.sin(theta)
-        QX, QY = np.meshgrid(qx, qy)
-        self.detqx = QX
-        self.detqy = QY
+        self.detqx = beam_parameters.k*np.sin(np.arctan(r/self.distance_sample_detector))*np.cos(theta)
+        self.detqy = beam_parameters.k*np.sin(np.arctan(r/self.distance_sample_detector))*np.sin(theta)
+
 
 
     def get_detector_extent_real_space(self) -> NDArray[np.float64]:
