@@ -20,6 +20,16 @@ from typing import List, Tuple
 
 @dataclass(frozen=True)
 class Layer:
+    """A single material layer in a multilayer stack.
+
+    Attributes
+    ----------
+    material : str
+        Name of the material (e.g. ``"Pt"``, ``"Co"``).
+    thickness : float
+        Physical thickness in metres.
+    """
+
     material: str
     thickness: float
 
@@ -33,6 +43,20 @@ class Layer:
 
 @dataclass
 class MultilayerRecipe:
+    """Parsed representation of a multilayer recipe string.
+
+    Attributes
+    ----------
+    recipe_string : str
+        Original recipe string as supplied by the user.
+    layers : list of Layer
+        Fully expanded list of layers in deposition order.
+    sample_name : str or None
+        Optional human-readable sample identifier.
+    comments : list of str
+        Optional free-text annotations attached to the recipe.
+    """
+
     recipe_string: str
     layers: List[Layer]
     sample_name: str | None = None
@@ -44,12 +68,28 @@ class MultilayerRecipe:
 
     @property
     def total_thickness(self) -> float:
+        """Total physical thickness of the stack in metres."""
         return sum(layer.thickness for layer in self.layers)
 
     def add_comment(self, text: str) -> None:
+        """Append a free-text comment to the recipe.
+
+        Parameters
+        ----------
+        text : str
+            Comment string to append.
+        """
         self.comments.append(text)
 
     def summary(self) -> str:
+        """Return a human-readable summary of the recipe.
+
+        Returns
+        -------
+        str
+            Multi-line string listing sample name, recipe, layer count,
+            total thickness, and any attached comments.
+        """
         lines = []
         if self.sample_name:
             lines.append(f"Sample: {self.sample_name}")
@@ -105,6 +145,24 @@ class MultilayerRecipe:
         include_header: bool = False,
         include_metadata: bool = True,
     ) -> Path:
+        """Write the expanded layer stack to a plain-text file.
+
+        Parameters
+        ----------
+        filename : str or Path
+            Output file path.
+        include_header : bool, optional
+            If ``True``, prepend metadata (sample name, recipe, total
+            thickness, comments) as ``#``-prefixed lines. Default is ``False``.
+        include_metadata : bool, optional
+            Whether to include metadata when ``include_header`` is ``True``.
+            Default is ``True``.
+
+        Returns
+        -------
+        Path
+            Resolved path of the written file.
+        """
         path = Path(filename)
         path.write_text(
             self.to_txt(
@@ -161,6 +219,18 @@ class RecipeParser:
         self.pos = 0
 
     def parse(self) -> List[Layer]:
+        """Parse the recipe string and return the expanded list of layers.
+
+        Returns
+        -------
+        list of Layer
+            Fully expanded layer sequence in deposition order.
+
+        Raises
+        ------
+        ValueError
+            If the recipe string contains invalid syntax.
+        """
         layers = self._parse_sequence(stop_char=None)
         if self.pos != len(self.text):
             raise ValueError(
@@ -287,6 +357,28 @@ def parse_recipe(
     sample_name: str | None = None,
     comments: List[str] | None = None,
 ) -> MultilayerRecipe:
+    """Parse a multilayer recipe string into a :class:`MultilayerRecipe`.
+
+    Parameters
+    ----------
+    recipe : str
+        Recipe string, e.g. ``"Pt(5)/[Co(2)/Pt(1)]x10/Ta(3)"``.
+        Thicknesses are in nanometres; brackets with ``xN`` denote repetitions.
+    sample_name : str or None, optional
+        Human-readable label attached to the returned recipe.
+    comments : list of str or None, optional
+        Free-text annotations attached to the returned recipe.
+
+    Returns
+    -------
+    MultilayerRecipe
+        Dataclass with the fully expanded layer list.
+
+    Raises
+    ------
+    ValueError
+        If the recipe string contains invalid syntax.
+    """
     parser = RecipeParser(recipe)
     layers = parser.parse()
 
@@ -305,6 +397,26 @@ def recipe_to_txt_file(
     comments: List[str] | None = None,
     include_header: bool = False,
 ) -> Path:
+    """Parse a recipe string and write the expanded stack to a text file.
+
+    Parameters
+    ----------
+    recipe : str
+        Recipe string, e.g. ``"Pt(5)/[Co(2)/Pt(1)]x10/Ta(3)"``.
+    filename : str or Path
+        Output file path.
+    sample_name : str or None, optional
+        Human-readable sample label written to the header.
+    comments : list of str or None, optional
+        Free-text annotations written to the header.
+    include_header : bool, optional
+        If ``True``, prepend metadata as ``#``-prefixed lines. Default ``False``.
+
+    Returns
+    -------
+    Path
+        Resolved path of the written file.
+    """
     multilayer = parse_recipe(
         recipe=recipe,
         sample_name=sample_name,
@@ -722,18 +834,26 @@ class Structure:
         )  # Optional: store effective dielectric tensors if needed
 
     def dielectric_tensor_mixed(self, n, theta=0.0):
-        """
-        Build a 2x2 transverse dielectric tensor from:
-        n=(n0,dn_l,dn_c)
-        - n0: baseline isotropic refractive index
-        - dn_lin: linear anisotropy contribution
-        - dn_circ: circular anisotropy contribution
-        - theta: rotation angle (radians) of the linear principal axes
+        """Build a 3-element array of 2×2 transverse dielectric tensors.
 
-        Small-anisotropy approximation:
-            eps0      = n0^2
-            eps_l   = 2 n0 dn_l
-            eps_c  = 2 n0 dn_c
+        Uses the small-anisotropy approximation:
+        ``eps0 = n0²``, ``eps_l = 2 n0 Δn_l``, ``eps_c = 2 n0 Δn_c``.
+
+        Parameters
+        ----------
+        n : array-like of length 3
+            ``(n0, dn_c, dn_l)`` where ``n0`` is the baseline isotropic
+            refractive index, ``dn_c`` the circular anisotropy, and ``dn_l``
+            the linear anisotropy contribution.
+        theta : float, optional
+            Rotation angle in radians of the linear principal axes.
+            Default is ``0.0``.
+
+        Returns
+        -------
+        ndarray of shape (3, 2, 2)
+            ``[eps_isotropic * I, eps_circular_tensor, eps_linear_tensor]``
+            where each element is a complex 2×2 matrix.
         """
         n0 = n[0]
         dn_c = n[1]
@@ -903,19 +1023,17 @@ class Structure:
         """
         return sum(self.layer_thicknesses)
 
-    def create_2d_refractive_index_map(self, shape: tuple) -> np.ndarray:
-        """Create a 2D array representing the refractive index profile of the structure.
+    def create_2d_refractive_index_map(self, shape: tuple) -> None:
+        """Create a uniform 2-D effective refractive index map and store it.
+
+        Fills ``self.refractive_index_map`` with a constant array equal to
+        ``self.effective_refractive_index`` over the requested shape.
+        :meth:`return_total_effective_refractive_index` must be called first.
 
         Parameters
         ----------
         shape : tuple of int
-            Desired shape of the output array (height, width).
-
-        Returns
-        -------
-        np.ndarray
-            2D array of shape `shape` where each row corresponds to a layer's
-            refractive index, repeated across the width.
+            Desired array shape ``(rows, cols)`` in pixels.
         """
         n_layers = len(self.layer_refractive_indices)
         if n_layers == 0:
@@ -928,20 +1046,14 @@ class Structure:
         )
 
     def return_total_effective_dielectric_tensor(self):
-        """
-        Thickness-weighted effective transverse dielectric tensor.
+        """Return the thickness-weighted effective transverse dielectric tensor.
 
-        Parameters
-        ----------
-        layer_tensors : list of (2,2) complex arrays
-            Dielectric tensors of the layers.
-        layer_thicknesses : list of float
-            Thicknesses of the layers.
+        Averages ``self.dielectric_tensors`` weighted by ``self.layer_thicknesses``.
 
         Returns
         -------
-        eps_eff : (2,2) complex array
-            Effective dielectric tensor.
+        ndarray of shape (3, 2, 2)
+            Thickness-weighted mean dielectric tensor across all layers.
         """
 
         D = np.sum(self.layer_thicknesses)
@@ -1016,15 +1128,27 @@ class Structure:
 
 
 class Apertures:
-    """Class for generating masks from circular apertures.
+    """2-D circular aperture mask generator.
 
     Parameters
     ----------
-    None
+    shape : tuple of int
+        Array shape ``(rows, cols)`` in pixels.
+    real_space_pixel_size : float
+        Physical size of one pixel in metres.
 
     Attributes
     ----------
-    None
+    shape : tuple of int
+        Array shape in pixels.
+    pixel_size : float
+        Physical pixel size in metres.
+    aperture_design : ndarray of shape ``shape``
+        Current aperture mask with values in ``[0, 1]``. Initialised to ones.
+    x, y : ndarray
+        2-D real-space coordinate grids in metres.
+    extent_real : ndarray of shape (4,)
+        ``[x_min, x_max, y_min, y_max]`` in metres.
     """
 
     def __init__(self, shape, real_space_pixel_size) -> None:
@@ -1121,15 +1245,31 @@ class Apertures:
 
 
 class Apertures3D:
-    """Class for generating masks from circular apertures.
+    """3-D circular aperture mask generator for layered samples.
 
     Parameters
     ----------
-    None
+    shape : tuple of int
+        Array shape ``(layers, rows, cols)`` in pixels.
+    real_space_pixel_size : float
+        Physical size of one transverse pixel in metres.
+    layer_thicknesses : array-like of float
+        Physical thickness of each layer in metres.
 
     Attributes
     ----------
-    None
+    shape : tuple of int
+        Array shape ``(layers, rows, cols)`` in pixels.
+    pixel_size : float
+        Physical transverse pixel size in metres.
+    layer_thicknesses : ndarray
+        Physical thickness of each layer in metres.
+    aperture_design : ndarray of shape ``shape``
+        Current aperture mask with values in ``[0, 1]``. Initialised to ones.
+    x, y, z : ndarray
+        3-D real-space coordinate grids in metres.
+    extent_real : ndarray of shape (6,)
+        ``[x_min, x_max, y_min, y_max, z_min, z_max]`` in metres.
     """
 
     def __init__(self, shape, real_space_pixel_size, layer_thicknesses) -> None:
@@ -1275,20 +1415,26 @@ class Magnetic_Structure:
     """
 
     def __init__(self, magnetic_structure, magnetic_pattern) -> None:
+        """
+        Parameters
+        ----------
+        magnetic_structure : Structure
+            Fully assembled :class:`Structure` whose
+            ``effective_refractive_index`` carries the magnetic contribution.
+        magnetic_pattern : ndarray
+            2-D (or 3-D) magnetisation pattern with values in ``[-1, 1]``.
+            A 3-D array is interpreted as ``(depth, rows, cols)``.
+        """
         self.magnetic_structure = magnetic_structure
         self.magnetic_refractive_index = magnetic_structure.effective_refractive_index
         self.magnetic_pattern = magnetic_pattern
 
-    def calc_projection_approximation(self) -> ArrayLike:
-        """Calculate the projection approximation for a given magnetic refractive index.
+    def calc_projection_approximation(self) -> None:
+        """Compute the projection approximation of the magnetisation pattern.
 
-        Parameters
-        ----------
-        magnetic_refractive_index : complex
-            Complex magnetization profile for a layer.
-
-        Returns
-        -------
+        For a 3-D pattern ``(depth, rows, cols)``, sums along the depth axis
+        to obtain a 2-D projected map. For a 2-D pattern the input is used
+        directly. The result is stored in ``self.magnetic_projection``.
         """
         if self.magnetic_pattern.ndim > 2:
             self.magnetic_projection = np.sum(self.magnetic_pattern, axis=0)
@@ -1310,8 +1456,17 @@ class Magnetic_Structure:
                 "Magnetic projection not calculated yet. Call calc_projection_approximation() first."
             )
 
-    def calc_magnetic_dichroism_birefringence(self):
-        """Calculate the magnetic dichroism and birefringence contributions to the refractive index."""
+    def calc_magnetic_dichroism_birefringence(self) -> None:
+        """Compute spatially resolved magnetic dichroism and birefringence maps.
+
+        Multiplies the effective magnetic refractive index by the magnetisation
+        pattern to obtain per-pixel dichroism (imaginary part) and birefringence
+        (real part) maps. Results are stored in:
+
+        - ``self.magnetic_dichroism``
+        - ``self.magnetic_birefringence``
+        - ``self.magnetic_refractive_index_map``
+        """
         self.magnetic_dichroism = (
             self.magnetic_refractive_index.imag * self.magnetic_pattern
         )
