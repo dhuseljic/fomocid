@@ -890,7 +890,7 @@ class Apertures3D:
             pixel_depth = radius
             pixel_sigma = sigma
 
-        self.aperture_design = np.ones(self.shape)
+        #self.aperture_design = np.ones(self.shape)
 
         for i in range(0, pixel_depth + 1):
             self.aperture_design[i, :, :] = 1 - circle_mask3D(
