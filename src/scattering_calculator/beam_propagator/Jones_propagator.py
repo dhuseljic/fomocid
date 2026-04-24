@@ -8,7 +8,7 @@ class wavefronts:
         self.E_in=E_in
         self.exit_wave = self.propagate_jones_multislice(
             E_in=self.E_in,
-            eps_stack=eps_stack
+            eps_stack=eps_stack,
             wavelength=beam_parameters.wavelength,
             thicknesses=layer_thicknesses,
             pixel_size=real_space_pixel_size,
