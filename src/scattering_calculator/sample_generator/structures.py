@@ -882,17 +882,17 @@ class Apertures3D:
             # Convert radius from metres to pixels using the real-space grid
             pixel_radius = radius / np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
             pixel_depth = np.argmin(
-                np.abs(np.append(0, self.layer_thicknesses) - depth)
+                np.abs(np.append(0, np.cumsum(self.layer_thicknesses)) - depth)
             )
             pixel_sigma = sigma / np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
         else:
             pixel_radius = radius
-            pixel_depth = radius
+            pixel_depth = depth
             pixel_sigma = sigma
 
         #self.aperture_design = np.ones(self.shape)
-
-        for i in range(0, pixel_depth + 1):
+        print(pixel_depth)
+        for i in range(0, pixel_depth ):
             self.aperture_design[i, :, :] *= (1 - circle_mask3D(
                 self.shape, center, pixel_radius, pixel_sigma
             ))
