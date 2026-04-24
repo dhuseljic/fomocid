@@ -343,6 +343,10 @@ class Structure:
         Structure label.
     material_params : material_params
         Reference to the material database.
+    sample_shape :
+        Shape of the sample in pixels.
+    real_space_pixel_size : float
+        Physical pixel size (lateral, xy plane) in metres.
     layer_names : list of str
         Element name of each layer in deposition order.
     layer_thicknesses : list of float
@@ -351,12 +355,16 @@ class Structure:
         Complex refractive index of each layer.
     effective_refractive_indices : list of complex
         Effective index (``n * thickness``) of each layer.
+    dielectric_tensors : (Nz,Ny,Nx,2,2) complex ndarray
+    magnetization : (Nz,Ny,Nx,3) float ndarray
+    mask : (Nz,Ny,Nx) float ndarray for mask. if 1 the material is there if 0 vacuum. Used for aperture function or magnetic tracks
     """
 
-    def __init__(self, name: str, material_params: material_params) -> None:
+    def __init__(self, name: str, material_params: material_params, sample_shape: list[int, int, int], real_space_pixel_size: float) -> None:
         self.name = name
         self.material_params = material_params
-
+        self.sample_shape = sample_shape
+        self.real_space_pixel_size = real_space_pixel_size
         self.layer_names: list[str] = []
         self.layer_thicknesses: list[float] = []
         self.layer_refractive_indices: list[complex] = []
@@ -367,6 +375,11 @@ class Structure:
         self.effective_dielectric_tensors: list[NDArray[np.complex128]] = (
             []
         )  # Optional: store effective dielectric tensors if needed
+        self.magnetization: NDArray[np.float64] | None = None  # Optional: store magnetization map
+        self.mask: NDArray[np.float64] | None = None  # Optional: store sample mask for aperture function
+
+        if self.sample_shape[0]==0:
+            self.sample_shape[0]=len(self.layer_names)
 
     def dielectric_tensor_mixed(self, n, theta=0.0):
         """Build a 3-element array of 2×2 transverse dielectric tensors.
@@ -459,6 +472,7 @@ class Structure:
         self.layer_refractive_indices.append(refractive_index)
         self.dielectric_tensors.append(dielectric_tensor)
         self.effective_refractive_indices.append(effective_index)
+        self.sample_shape[0]=len(self.layer_names)
 
     def return_layer_refractive_indices(self) -> NDArray[np.complex128]:
         """Return all layer refractive indices as a NumPy array.
@@ -599,6 +613,14 @@ class Structure:
         eps_eff /= D
 
         return eps_eff
+    
+
+    def calculate_final_dielectric_tensor(self) -> None:
+        dielectric_tensor_vacuum=np.array([[1.+0.j, 0.+0.j],[0.+0.j, 1+0.j]])
+        self.dielectric_tensors=np.array(self.dielectric_tensors)
+        self.final_dielectric_tensor=np.einsum("ij,zyx->zyxij", dielectric_tensor_vacuum, 1-self.mask)+np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,0,:,:], self.mask)+np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,1,:,:], self.magnetization[:,:,:,2])+np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,2,:,:], self.magnetization[:,:,:,0])-np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,2,:,:], self.magnetization[:,:,:,1])
+
+
 
     def visualize_structure(self) -> None:
         """Plot the layer stack coloured by real and imaginary refractive index.
