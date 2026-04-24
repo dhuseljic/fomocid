@@ -77,6 +77,7 @@ def gauss_beam(
         Gauss_long = 1
 
     Gauss = Gauss_trans * Gauss_long
+    Gauss = Gauss / np.max(np.abs(Gauss))  # Normalize to max amplitude of 1
 
     return Gauss
 
