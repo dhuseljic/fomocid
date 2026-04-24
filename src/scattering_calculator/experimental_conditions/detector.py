@@ -13,21 +13,25 @@ class detector_layout:
     ----------
     pixel_size : float
         Physical pixel size in metres.
-    shape : tuple of int
+    detector_shape : tuple of int
         Detector dimensions (rows, cols) in pixels, e.g. ``(2048, 2048)``.
     distance_sample_detector : float
         Sample-to-detector distance in metres.
+    detector_center : tuple of float
+        Coordinates of the detector center in pixels, e.g. ``(1024, 1024)``.
     """
 
     def __init__(
         self,
         pixel_size: float = 10e-6,
-        shape: tuple[int, int] = (2048, 2048),
+        detector_shape: tuple[int, int] = (2048, 2048),
         distance_sample_detector: float = 0.15,
+        detector_center: tuple[float, float] = (1024,1024),
     ) -> None:
         self.pixel_size = pixel_size
-        self.shape = shape
+        self.detector_shape = detector_shape
         self.distance_sample_detector = distance_sample_detector
+        self.detector_center = detector_center
 
         # Calculate real-space coordinates of detector plane in meters
         self.calc_real_space_coordinates()
@@ -38,11 +42,27 @@ class detector_layout:
         Sets ``self.detx`` and ``self.dety`` as 2-D arrays of physical
         coordinates in metres, centred on the optical axis.
         """
-        x = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.pixel_size
-        y = (np.arange(self.shape[0]) - self.shape[0] / 2) * self.pixel_size
+        x = (np.arange(self.detector_shape[1]) - self.detector_center[1]) * self.pixel_size
+        y = (np.arange(self.detector_shape[0]) - self.detector_center[0]) * self.pixel_size
         X, Y = np.meshgrid(x, y)
         self.detx = X
         self.dety = Y
+
+    def calc_q_space_coordinates(self, beam_parameters) -> None:
+        """Compute Fourier-space (qx, qy) coordinate grids for the detector plane.
+
+        Sets ``self.detqx`` and ``self.detqy`` as 2-D arrays of physical
+        coordinates in metres, centred on the optical axis.
+        """
+        
+        r = np.sqrt(self.detx**2 + self.dety**2)
+        theta=np.arctan2(self.dety, self.detx)
+        qx = beam_parameters.k*np.sin(np.arctan(r/self.distance_sample_detector))*np.cos(theta)
+        qy = beam_parameters.k*np.sin(np.arctan(r/self.distance_sample_detector))*np.sin(theta)
+        QX, QY = np.meshgrid(qx, qy)
+        self.detqx = QX
+        self.detqy = QY
+
 
     def get_detector_extent_real_space(self) -> NDArray[np.float64]:
         """Calculate the physical extent of the detector plane in metres.
@@ -106,12 +126,12 @@ class beamstop:
         detector_config: detector_layout,
         distance_detector_beamstop: float,
     ) -> None:
-        self.shape = detector_config.shape
+        self.detector_shape = detector_config.detector_shape
         self.detector_pixel_size = detector_config.pixel_size
         self.distance_sample_detector = detector_config.distance_sample_detector
         self.distance_beamstop = distance_detector_beamstop
-        self.beamstop = np.zeros(self.shape)
-        self.inverse_beamstop = np.ones(self.shape)
+        self.beamstop = np.zeros(self.detector_shape)
+        self.inverse_beamstop = np.ones(self.detector_shape)
 
     def calc_effective_beamstop_radius(self, radius: float) -> float:
         """Project a physical beamstop radius onto the detector plane.
@@ -163,7 +183,7 @@ class beamstop:
         if use_real_space_coordinates:
             radius_effective = radius_effective / self.detector_pixel_size
 
-        self.beamstop = circle_mask(self.shape, center, radius_effective, sigma=sigma)
+        self.beamstop = circle_mask(self.detector_shape, center, radius_effective, sigma=sigma)
 
     def return_beamstop(self) -> NDArray[np.float64]:
         """Return the current beamstop mask array.
@@ -171,6 +191,6 @@ class beamstop:
         Returns
         -------
         beamstop : ndarray
-            2-D mask array of shape ``self.shape``.
+            2-D mask array of shape ``self.detector_shape``.
         """
         return self.beamstop

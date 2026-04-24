@@ -157,6 +157,7 @@ class beam_parameters:
     def __init__(self, photon_energy: float, photon_flux: float, pol) -> None:
         self.energy: float = photon_energy  # in eV
         self.wavelength: float = physics.photon_energy_wavelength(photon_energy)
+        self.k: float = 2*np.pi / physics.photon_energy_wavelength(photon_energy)
         self.photon_flux: float = photon_flux  # in photons/s
         self.pol=pol
 

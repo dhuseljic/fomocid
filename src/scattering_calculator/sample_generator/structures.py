@@ -1,17 +1,14 @@
 from __future__ import annotations
-
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-
 from scattering_calculator.utils.masking import circle_mask
 from scattering_calculator.utils.masking import circle_mask3D
 
 from scattering_calculator.database.database_loading import (
     material_params,
 )  # noqa: E402
-
 
 from pathlib import Path
 
