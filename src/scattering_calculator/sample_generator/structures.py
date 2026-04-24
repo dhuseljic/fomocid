@@ -8,9 +8,12 @@ import matplotlib.colors as mcolors
 from scattering_calculator.utils.masking import circle_mask
 from scattering_calculator.utils.masking import circle_mask3D
 
+from scattering_calculator.database.database_loading import (
+    material_params,
+)  # noqa: E402
+
 
 from pathlib import Path
-from scipy.interpolate import interp1d
 
 import argparse
 from dataclasses import dataclass, field
@@ -390,45 +393,6 @@ def parse_recipe(
     )
 
 
-def recipe_to_txt_file(
-    recipe: str,
-    filename: str | Path,
-    sample_name: str | None = None,
-    comments: List[str] | None = None,
-    include_header: bool = False,
-) -> Path:
-    """Parse a recipe string and write the expanded stack to a text file.
-
-    Parameters
-    ----------
-    recipe : str
-        Recipe string, e.g. ``"Pt(5)/[Co(2)/Pt(1)]x10/Ta(3)"``.
-    filename : str or Path
-        Output file path.
-    sample_name : str or None, optional
-        Human-readable sample label written to the header.
-    comments : list of str or None, optional
-        Free-text annotations written to the header.
-    include_header : bool, optional
-        If ``True``, prepend metadata as ``#``-prefixed lines. Default ``False``.
-
-    Returns
-    -------
-    Path
-        Resolved path of the written file.
-    """
-    multilayer = parse_recipe(
-        recipe=recipe,
-        sample_name=sample_name,
-        comments=comments,
-    )
-    return multilayer.write_txt(
-        filename=filename,
-        include_header=include_header,
-        include_metadata=True,
-    )
-
-
 # ============================================================
 # CLI
 # ============================================================
@@ -501,291 +465,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
-
-class material_params:
-    """Database of complex refractive indices for a set of materials.
-
-    Can be initialized either with a pre-computed dictionary of refractive indices,
-    or with material names and x-ray energy to load indices from the database.
-
-    Parameters
-    ----------
-    refractive_indices : dict[str, complex], optional
-        Mapping from element/material name to its complex refractive index.
-    materials : list[str], optional
-        List of material names to load from database.
-    x_ray_energy : float, optional
-        X-ray energy in eV for database lookups.
-
-    Attributes
-    ----------
-    elements : KeysView[str]
-        Names of all materials in the database.
-    database : dict[str, complex]
-        Full refractive index lookup table.
-    x_ray_energy : float or None
-        The x-ray energy used to load indices from database.
-    """
-
-    def __init__(
-        self,
-        refractive_indices: dict[str, complex] = None,
-        materials: list[str] = None,
-        x_ray_energy: float = None,
-    ) -> None:
-
-        # If both refractive_indices and materials are provided, use refractive_indices (backward compatible)
-        if refractive_indices is not None:
-            self.database = refractive_indices
-            self.x_ray_energy = None
-        elif materials is not None and x_ray_energy is not None:
-            # Load from database using material names and energy
-            self.x_ray_energy = x_ray_energy
-            self.database = self._load_refractive_indices_from_db(
-                materials, x_ray_energy
-            )
-        else:
-            raise ValueError(
-                "Either provide 'refractive_indices' dict, or both 'materials' list and 'x_ray_energy'"
-            )
-
-        self.elements = self.database.keys()
-
-    @staticmethod
-    def load_refractive_index(material_name, energy, db_path=None):
-        """
-        Load refractive index from database for a given material and energy.
-        Uses interpolation if energy falls between database values.
-
-        Parameters:
-        -----------
-        material_name : str
-            Name of the material (e.g., 'Co', 'Ta', 'SiN')
-        energy : float
-            X-ray energy in eV
-        db_path : str or Path, optional
-            Path to the database directory. If None, looks for it in the project.
-
-        Returns:
-        --------
-        complex
-            Refractive index n = 1 - delta - i*beta
-        """
-        if db_path is None:
-            # Try to find database relative to current working directory
-            db_path = Path(
-                "../src/scattering_calculator/database/material_parameter/refractive_indexes"
-            )
-        else:
-            db_path = Path(db_path)
-
-        # Special cases
-        if material_name == "vacuum":
-            return (1.0 + 0j, 0j, 0j)
-        elif material_name == "perfect_absorption_mask":
-            return (-1j * 1e6, 0j, 0j)
-
-        # Map material names to folder names
-        material_mapping = {
-            "SiN": "Si3N4",
-            "Si3N4": "Si3N4",
-            "Co": "Co",
-            "Ta": "Ta",
-            "Pt": "Pt",
-            "Au": "Au",
-            "Fe": "Fe",
-            "Ni": "Ni",
-            "Cr": "Cr",
-            "Cu": "Cu",
-            "Ir": "Ir",
-            "MgO": "MgO",
-        }
-
-        folder_name = material_mapping.get(material_name, material_name)
-        material_dir = db_path / folder_name
-
-        # if not txt_file.exists():
-        #    # Try to find any .txt file in the directory
-        #    txt_files = list(material_dir.glob("*.txt"))
-        #    if txt_files:
-        #        txt_file = txt_files[0]
-        #    else:
-        #        raise FileNotFoundError(f"No refractive index data found for {material_name} in {material_dir}")
-
-        if material_name == "Co" and energy > 770 and energy < 805:
-            txt_file = material_dir / f"{folder_name}_delta_c.txt"
-            data = np.loadtxt(txt_file, skiprows=2)
-            energies = data[:, 0]
-            delta_c = data[:, 1] * 1e-3  # real part
-            interp_delta_c = interp1d(
-                energies, delta_c, kind="linear", fill_value="extrapolate"
-            )
-
-            txt_file = material_dir / f"{folder_name}_beta_c.txt"
-            data = np.loadtxt(txt_file, skiprows=2)
-            energies = data[:, 0]
-            beta_c = data[:, 1] * 1e-3  # imaginary part
-            interp_beta_c = interp1d(
-                energies, beta_c, kind="linear", fill_value="extrapolate"
-            )
-
-            txt_file = material_dir / f"{folder_name}_delta.txt"
-            data = np.loadtxt(txt_file, skiprows=2)
-            energies = data[:, 0]
-            delta = data[:, 1] * 1e-3  # real part
-            interp_delta = interp1d(
-                energies, delta, kind="linear", fill_value="extrapolate"
-            )
-
-            txt_file = material_dir / f"{folder_name}_beta.txt"
-            data = np.loadtxt(txt_file, skiprows=2)
-            energies = data[:, 0]
-            beta = data[:, 1] * 1e-3  # imaginary part
-            interp_beta = interp1d(
-                energies, beta, kind="linear", fill_value="extrapolate"
-            )
-
-        else:
-            # Find the txt file - look for one with just the material name
-            txt_file = material_dir / f"{folder_name}.txt"
-
-            # Load the data, skipping header lines
-            data = np.loadtxt(txt_file, skiprows=2)
-            energies = data[:, 0]
-            delta = data[:, 1]  # real part
-            beta = data[:, 2]  # imaginary part
-            # Create interpolation functions
-            interp_delta = interp1d(
-                energies, delta, kind="linear", fill_value="extrapolate"
-            )
-            interp_beta = interp1d(
-                energies, beta, kind="linear", fill_value="extrapolate"
-            )
-            interp_delta_c = interp1d(
-                energies, delta * 0, kind="linear", fill_value="extrapolate"
-            )
-            interp_beta_c = interp1d(
-                energies, beta * 0, kind="linear", fill_value="extrapolate"
-            )
-
-        # interp_delta_l = interp1d(energies, delta*0, kind='linear', fill_value='extrapolate')
-        # interp_beta_l = interp1d(energies, beta*0, kind='linear', fill_value='extrapolate')
-
-        # Get values at the requested energy
-        delta_at_energy = float(interp_delta(energy))
-        beta_at_energy = float(interp_beta(energy))
-        delta_c_at_energy = float(interp_delta_c(energy))
-        beta_c_at_energy = float(interp_beta_c(energy))
-        delta_l_at_energy = 0  # float(interp_delta_l(energy))
-        beta_l_at_energy = 0  # float(interp_beta_l(energy))
-
-        # Return complex refractive index
-        # n = 1 - delta - i*beta (following X-ray optics convention)
-
-        
-        return np.array(
-            [
-                1.0 - delta_at_energy - 1j * beta_at_energy,
-                -delta_c_at_energy - 1j * beta_c_at_energy,
-                -delta_l_at_energy - 1j * beta_l_at_energy,
-            ]
-        )
-
-    def _load_refractive_indices_from_db(
-        self, materials: list[str], x_ray_energy: float, db_path=None
-    ) -> dict:
-        """
-        Load refractive indices for multiple materials from the database.
-
-        Parameters
-        ----------
-        materials : list[str]
-            List of material names to load.
-        x_ray_energy : float
-            X-ray energy in eV.
-        db_path : str or Path, optional
-            Path to the database directory.
-
-        Returns
-        -------
-        dict
-            Dictionary with material names as keys and refractive indices as values.
-        """
-        refractive_indices = {}
-        for material in materials:
-            try:
-                result = self.load_refractive_index(
-                    material, x_ray_energy, db_path=db_path
-                )
-                # Handle both single and tuple returns
-                # if isinstance(result, tuple):
-                #    refractive_indices[material] = result[0]
-                # else:
-                refractive_indices[material] = result
-            except FileNotFoundError as e:
-                print(f"Warning: {e}")
-
-        return refractive_indices
-
-    def get_refractive_indices_dict(self, x_ray_energy, materials=None, db_path=None):
-        """
-        Get refractive indices for all materials at a specific X-ray energy.
-
-        Parameters:
-        -----------
-        x_ray_energy : float
-            X-ray energy in eV
-        materials : list, optional
-            List of material names. If None, uses default set.
-        db_path : str or Path, optional
-            Path to the database directory.
-
-        Returns:
-        --------
-        dict
-            Dictionary with material names as keys and complex refractive indices as values
-        """
-        if materials is None:
-            materials = ["vacuum", "perfect_absorption_mask", "SiN", "Ta", "Co"]
-
-        refractive_indices = {}
-        for material in materials:
-            try:
-                result = self.load_refractive_index(
-                    material, x_ray_energy, db_path=db_path
-                )
-                # Handle both single and tuple returns
-                if isinstance(result, tuple):
-                    refractive_indices[material] = result[0]
-                else:
-                    refractive_indices[material] = result
-            except FileNotFoundError as e:
-                print(f"Warning: {e}")
-
-        return refractive_indices
-
-    def get_refractive_index(
-        self, elements: str | list[str]
-    ) -> complex | list[complex]:
-        """Look up the complex refractive index for one or more materials.
-
-        Parameters
-        ----------
-        elements : str or list of str
-            Single material name or list of material names.
-
-        Returns
-        -------
-        complex or list of complex
-            Single refractive index when ``elements`` is a string;
-            list of refractive indices when ``elements`` is a list.
-        """
-        if isinstance(elements, str):
-            return self.database[elements]
-        return [self.database[element] for element in elements]
 
 
 class Structure:
@@ -1127,7 +806,7 @@ class Structure:
         plt.show()
 
 
-class Apertures:
+class Apertures2D:
     """2-D circular aperture mask generator.
 
     Parameters
@@ -1349,7 +1028,7 @@ class Apertures3D:
             pixel_depth = np.argmin(
                 np.abs(np.append(0, self.layer_thicknesses) - depth)
             )
-            pixel_sigma =sigma/ np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
+            pixel_sigma = sigma / np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
         else:
             pixel_radius = radius
             pixel_depth = radius
