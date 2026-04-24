@@ -893,9 +893,9 @@ class Apertures3D:
         #self.aperture_design = np.ones(self.shape)
 
         for i in range(0, pixel_depth + 1):
-            self.aperture_design[i, :, :] = 1 - circle_mask3D(
+            self.aperture_design[i, :, :] *= (1 - circle_mask3D(
                 self.shape, center, pixel_radius, pixel_sigma
-            )
+            ))
 
     def return_aperture_mask(self) -> NDArray[np.float64]:
         """Return the current aperture design as a NumPy array.
