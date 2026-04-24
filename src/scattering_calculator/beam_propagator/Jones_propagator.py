@@ -1,17 +1,21 @@
 import numpy as np
 import scipy as scp
+from scattering_calculator.utils import physics, image_transformator
+from scattering_calculator.experimental_conditions import light_beam
 
-
-class exit_wave:
-    def __init__(self, sample,E_in, propagate=False):
-        self.E = self.propagate_jones_multislice(
-            E_in=E_in,
+class wavefronts:
+    def __init__(self, beam_parameters,sample,E_in, propagate=False):
+        self.E_in=E_in
+        self.exit_wave = self.propagate_jones_multislice(
+            E_in=self.E_in,
             eps_stack=np.array(sample.final_dielectric_tensor),
-            wavelength=physics.photon_energy_wavelength(x_ray_energy),
+            wavelength=beam_parameters.wavelength,
             thicknesses=sample.layer_thicknesses,
             pixel_size=sample.real_space_pixel_size,
             propagate=propagate
         )
+        self.detector_wave = image_transformator.Fraunhofer_propagation_jones(self.exit_wave)
+        self.hologram = E_I(self.detector_wave)
 
 
 
@@ -20,7 +24,7 @@ class exit_wave:
     # Multislice propagation through stack of dielectric tensor images
     # ============================================================
 
-    def propagate_jones_multislice(E-in, eps_stack, wavelength, thicknesses, pixel_size, propagate=True):
+    def propagate_jones_multislice(self,E_in, eps_stack, wavelength, thicknesses, pixel_size, propagate=True):
         """
         Multislice propagation through a dielectric tensor stack.
 
@@ -35,17 +39,17 @@ class exit_wave:
 
         Returns
         -------
-        E : (Ny, Nx, 2) complex
+        E_in : (Ny, Nx, 2) complex
             Output field after all slices
         """
-        E = np.asarray(E_in, dtype=complex)
+        E_in = np.asarray(E_in, dtype=complex)
         eps_stack = np.asarray(eps_stack, dtype=complex)
 
-        if E.ndim != 3 or E.shape[-1] != 2:
+        if E_in.ndim != 3 or E_in.shape[-1] != 2:
             raise ValueError("E_in must have shape (Ny, Nx, 2)")
         if eps_stack.ndim != 5 or eps_stack.shape[-2:] != (2, 2):
             raise ValueError("eps_stack must have shape (Nz, Ny, Nx, 2, 2)")
-        if E.shape[:2] != eps_stack.shape[1:3]:
+        if E_in.shape[:2] != eps_stack.shape[1:3]:
             raise ValueError("E_in and eps_stack must have matching (Ny, Nx)")
 
         Nz = eps_stack.shape[0]
@@ -54,14 +58,14 @@ class exit_wave:
             eps_slice = eps_stack[iz]
             dz = thicknesses[iz]
             # Local Jones interaction
-            E = propagate_jones_single_slice(E, eps_slice, wavelength, dz)
+            E_in = self.propagate_jones_single_slice(E_in, eps_slice, wavelength, dz)
 
             # Free-space propagation between slices
             if propagate:
                 if iz < Nz - 1:
-                    E = propagate_free_space_jones(E, wavelength, dz, pixel_size)
+                    E_in = self.propagate_free_space_jones(E_in, wavelength, dz, pixel_size)
 
-        return E
+        return E_in
 
 
 
@@ -70,7 +74,7 @@ class exit_wave:
     # Single-slice propagation through dielectric tensor image
     # ============================================================
 
-    def propagate_jones_single_slice(E, eps_slice, wavelength, thickness):
+    def propagate_jones_single_slice(self,E, eps_slice, wavelength, thickness):
         """
         Propagate a coherent Jones wavefield through one dielectric slice.
 
@@ -96,8 +100,8 @@ class exit_wave:
         if E.shape[:2] != eps_slice.shape[:2]:
             raise ValueError("E and eps_slice must have same (Ny, Nx)")
 
-        J_field = jones_from_eps_slice(eps_slice, wavelength, thickness)
-        E_out = apply_jones_field(E, J_field)
+        J_field = self.jones_from_eps_slice(eps_slice, wavelength, thickness)
+        E_out = self.apply_jones_field(E, J_field)
 
         return E_out
 
@@ -106,7 +110,7 @@ class exit_wave:
     # Build Jones propagator field from dielectric tensor field
     # ============================================================
 
-    def jones_from_eps_slice(eps_slice, wavelength, thickness):
+    def jones_from_eps_slice(self,eps_slice, wavelength, thickness):
         """
         eps_slice: (Ny, Nx, 2, 2)
         wavelength: scalar
@@ -177,7 +181,7 @@ class exit_wave:
 
 
 
-    def jones_from_eps_slice_old(eps_slice, wavelength, thickness):
+    def jones_from_eps_slice_old(self,eps_slice, wavelength, thickness):
         """
         eps_slice: (Ny, Nx, 2, 2)
         wavelength: scalar
@@ -213,7 +217,7 @@ class exit_wave:
     # Free-space propagation of a Jones wavefield (angular spectrum)
     # ============================================================
 
-    def propagate_free_space_jones(E_in, wavelength, dz, pixel_size):
+    def propagate_free_space_jones(self,E_in, wavelength, dz, pixel_size):
         """
         Free-space propagation of a Jones wavefield by angular spectrum.
 
@@ -256,7 +260,7 @@ class exit_wave:
     # ============================================================
     # Utility: apply a Jones matrix field to a Jones wavefield
     # ============================================================
-    def apply_jones_field(E_in, J_field):
+    def apply_jones_field(self,E_in, J_field):
         """
         E_in:   (Ny, Nx, 2)
         J_field:(Ny, Nx, 2, 2)
@@ -265,55 +269,6 @@ class exit_wave:
             E_out: (Ny, Nx, 2)
         """
         return np.einsum("yxab,yxb->yxa", J_field, E_in)
-
-
-
-
-
-
-def polarization_vector(pol):
-    '''
-    Return the Jones vector for a given polarization type.
-    
-    Parameters
-    ----------
-    pol : str or float
-        Polarization type: "CR" (circular right), "CL" (circular left), "x" (linear horizontal), "y" (linear vertical), or angle in radians for linear polarization at that angle.
-    
-    Returns
-    -------
-    jones_vec : ndarray of shape (2,)
-        Jones vector corresponding to the specified polarization.
-    '''
-
-    if pol=="CR":
-        return np.array([1, -1j]) / np.sqrt(2)
-    elif pol=="CL":
-        return np.array([1, 1j]) / np.sqrt(2)
-    elif pol=="x":
-        return np.array([1, 0])
-    elif pol=="y":
-        return np.array([0, 1])
-    else:
-        return np.array([np.sin(pol), np.cos(pol)]) 
-    
-    
-def scalar_to_jones(scalar_wavefield, pol):
-    '''Calculate Jones wavefield for given polarization.
-    
-    Parameters
-    ----------
-    scalar_wavefield : ndarray of shape (Ny, Nx)
-        Input scalar wavefield.
-    pol : int or str
-        Polarization index (0 for Ex, 1 for Ey) or polarization type ("CR", "CL", "x", "y", or angle in radians).        
-    
-    Returns
-    -------
-    Jones wavefield : ndarray of shape (Ny, Nx, 2)
-        Jones wavefield corresponding to the specified polarization.
-    '''
-    return np.einsum("yx,s->yxs", scalar_wavefield, polarization_vector(pol))
 
 
 def E_j(E,pol):
@@ -327,17 +282,15 @@ def E_j(E,pol):
     pol : int or str
         Polarization index (0 for Ex, 1 for Ey) or polarization type ("CR'''
 
-    return np.einsum("yxs,s->yxs", E, polarization_vector(pol))
+    return np.einsum("yxs,s->yxs", E, light_beam.polarization_vector(pol))
 
-def E_I(E,pol):
+def E_I(E):
     '''Calculate intensity of Jones wavefield for given polarization.
     
     Parameters
     ----------
     E : ndarray of shape (Ny, Nx, 2)
-        Input Jones wavefield.
-    pol : int
-        Polarization index (0 for Ex, 1 for Ey).        
+        Input Jones wavefield.       
     '''
     I= (np.sum(np.abs(E)**2, axis=(2)))
     return I
