@@ -6,6 +6,39 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 
+def Fraunhofer_propagation_jones(E):
+    """Propagate a Jones wavefield to the far field using Fourier transform.
+
+    Parameters
+    ----------
+    E : ndarray of shape (Ny, Nx, 2)
+        Input Jones wavefield.
+
+    Returns
+    -------
+    E_far : ndarray of shape (Ny, Nx, 2)
+        Far-field Jones wavefield.
+    """
+    return scp.fft.fftshift(scp.fft.fft2(scp.fft.ifftshift(E, axes=(0, 1)), workers=-1, axes=(0, 1)), axes=(0, 1))
+
+def reconstruct(I):
+    """FTH reconstruction of scalar hologram.
+
+    Parameters
+    ----------
+    I : ndarray of shape (Ny, Nx)
+        Input intensity image.
+
+    Returns
+    -------
+    FTH reconstruction of the input hologram.
+
+    """
+
+    return scp.fft.fftshift(scp.fft.fft2(scp.fft.ifftshift(I), workers=-1))
+
+
+
 def shift_image(
     image: NDArray[np.floating],
     shift: ArrayLike,

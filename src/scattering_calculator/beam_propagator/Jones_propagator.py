@@ -1,5 +1,5 @@
 import numpy as np
-
+import scipy as scp
 
 # ============================================================
 # Utility: apply a Jones matrix field to a Jones wavefield
@@ -38,7 +38,7 @@ def jones_from_eps_slice(eps_slice, wavelength, thickness):
     n = np.sqrt(vals)                         # (Ny,Nx,2)
 
     # Propagation phases
-    print(k0, n[0,0], thickness)
+    #print(thickness*1e9,"\n n=", n[528,528], "\n vecs", vecs[528,528],"\n vals", vals[528,528]  )
     phase = np.exp(-1j * k0 * n * thickness)   # (Ny,Nx,2)
 
     # Build diagonal matrix field
@@ -49,6 +49,7 @@ def jones_from_eps_slice(eps_slice, wavelength, thickness):
     # J = V D V^{-1}
     vecs_inv = np.linalg.inv(vecs)
     J_field = vecs @ D @ vecs_inv
+    #print(J_field[528,528])
     return J_field
 
 
@@ -86,6 +87,7 @@ def propagate_jones_single_slice(illumination, eps_slice, wavelength, thickness)
 
     J_field = jones_from_eps_slice(eps_slice, wavelength, thickness)
     E_out = apply_jones_field(illumination, J_field)
+
     return E_out, J_field
 
 
