@@ -4,14 +4,14 @@ from scattering_calculator.utils import physics, image_transformator
 from scattering_calculator.experimental_conditions import light_beam
 
 class wavefronts:
-    def __init__(self, beam_parameters,sample,E_in, propagate=False):
+    def __init__(self, beam_parameters,eps_stack,layer_thicknesses,real_space_pixel_size,E_in, propagate=False):
         self.E_in=E_in
         self.exit_wave = self.propagate_jones_multislice(
             E_in=self.E_in,
-            eps_stack=np.array(sample.final_dielectric_tensor),
+            eps_stack=eps_stack
             wavelength=beam_parameters.wavelength,
-            thicknesses=sample.layer_thicknesses,
-            pixel_size=sample.real_space_pixel_size,
+            thicknesses=layer_thicknesses,
+            pixel_size=real_space_pixel_size,
             propagate=propagate
         )
         self.detector_wave = image_transformator.Fraunhofer_propagation_jones(self.exit_wave)
