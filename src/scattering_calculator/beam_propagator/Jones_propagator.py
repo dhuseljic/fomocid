@@ -21,8 +21,6 @@ class wavefronts:
         self.hologram = E_I(self.detector_wave)
 
 
-
-
     # ============================================================
     # Multislice propagation through stack of dielectric tensor images
     # ============================================================
@@ -69,8 +67,6 @@ class wavefronts:
                     E_in = self.propagate_free_space_jones(E_in, wavelength, dz, pixel_size)
 
         return E_in
-
-
 
 
     # ============================================================
@@ -256,8 +252,6 @@ class wavefronts:
             E_out[..., pol] = np.fft.ifft2(F_prop)
 
         return E_out
-
-
 
 
     # ============================================================

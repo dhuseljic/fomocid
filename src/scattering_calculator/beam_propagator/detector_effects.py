@@ -4,19 +4,36 @@ from scipy.ndimage import map_coordinates
 from scattering_calculator.experimental_conditions.detector import detector_layout
 from scattering_calculator.utils import image_transformator
 from scipy.interpolate import griddata
+from scipy import signal
 
 class detector_hologram:
-    def __init__(self, detector_layout, hologram, beam_parameters,real_space_pixel_size):
+    def __init__(self,
+                 detector_layout,
+                 hologram,
+                 beam_parameters,
+                 real_space_pixel_size,
+                 beamstop,
+                 ):
         self.detector_layout = detector_layout
         self.hologram = hologram
         self.beam_parameters = beam_parameters
         self.real_space_pixel_size=real_space_pixel_size
+        self.beamstop=beamstop
+
         self.extent_real = self.detector_layout.get_detector_extent_real_space()
         self.sample_shape = self.hologram.shape
         self.q_max_sim=np.pi / self.real_space_pixel_size
 
+        self.readout_noise_average=50
+        self.readout_noise_sigma=3
+        self.sigma_h_px=0.3
+        self.max_counts_per_image=90e3
+        self.counts_per_photon=100
+        self.number_frames=1
+        self.detector_threshold=64e3
 
-    def gnomonic_projection2(self) -> NDArray[np.float64]:
+
+    def gnomonic_projection(self) -> NDArray[np.float64]:
         '''Apply gnomonic projection to the hologram to correct for curvature of the Ewald sphere.
         Returns
         -------
@@ -71,40 +88,49 @@ class detector_hologram:
         ----------
         Author: RB_2020
         '''
+
         holo=self.hologram_detector
+        npx,npy=holo.shape
 
         # 4. simulate sample drift / vibrations AND SPATIAL INCOHERENCE
-        if sigma_h_px > 0:
-            kernel = np.outer(signal.gaussian(npx, sigma_h_px), signal.gaussian(npx, sigma_h_px))
+        if self.sigma_h_px > 0:
+            kernel = np.outer(signal.windows.gaussian(npx, self.sigma_h_px), signal.windows.gaussian(npx, self.sigma_h_px))
             if kernel.sum() > 0:
                 kernel /= kernel.sum()
                 holo = signal.fftconvolve(holo,kernel,mode='same')
 
         # 6. adjust the maximum count to 64000 for a single image
-        factor_holo=(max_counts_per_image)/holo.max()
+        factor_holo=(self.max_counts_per_image)/np.amax((1.-self.beamstop.beamstop)*holo)
+        
+        print("amax",np.amax((1.-self.beamstop.beamstop)*holo),np.amax(holo))
         holo*=factor_holo
 
         # consider you will have more than one frame
-        holo *= number_frames        
+        holo *= self.number_frames        
 
         # 7. add Poisson noise to number of photons (sqrt(counts/counts_per_photon))
-        holo /= counts_per_photon
+        holo /= self.counts_per_photon
         holo = np.random.poisson(holo).astype(np.float64)
 
 
         # 8. round to integer number of photons and convert back to counts
-        holo = np.round(holo,0)*counts_per_photon
+        holo = np.round(holo,0)*self.counts_per_photon
         
         # 9. add gaussian readout noise from detector
-        if (readout_noise_average > 0 or readout_noise_sigma > 0):
-            holo += np.random.normal(readout_noise_average*number_frames,readout_noise_sigma*np.sqrt(number_frames),holo.shape)
+        if (self.readout_noise_average > 0 or self.readout_noise_sigma > 0):
+            holo += np.random.normal(self.readout_noise_average*self.number_frames,self.readout_noise_sigma*np.sqrt(self.number_frames),holo.shape)
             
+        # 9.b cap image at thresholding camera value
+        holo=np.minimum(holo, self.detector_threshold)
+
+
         # 10 divide by frame number: it is an average
-        holo/= number_frames
+        holo/= self.number_frames
             
         # just making sure the final product is positive
         holo[holo<0]=0
 
         self.hologram_exp=holo.copy()
+
 
                         
