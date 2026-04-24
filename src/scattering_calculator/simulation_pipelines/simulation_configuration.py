@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Literal
 
 
+class _ConfigMixin:
+    def to_dict(self) -> dict:
+        """Return all configuration fields and their current values as a dict."""
+        return dataclasses.asdict(self)
+
+
 @dataclass(frozen=True)
-class XRayConfig:
+class XRayConfig(_ConfigMixin):
     energy: float  # eV
     photon_flux: float  # photons/s
     polarization: Literal["circular", "linear"] = "circular"
@@ -23,7 +30,7 @@ class XRayConfig:
 
 
 @dataclass(frozen=True)
-class SimulationConfig:
+class SimulationConfig(_ConfigMixin):
     shape: tuple[int, int] = (256, 256)  # px
     real_space_pixel_size: float = 10e-9  # m/px
     other_config: dict = field(default_factory=dict)
@@ -38,7 +45,7 @@ class SimulationConfig:
 
 
 @dataclass(frozen=True)
-class FrontApertureConfig:
+class FrontApertureConfig(_ConfigMixin):
     aperture_method: Literal["circular", "rectangular"] | None = "circular"
     aperture_thickness: float = 0.01  # m
     aperture_center: tuple[int, int] = (0, 0)  # px
@@ -52,26 +59,26 @@ class FrontApertureConfig:
 
 
 @dataclass(frozen=True)
-class IlluminationConfig:
+class IlluminationConfig(_ConfigMixin):
     illumination_function: Literal["gaussian"] | None = "gaussian"
     illumination_center: tuple[int, int] = (0, 0)  # px
     illumination_config: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class SampleConfig:
+class SampleConfig(_ConfigMixin):
     recipe: str = "Recipe"
     other_config: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class MagneticPatternConfig:
+class MagneticPatternConfig(_ConfigMixin):
     pattern_type_method: str = "skyrmion_pattern"
     pattern_config: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class DetectorConfig:
+class DetectorConfig(_ConfigMixin):
     shape: tuple[int, int] = (256, 256)  # px
     pixel_size: float = 55e-6  # m/px
     sample_to_detector_distance: float = 0.1  # m
@@ -101,7 +108,7 @@ class DetectorConfig:
 
 
 @dataclass(frozen=True)
-class BeamstopConfig:
+class BeamstopConfig(_ConfigMixin):
     bs_method: Literal["circular", "rectangular"] | None = "circular"
     bs_detector_distance: float = 0.01  # m
     bs_center: tuple[int, int] = (0, 0)  # px
