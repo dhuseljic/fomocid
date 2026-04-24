@@ -232,11 +232,12 @@ class illumination:
     def visualize_illumination(self) -> None:
         # Plot Gaussian beam
         fig, ax = plt.subplots(1, 2, figsize=(10, 5), sharex=True, sharey=True)
-        ax[0].imshow(np.abs(self.illumination) ** 2, extent=1e6 * self.extent_real)
+        ma = np.max(np.abs(self.illumination) ** 2)
+        ax[0].imshow(np.abs(self.illumination) ** 2, extent=1e6 * self.extent_real, vmin=0, vmax=ma)
         ax[0].set_title("Intensity")
         ax[0].set_xlabel("x in µm")
         ax[0].set_ylabel("y in µm")
-        ax[1].imshow(np.angle(self.illumination), extent=1e6 * self.extent_real)
+        ax[1].imshow(np.angle(self.illumination), extent=1e6 * self.extent_real, vmin=-np.pi, vmax=np.pi, cmap="hsv")
         ax[1].set_title("Phase")
         ax[1].set_xlabel("x in µm")
         ax[1].set_ylabel("y in µm")

@@ -1,56 +1,58 @@
 import numpy as np
 import scipy as scp
 
-# ============================================================
-# Utility: apply a Jones matrix field to a Jones wavefield
-# ============================================================
 
-def apply_jones_field(E_in, J_field):
-    """
-    E_in:   (Ny, Nx, 2)
-    J_field:(Ny, Nx, 2, 2)
 
-    returns:
-        E_out: (Ny, Nx, 2)
-    """
-    return np.einsum("yxab,yxb->yxa", J_field, E_in)
 
 
 # ============================================================
-# Build Jones propagator field from dielectric tensor field
+# Multislice propagation through stack of dielectric tensor images
 # ============================================================
 
-def jones_from_eps_slice(eps_slice, wavelength, thickness):
+def propagate_jones_multislice(illumination, eps_stack, wavelength, thicknesses, pixel_size, propagate=True):
     """
-    eps_slice: (Ny, Nx, 2, 2)
-    wavelength: scalar
-    thickness: scalar
+    Multislice propagation through a dielectric tensor stack.
 
-    returns:
-        J_field: (Ny, Nx, 2, 2)
+    Parameters
+    ----------
+    illumination : (Ny, Nx, 2) complex
+    eps_stack : (Nz, Ny, Nx, 2, 2) complex
+    wavelength : float
+    thicknesses : list of float
+        Thicknesses of each slice
+    pixel_size : float
+
+    Returns
+    -------
+    E : (Ny, Nx, 2) complex
+        Output field after all slices
     """
-    k0 = 2 * np.pi / wavelength
+    E = np.asarray(illumination, dtype=complex)
+    eps_stack = np.asarray(eps_stack, dtype=complex)
 
-    # Eigen-decomposition pixel by pixel
-    vals, vecs = np.linalg.eig(eps_slice)     # vals: (Ny,Nx,2), vecs: (Ny,Nx,2,2)
+    if E.ndim != 3 or E.shape[-1] != 2:
+        raise ValueError("illumination must have shape (Ny, Nx, 2)")
+    if eps_stack.ndim != 5 or eps_stack.shape[-2:] != (2, 2):
+        raise ValueError("eps_stack must have shape (Nz, Ny, Nx, 2, 2)")
+    if E.shape[:2] != eps_stack.shape[1:3]:
+        raise ValueError("illumination and eps_stack must have matching (Ny, Nx)")
 
-    # Refractive indices of local eigenmodes
-    n = np.sqrt(vals)                         # (Ny,Nx,2)
+    Nz = eps_stack.shape[0]
 
-    # Propagation phases
-    #print(thickness*1e9,"\n n=", n[528,528], "\n vecs", vecs[528,528],"\n vals", vals[528,528]  )
-    phase = np.exp(-1j * k0 * n * thickness)   # (Ny,Nx,2)
+    for iz in range(Nz):
+        eps_slice = eps_stack[iz]
+        dz = thicknesses[iz]
+        # Local Jones interaction
+        E = propagate_jones_single_slice(E, eps_slice, wavelength, dz)
 
-    # Build diagonal matrix field
-    D = np.zeros_like(eps_slice, dtype=complex)
-    D[..., 0, 0] = phase[..., 0]
-    D[..., 1, 1] = phase[..., 1]
+        # Free-space propagation between slices
+        if propagate:
+            if iz < Nz - 1:
+                E = propagate_free_space_jones(E, wavelength, dz, pixel_size)
 
-    # J = V D V^{-1}
-    vecs_inv = np.linalg.inv(vecs)
-    J_field = vecs @ D @ vecs_inv
-    #print(J_field[528,528])
-    return J_field
+    return E
+
+
 
 
 # ============================================================
@@ -73,7 +75,6 @@ def propagate_jones_single_slice(illumination, eps_slice, wavelength, thickness)
     Returns
     -------
     E_out : (Ny, Nx, 2) complex
-    J_field : (Ny, Nx, 2, 2) complex
     """
     illumination = np.asarray(illumination, dtype=complex)
     eps_slice = np.asarray(eps_slice, dtype=complex)
@@ -88,7 +89,114 @@ def propagate_jones_single_slice(illumination, eps_slice, wavelength, thickness)
     J_field = jones_from_eps_slice(eps_slice, wavelength, thickness)
     E_out = apply_jones_field(illumination, J_field)
 
-    return E_out, J_field
+    return E_out
+
+
+# ============================================================
+# Build Jones propagator field from dielectric tensor field
+# ============================================================
+
+def jones_from_eps_slice(eps_slice, wavelength, thickness):
+    """
+    eps_slice: (Ny, Nx, 2, 2)
+    wavelength: scalar
+    thickness: scalar
+
+    returns:
+        J_field: (Ny, Nx, 2, 2)
+    
+    Optimized: Detects isotropic pixels (diagonal with equal elements)
+    and computes their Jones matrix directly without eigendecomposition.
+    """
+    k0 = 2 * np.pi / wavelength
+    Ny, Nx = eps_slice.shape[:2]
+    
+    # Extract diagonal and off-diagonal elements
+    diag_00 = eps_slice[..., 0, 0]  # (Ny, Nx)
+    diag_11 = eps_slice[..., 1, 1]  # (Ny, Nx)
+    off_01 = eps_slice[..., 0, 1]   # (Ny, Nx)
+    off_10 = eps_slice[..., 1, 0]   # (Ny, Nx)
+    
+    # Check which pixels are isotropic: diagonal with equal elements
+    # Tolerance for floating point comparison
+    tol = 1e-10
+    is_isotropic = (
+        (np.abs(off_01) < tol) & 
+        (np.abs(off_10) < tol) & 
+        (np.abs(diag_00 - diag_11) < tol * np.abs(diag_00) + tol)
+    )
+    
+    # Initialize Jones field
+    J_field = np.zeros((Ny, Nx, 2, 2), dtype=complex)
+    
+    # Handle isotropic pixels directly (no eigendecomposition needed)
+    if np.any(is_isotropic):
+        n_iso = np.sqrt(diag_00[is_isotropic])
+        phase_iso = np.exp(-1j * k0 * n_iso * thickness)
+        
+        # For isotropic: J = diag(phase, phase)
+        J_field[is_isotropic, 0, 0] = phase_iso
+        J_field[is_isotropic, 1, 1] = phase_iso
+    
+    # Handle anisotropic pixels with eigendecomposition
+    if np.any(~is_isotropic):
+        eps_aniso = eps_slice[~is_isotropic]
+        
+        # Eigen-decomposition for anisotropic pixels only
+        vals, vecs = np.linalg.eig(eps_aniso)  # vals: (N_aniso, 2), vecs: (N_aniso, 2, 2)
+        
+        # Refractive indices
+        n = np.sqrt(vals)  # (N_aniso, 2)
+        
+        # Propagation phases
+        phase = np.exp(-1j * k0 * n * thickness)  # (N_aniso, 2)
+        
+        # Build diagonal phase matrices
+        D = np.zeros((len(eps_aniso), 2, 2), dtype=complex)
+        D[:, 0, 0] = phase[:, 0]
+        D[:, 1, 1] = phase[:, 1]
+        
+        # J = V D V^{-1}
+        vecs_inv = np.linalg.inv(vecs)
+        J_aniso = vecs @ D @ vecs_inv
+        
+        # Place anisotropic results in output
+        J_field[~is_isotropic] = J_aniso
+    
+    return J_field
+
+
+
+def jones_from_eps_slice_old(eps_slice, wavelength, thickness):
+    """
+    eps_slice: (Ny, Nx, 2, 2)
+    wavelength: scalar
+    thickness: scalar
+
+    returns:
+        J_field: (Ny, Nx, 2, 2)
+    """
+    k0 = 2 * np.pi / wavelength
+
+    # Eigen-decomposition for Hermitian matrices (faster than general eig)
+    vals, vecs = np.linalg.eig(eps_slice)     # vals: (Ny,Nx,2), vecs: (Ny,Nx,2,2)
+
+    print("---",eps_slice[eps_slice.shape[0]//2,eps_slice.shape[0]//2],"\n---",vals[eps_slice.shape[0]//2,eps_slice.shape[0]//2],"\n---",vecs[eps_slice.shape[0]//2,eps_slice.shape[0]//2])
+    print(".")# Refractive indices of local eigenmodes
+    n = np.sqrt(vals)                         # (Ny,Nx,2)
+
+    # Propagation phases
+    phase = np.exp(-1j * k0 * n * thickness)   # (Ny,Nx,2)
+
+    # Build diagonal matrix field
+    D = np.zeros_like(eps_slice, dtype=complex)
+    D[..., 0, 0] = phase[..., 0]
+    D[..., 1, 1] = phase[..., 1]
+
+    # J = V D V^{-1}
+    vecs_inv = np.linalg.inv(vecs)
+    J_field = vecs @ D @ vecs_inv
+    return J_field
 
 
 # ============================================================
@@ -133,52 +241,17 @@ def propagate_free_space_jones(E_in, wavelength, dz, pixel_size):
     return E_out
 
 
+
+
 # ============================================================
-# Multislice propagation through stack of dielectric tensor images
+# Utility: apply a Jones matrix field to a Jones wavefield
 # ============================================================
-
-def propagate_jones_multislice(illumination, eps_stack, wavelength, thicknesses, pixel_size, propagate=True):
+def apply_jones_field(E_in, J_field):
     """
-    Multislice propagation through a dielectric tensor stack.
+    E_in:   (Ny, Nx, 2)
+    J_field:(Ny, Nx, 2, 2)
 
-    Parameters
-    ----------
-    illumination : (Ny, Nx, 2) complex
-    eps_stack : (Nz, Ny, Nx, 2, 2) complex
-    wavelength : float
-    thicknesses : list of float
-        Thicknesses of each slice
-    pixel_size : float
-
-    Returns
-    -------
-    E : (Ny, Nx, 2) complex
-        Output field after all slices
+    returns:
+        E_out: (Ny, Nx, 2)
     """
-    E = np.asarray(illumination, dtype=complex)
-    eps_stack = np.asarray(eps_stack, dtype=complex)
-
-    if E.ndim != 3 or E.shape[-1] != 2:
-        raise ValueError("illumination must have shape (Ny, Nx, 2)")
-    if eps_stack.ndim != 5 or eps_stack.shape[-2:] != (2, 2):
-        raise ValueError("eps_stack must have shape (Nz, Ny, Nx, 2, 2)")
-    if E.shape[:2] != eps_stack.shape[1:3]:
-        raise ValueError("illumination and eps_stack must have matching (Ny, Nx)")
-
-    Nz = eps_stack.shape[0]
-
-    for iz in range(Nz):
-        eps_slice = eps_stack[iz]
-        dz = thicknesses[iz]
-        # Local Jones interaction
-        E, _ = propagate_jones_single_slice(E, eps_slice, wavelength, dz)
-
-        # Free-space propagation between slices
-        if propagate:
-            if iz < Nz - 1:
-                E = propagate_free_space_jones(E, wavelength, dz, pixel_size)
-
-    return E
-
-
-
+    return np.einsum("yxab,yxb->yxa", J_field, E_in)
