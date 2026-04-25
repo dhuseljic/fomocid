@@ -231,7 +231,7 @@ class detector_hologram:
         self.sigma_h_px=0.3
         self.max_counts_per_image=60e3
         self.counts_per_photon=100
-        self.number_frames=50
+        self.number_frames=3000
         self.detector_threshold=64e3
         self.sigma_photon=0.75
         self.photon_n_classes = 16
@@ -364,7 +364,7 @@ class detector_hologram:
 
         # 9. convert photons back to detector counts
         holo = photon_counts * self.counts_per_photon
-        holo = np.round(holo, 0)
+        
 
         # 10. add gaussian readout noise from detector
         if (self.readout_noise_average > 0 or self.readout_noise_sigma > 0):
@@ -374,6 +374,7 @@ class detector_hologram:
                 holo.shape)
             
         # 11 cap image at thresholding camera value
+        holo = np.round(holo, 0)
         holo=np.minimum(holo, self.number_frames*self.detector_threshold)
 
         # 12 divide by frame number: it is an average

@@ -629,7 +629,7 @@ class Structure:
         # Build material dielectric tensor everywhere
         out += eps0[:, None, None, :, :]
         out += m[..., 2, None, None] * eps_mz[:, None, None, :, :]
-        out += (m[..., 0] - m[..., 1])[..., None, None] * eps_xy[:, None, None, :, :]
+        out += (np.abs(m[..., 0]) - np.abs(m[..., 1]))[..., None, None] * eps_xy[:, None, None, :, :]
 
         # Apply material mask once
         out *= mask[..., None, None]
