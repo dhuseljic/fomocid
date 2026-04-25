@@ -168,7 +168,7 @@ class wavefronts:
         tol = 1e-14
 
         # ------------------------------------------------------------
-        # 0. Ultra-Fast path: spatially uniform dielectric tensor
+        # 0. Ultra-Fast path: spatially uniform dielectric tensor. almost useless because materials are never homogeneous (at least there is the ref hole)
         # ------------------------------------------------------------
         if False:
             eps0 = eps_slice[0, 0]
@@ -397,7 +397,7 @@ class wavefronts:
 
 
 
-    def jones_from_eps_slice_old(self,eps_slice, wavelength, thickness):
+    def jones_from_eps_slice_oldold(self,eps_slice, wavelength, thickness):
         """
         eps_slice: (Ny, Nx, 2, 2)
         wavelength: scalar

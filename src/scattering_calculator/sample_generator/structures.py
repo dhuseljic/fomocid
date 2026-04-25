@@ -613,6 +613,36 @@ class Structure:
     
 
     def calculate_final_dielectric_tensor(self) -> None:
+        self.dielectric_tensors = np.asarray(self.dielectric_tensors)
+
+        mask = self.mask              # (Nz, Ny, Nx)
+        m = self.magnetization        # (Nz, Ny, Nx, 3)
+
+        eps0   = self.dielectric_tensors[:, 0]  # (Nz, 2, 2)
+        eps_mz = self.dielectric_tensors[:, 1]  # (Nz, 2, 2)
+        eps_xy = self.dielectric_tensors[:, 2]  # (Nz, 2, 2)
+
+        Nz, Ny, Nx = mask.shape
+
+        out = np.zeros((Nz, Ny, Nx, 2, 2), dtype=complex)
+
+        # Build material dielectric tensor everywhere
+        out += eps0[:, None, None, :, :]
+        out += m[..., 2, None, None] * eps_mz[:, None, None, :, :]
+        out += (m[..., 0] - m[..., 1])[..., None, None] * eps_xy[:, None, None, :, :]
+
+        # Apply material mask once
+        out *= mask[..., None, None]
+
+        # Add vacuum identity outside material
+        vac = 1.0 - mask
+        out[..., 0, 0] += vac
+        out[..., 1, 1] += vac
+
+        self.final_dielectric_tensor = out
+        
+
+    def calculate_final_dielectric_tensor_old(self) -> None:
         dielectric_tensor_vacuum=np.array([[1.+0.j, 0.+0.j],[0.+0.j, 1+0.j]])
         self.dielectric_tensors=np.array(self.dielectric_tensors)
         self.final_dielectric_tensor=np.einsum("ij,zyx->zyxij", dielectric_tensor_vacuum, 1-self.mask)+np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,0,:,:], self.mask)+np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,1,:,:], self.magnetization[:,:,:,2])+np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,2,:,:], self.magnetization[:,:,:,0])-np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,2,:,:], self.magnetization[:,:,:,1])
