@@ -232,7 +232,7 @@ class detector_hologram:
         self.max_counts_per_image=90e3
         self.counts_per_photon=100
         self.number_frames=1
-        self.detector_threshold=64e3
+        self.detector_threshold=64e33
         self.sigma_photon=0.75
         self.photon_n_classes = 16
         self.photon_n_variants = 6
@@ -258,8 +258,6 @@ class detector_hologram:
         detx = self.detector_layout.detx
         dety = self.detector_layout.dety
    
-        
-
         # generate the qx, qy coordinates in the far field based on the real-space coordinates of the illumination plane
         # these are the q of the far field before the gnomonic projection, which are given by qx = (2 * pi / real_space_pixel_size) * (nx / sample_shape[1]) and qy = (2 * pi / real_space_pixel_size) * (ny / sample_shape[0])
         #qx = (np.arange(self.sample_shape[1])) * (np.pi/self.real_space_pixel_size) 
@@ -277,9 +275,9 @@ class detector_hologram:
 
         ## we just need to rescale detqx so they are expressed in absolute pixel value
         self.hologram_detector =map_coordinates(self.hologram, 
-                                                [detqx/Dq*self.hologram.shape[0]+1*self.hologram.shape[0]/2,
-                                                 detqy/Dq*self.hologram.shape[0]+1*self.hologram.shape[0]/2], 
-                                                 order=3, mode='constant', cval=0)
+                                                [detqy/Dq*self.hologram.shape[0]+1*self.hologram.shape[0]/2,
+                                                 detqx/Dq*self.hologram.shape[1]+1*self.hologram.shape[1]/2], 
+                                                 order=5, mode='constant', cval=0)
         # now we calculate the spatial coordinates on the detector plane corresponding to these qx, qy coordinates, 
    
 
