@@ -56,6 +56,7 @@ class wavefronts:
         Nz = eps_stack.shape[0]
 
         for iz in range(Nz):
+            print(iz)
             eps_slice = eps_stack[iz]
             dz = thicknesses[iz]
             # Local Jones interaction
