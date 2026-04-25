@@ -229,10 +229,10 @@ class detector_hologram:
         self.readout_noise_average=50
         self.readout_noise_sigma=3
         self.sigma_h_px=0.3
-        self.max_counts_per_image=90e3
+        self.max_counts_per_image=60e3
         self.counts_per_photon=100
-        self.number_frames=1
-        self.detector_threshold=64e33
+        self.number_frames=50
+        self.detector_threshold=64e3
         self.sigma_photon=0.75
         self.photon_n_classes = 16
         self.photon_n_variants = 6
@@ -375,7 +375,6 @@ class detector_hologram:
             
         # 11 cap image at thresholding camera value
         holo=np.minimum(holo, self.number_frames*self.detector_threshold)
-
 
         # 12 divide by frame number: it is an average
         holo/= self.number_frames

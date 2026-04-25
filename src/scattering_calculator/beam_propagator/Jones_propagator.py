@@ -162,6 +162,17 @@ class wavefronts:
 
 
     def jones_from_eps_slice(self, eps_slice, wavelength, thickness):
+        """
+        Fast vectorized Jones propagator for a field of 2x2 dielectric tensors.
+
+        eps_slice: (Ny, Nx, 2, 2)
+        returns:   (Ny, Nx, 2, 2)
+
+        Computes:
+            J = exp(-i k0 thickness sqrt(eps))
+        using the 2x2 matrix-function identity:
+            f(eps) = alpha I + beta eps
+        """
 
         k0 = 2 * np.pi / wavelength
         Ny, Nx = eps_slice.shape[:2]
