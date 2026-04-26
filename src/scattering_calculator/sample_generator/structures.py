@@ -927,6 +927,7 @@ class Apertures3D:
             Standard deviation of the Gaussian smoothing filter in pixels.
             No smoothing when ``None`` or ``0``.
         """
+
         if use_real_space_coordinates:
             # Convert radius from metres to pixels using the real-space grid
             pixel_radius = radius / np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
@@ -934,16 +935,18 @@ class Apertures3D:
                 np.abs(np.append(0, np.cumsum(self.layer_thicknesses)) - depth)
             )
             pixel_sigma = sigma / np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
+            pixel_center=np.array(center)/self.pixel_size+self.shape[1]//2
         else:
             pixel_radius = radius
             pixel_depth = depth
             pixel_sigma = sigma
+            pixel_center=np.array(center)
 
         #self.aperture_design = np.ones(self.shape)
         print(pixel_depth)
         for i in range(0, pixel_depth ):
             self.aperture_design[i, :, :] *= (1 - circle_mask3D(
-                self.shape, center, pixel_radius, pixel_sigma
+                self.shape, pixel_center, pixel_radius, pixel_sigma
             ))
 
     def return_aperture_mask(self) -> NDArray[np.float64]:

@@ -137,28 +137,24 @@ class beam_parameters:
     ----------
     photon_energy : float
         Photon energy in eV. Used to compute ``self.wavelength``.
-    photon_flux : float
-        Photon flux in photons/s.
-
+    pol: string or float
+        Polarization "CR", "CL", "LH", "LV", float angle in radians
     Attributes
     ----------
     energy : float
         Photon energy in eV.
     wavelength : float
         Photon wavelength in metres derived from ``photon_energy``.
-    photon_flux : float
-        Photon flux in photons/s.
     illumination : complex ndarray
         Beam cross-section set by :meth:`gauss_beam`.
     pol : str
         Polarization type, e.g. "CR", "CL", "x", "y", or angle in radians.
     """
 
-    def __init__(self, photon_energy: float, photon_flux: float, pol) -> None:
+    def __init__(self, photon_energy: float, pol) -> None:
         self.energy: float = photon_energy  # in eV
         self.wavelength: float = physics.photon_energy_wavelength(photon_energy)
         self.k: float = 2*np.pi / physics.photon_energy_wavelength(photon_energy)
-        self.photon_flux: float = photon_flux  # in photons/s
         self.pol=pol
 
 
@@ -208,6 +204,35 @@ class illumination:
         self.calc_real_space_coordinates()
         self.extent_real = self.get_illumination_extent_real_space()
         
+    def gauss_beam(
+        self,
+        center: ArrayLike,
+        distance: float,
+        fwhm: float,
+    ) -> None:
+        """Compute the Gaussian beam cross-section and store in ``self.illumination``.
+
+        Uses the wavelength stored in ``self.wavelength``.
+
+        Parameters
+        ----------
+        center : array-like of float
+            Beam centre coordinates ``[y_center, x_center]`` in meters, with respect to the sample
+            (0,0) is the sample center
+        distance : float
+            Propagation distance from the beam waist in metres.
+        fwhm : float
+            Full-width at half-maximum of the beam at the waist in metres.
+        """
+        self.illumination = gauss_beam(
+            self.shape,
+            self.pixel_size,
+            center/self.pixel_size+self.shape[0]//2,
+            distance,
+            fwhm,
+            self.beam_parameters.wavelength,
+        )
+
     def get_illumination_jones(self) -> None:
         self.illumination_jones=scalar_to_jones(self.illumination, self.beam_parameters.pol)
 
@@ -247,33 +272,7 @@ class illumination:
         """Set the beam cross-section to a plane wave with uniform amplitude and zero phase."""
         self.illumination = np.ones(shape, dtype=complex)
 
-    def gauss_beam(
-        self,
-        center: ArrayLike,
-        distance: float,
-        fwhm: float,
-    ) -> None:
-        """Compute the Gaussian beam cross-section and store in ``self.illumination``.
 
-        Uses the wavelength stored in ``self.wavelength``.
-
-        Parameters
-        ----------
-        center : array-like of float
-            Beam centre coordinates ``[y_center, x_center]`` in pixels.
-        distance : float
-            Propagation distance from the beam waist in metres.
-        fwhm : float
-            Full-width at half-maximum of the beam at the waist in metres.
-        """
-        self.illumination = gauss_beam(
-            self.shape,
-            self.pixel_size,
-            center,
-            distance,
-            fwhm,
-            self.beam_parameters.wavelength,
-        )
 
     def return_illumination(self) -> NDArray[np.complex128] | None:
         """Return the current beam cross-section array."""

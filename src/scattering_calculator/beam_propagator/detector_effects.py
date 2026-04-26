@@ -1,11 +1,9 @@
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from scipy.ndimage import map_coordinates
 from scattering_calculator.experimental_conditions.detector import detector_layout
-from scattering_calculator.utils import image_transformator
-from scipy.interpolate import griddata
 from scipy import signal
 from scipy.ndimage import gaussian_filter
+from scipy.ndimage import map_coordinates
 
 
 
@@ -222,17 +220,17 @@ class detector_hologram:
         self.real_space_pixel_size=real_space_pixel_size
         self.beamstop=beamstop
 
-        self.extent_real = self.detector_layout.get_detector_extent_real_space()
-        self.sample_shape = self.hologram.shape
-        self.q_max_sim=np.pi / self.real_space_pixel_size
+        # acquisition details
+        self.number_frames=10
+        self.max_counts_per_image=62e3
 
+        # detector readout
         self.readout_noise_average=50
         self.readout_noise_sigma=3
-        self.sigma_h_px=0.3
-        self.max_counts_per_image=60e3
-        self.counts_per_photon=100
-        self.number_frames=3000
         self.detector_threshold=64e3
+
+        # photon-detector interaction details
+        self.counts_per_photon=100
         self.sigma_photon=0.75
         self.photon_n_classes = 16
         self.photon_n_variants = 6
@@ -241,46 +239,11 @@ class detector_hologram:
         self.photon_irregularity = 2.0
         self.regenerate_photon_kernels = True
 
+        # beam properties
+        self.sigma_y=0.3
+        self.sigma_x=0.3
 
-
-    def gnomonic_projection(self) -> NDArray[np.float64]:
-        '''Apply gnomonic projection to the hologram to correct for curvature of the Ewald sphere.
-        Returns
-        -------
-            hologram_gnomonic : ndarray of shape (Ny, Nx)
-            Gnomonic-projected hologram.        
-        '''
-        l= self.beam_parameters.wavelength
-        k = 2 * np.pi / self.beam_parameters.wavelength
-        detqx = self.detector_layout.detqx
-        detqy = self.detector_layout.detqy
-        z = self.detector_layout.distance_sample_detector
-        detx = self.detector_layout.detx
-        dety = self.detector_layout.dety
    
-        # generate the qx, qy coordinates in the far field based on the real-space coordinates of the illumination plane
-        # these are the q of the far field before the gnomonic projection, which are given by qx = (2 * pi / real_space_pixel_size) * (nx / sample_shape[1]) and qy = (2 * pi / real_space_pixel_size) * (ny / sample_shape[0])
-        #qx = (np.arange(self.sample_shape[1])) * (np.pi/self.real_space_pixel_size) 
-        #qy = (np.arange(self.sample_shape[0])) * (np.pi/self.real_space_pixel_size) 
-        #QX, QY = np.meshgrid(qx, qy)
-        # how much is a pixel in q space
-        Dq=np.pi/self.real_space_pixel_size
-
-        # we can use detx and dety to calculate the qx, qy coordinates in the far field corresponding to the real-space coordinates of the detector pixels
-        # and then we can use these to decide where to sample hologram to have a gnomonic projection effect.
-        # so, self.qxy are the q-coordinates the detector is actually mapping
-        # while QX,QY are the perfect q coordinates of the sample simulation.
-        # to get an actual hologram, we must map hologram(QX,QY) in the (detqx, detqy) coordinates
-        #we do this using interpolation
-
-        ## we just need to rescale detqx so they are expressed in absolute pixel value
-        self.hologram_detector =map_coordinates(self.hologram, 
-                                                [detqy/Dq*self.hologram.shape[0]+1*self.hologram.shape[0]/2,
-                                                 detqx/Dq*self.hologram.shape[1]+1*self.hologram.shape[1]/2], 
-                                                 order=5, mode='constant', cval=0)
-        # now we calculate the spatial coordinates on the detector plane corresponding to these qx, qy coordinates, 
-   
-
     def add_noise(self):
         '''
         Given the hologram, the function simulates the holograms introducing drift,
@@ -295,33 +258,36 @@ class detector_hologram:
         ----------
         Author: RB_2020
         '''
+
+        # 0. we start with holo, the FFT of the exit wave, hence the distribution of photons (or counts) at a certain point in the detector for a single image
         rng = np.random.default_rng()
         holo=self.hologram_detector
         npx,npy=holo.shape
 
-        # 4. simulate sample drift / vibrations AND SPATIAL INCOHERENCE
-        if self.sigma_h_px > 0:
-            kernel = np.outer(signal.windows.gaussian(npx, self.sigma_h_px), signal.windows.gaussian(npx, self.sigma_h_px))
+        # 1. convolution with a gaussian to simulate vibrations and partial transversal coherence
+        if (self.sigma_x > 0) or (self.sigma_y > 0):
+            kernel = np.outer(signal.windows.gaussian(npx, self.sigma_y), signal.windows.gaussian(npx, self.sigma_x))
             if kernel.sum() > 0:
                 kernel /= kernel.sum()
                 holo = signal.fftconvolve(holo,kernel,mode='same')
 
-        # 6. adjust the maximum count to 64000 for a single image
-        factor_holo=(self.max_counts_per_image)/np.amax((1.-self.beamstop.beamstop)*holo)
-        holo*=factor_holo
+        # 2. adjust the maximum count to self.max_counts_per_image for a single frame.
+        # holo is not the count number
+        holo*=((self.max_counts_per_image)/np.amax((1.-self.beamstop.beamstop)*holo))
 
-        # consider you will have more than one frame
+        # 3. multiply by frame number to get counts of the entire set
         holo *= self.number_frames        
 
-        # 7.a convert detector counts to expected photon number
+        # 4. divide by counts_per_photons to get photon number
         expected_photons = holo / self.counts_per_photon
         expected_photons[expected_photons < 0] = 0
 
-        # 7.b Poisson photon sampling
+        # 5. Poisson photon sampling. Add poisson noise to number of photons
         photon_counts = rng.poisson(expected_photons).astype(np.int64)
  
 
-        # 8.b photon splatting with spatial kernel classes + event variants
+        # 6. photon splatting with spatial kernel classes + event variants
+        # this makes the photon events blobs affecting multiple pixels
         if self.sigma_photon > 0:
             # Create class map if it does not exist yet
             if not hasattr(self, "photon_class_map"):
@@ -362,29 +328,67 @@ class detector_hologram:
             )
 
 
-        # 9. convert photons back to detector counts
+        # 7. convert photons back to detector counts
         holo = photon_counts * self.counts_per_photon
         
 
-        # 10. add gaussian readout noise from detector
+        # 8. add gaussian readout noise from detector
         if (self.readout_noise_average > 0 or self.readout_noise_sigma > 0):
             holo += np.random.normal(
                 self.readout_noise_average*self.number_frames,
                 self.readout_noise_sigma*np.sqrt(self.number_frames),
                 holo.shape)
             
-        # 11 cap image at thresholding camera value
+        # 9. round to integers and cap image at thresholding camera value
         holo = np.round(holo, 0)
         holo=np.minimum(holo, self.number_frames*self.detector_threshold)
 
-        # 12 divide by frame number: it is an average
+        # 10. divide by frame number: it is an average
         holo/= self.number_frames
             
-        # just making sure the final product is positive
+        # 11. just making sure the final product is positive
         holo[holo<0]=0
 
         self.hologram_exp=holo.copy()
 
+
+
+    def gnomonic_projection(self) -> NDArray[np.float64]:
+        '''Apply gnomonic projection to the hologram to correct for curvature of the Ewald sphere.
+        Returns
+        -------
+            hologram_gnomonic : ndarray of shape (Ny, Nx)
+            Gnomonic-projected hologram.        
+        '''
+        l= self.beam_parameters.wavelength
+        k = 2 * np.pi / self.beam_parameters.wavelength
+        detqx = self.detector_layout.detqx
+        detqy = self.detector_layout.detqy
+        z = self.detector_layout.distance_sample_detector
+        detx = self.detector_layout.detx
+        dety = self.detector_layout.dety
+   
+        # generate the qx, qy coordinates in the far field based on the real-space coordinates of the illumination plane
+        # these are the q of the far field before the gnomonic projection, which are given by qx = (2 * pi / real_space_pixel_size) * (nx / sample_shape[1]) and qy = (2 * pi / real_space_pixel_size) * (ny / sample_shape[0])
+        #qx = (np.arange(self.sample_shape[1])) * (np.pi/self.real_space_pixel_size) 
+        #qy = (np.arange(self.sample_shape[0])) * (np.pi/self.real_space_pixel_size) 
+        #QX, QY = np.meshgrid(qx, qy)
+        # how much is a pixel in q space
+        Dq=np.pi/self.real_space_pixel_size
+
+        # we can use detx and dety to calculate the qx, qy coordinates in the far field corresponding to the real-space coordinates of the detector pixels
+        # and then we can use these to decide where to sample hologram to have a gnomonic projection effect.
+        # so, self.qxy are the q-coordinates the detector is actually mapping
+        # while QX,QY are the perfect q coordinates of the sample simulation.
+        # to get an actual hologram, we must map hologram(QX,QY) in the (detqx, detqy) coordinates
+        #we do this using interpolation
+
+        ## we just need to rescale detqx so they are expressed in absolute pixel value
+        self.hologram_detector =map_coordinates(self.hologram, 
+                                                [detqy/Dq*self.hologram.shape[0]+1*self.hologram.shape[0]/2,
+                                                 detqx/Dq*self.hologram.shape[1]+1*self.hologram.shape[1]/2], 
+                                                 order=5, mode='constant', cval=0)
+        # now we calculate the spatial coordinates on the detector plane corresponding to these qx, qy coordinates, 
 
 
 
