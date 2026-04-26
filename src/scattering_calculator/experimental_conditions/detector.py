@@ -213,8 +213,8 @@ class detector_hologram:
         self.beamstop=beamstop
 
         # acquisition details
-        self.number_frames=1
-        self.max_counts_per_image=62e3
+        self.number_frames=40
+        self.max_counts_per_image=60e3
 
         # detector readout
         self.readout_noise_average=50
@@ -232,8 +232,8 @@ class detector_hologram:
         self.regenerate_photon_kernels = True
 
         # beam properties
-        self.sigma_y=0.3
-        self.sigma_x=0.3
+        self.sigma_y=0.1
+        self.sigma_x=0.1
 
    
     def add_noise(self):

@@ -56,7 +56,7 @@ class wavefronts:
         Nz = eps_stack.shape[0]
 
         for iz in range(Nz):
-            print(iz)
+            #print(iz)
             eps_slice = eps_stack[iz]
             dz = thicknesses[iz]
             # Local Jones interaction
@@ -469,7 +469,6 @@ class wavefronts:
         ky = 2 * np.pi * FY
 
         kz = np.sqrt((k0**2 - kx**2 - ky**2) + 0j)
-        #print(kz,dz,kz*dz)
         H = np.exp(-1j * kz * dz)
 
         E_out = np.zeros_like(E_in, dtype=complex)

@@ -943,7 +943,7 @@ class Apertures3D:
             pixel_center=np.array(center)
 
         #self.aperture_design = np.ones(self.shape)
-        print(pixel_depth)
+        #print(pixel_depth)
         for i in range(0, pixel_depth ):
             self.aperture_design[i, :, :] *= (1 - circle_mask3D(
                 self.shape, pixel_center, pixel_radius, pixel_sigma
