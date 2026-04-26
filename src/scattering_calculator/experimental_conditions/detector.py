@@ -213,7 +213,7 @@ class detector_hologram:
         self.beamstop=beamstop
 
         # acquisition details
-        self.number_frames=200
+        self.number_frames=20
         self.max_counts_per_image=60e3
 
         # detector readout
@@ -322,23 +322,26 @@ class detector_hologram:
 
         # 7. convert photons back to detector counts
         holo = photon_counts * self.counts_per_photon
-        
 
-        # 8. add gaussian readout noise from detector
+
+        # 8. apply beamstop mask to shadow
+        holo*=(1.- self.beamstop.beamstop)
+
+        # 9. add gaussian readout noise from detector
         if (self.readout_noise_average > 0 or self.readout_noise_sigma > 0):
             holo += np.random.normal(
                 self.readout_noise_average*self.number_frames,
                 self.readout_noise_sigma*np.sqrt(self.number_frames),
                 holo.shape)
             
-        # 9. round to integers and cap image at thresholding camera value
+        # 10. round to integers and cap image at thresholding camera value
         holo = np.round(holo, 0)
         holo=np.minimum(holo, self.number_frames*self.detector_threshold)
 
-        # 10. divide by frame number: it is an average
+        # 11. divide by frame number: it is an average
         holo/= self.number_frames
             
-        # 11. just making sure the final product is positive
+        # 12. just making sure the final product is positive
         holo[holo<0]=0
 
         self.hologram_exp=holo.copy()
