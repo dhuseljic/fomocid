@@ -118,64 +118,21 @@ class wavefronts:
         return E_out
 
 
-    def jones_from_single_eps(self, eps, wavelength, thickness):
-        k0 = 2 * np.pi / wavelength
-        tol = 1e-14
-
-        a = eps[0, 0]
-        b = eps[0, 1]
-        c = eps[1, 0]
-        d = eps[1, 1]
-
-        # Diagonal case
-        if abs(b) < tol and abs(c) < tol:
-            J = np.zeros((2, 2), dtype=complex)
-            J[0, 0] = np.exp(-1j * k0 * thickness * np.sqrt(a))
-            J[1, 1] = np.exp(-1j * k0 * thickness * np.sqrt(d))
-            return J
-
-        # General 2x2 analytic case
-        tr = a + d
-        discr = (a - d)**2 + 4 * b * c
-        root = np.sqrt(discr)
-
-        lam1 = 0.5 * (tr + root)
-        lam2 = 0.5 * (tr - root)
-
-        f1 = np.exp(-1j * k0 * thickness * np.sqrt(lam1))
-        f2 = np.exp(-1j * k0 * thickness * np.sqrt(lam2))
-
-        denom = lam1 - lam2
-
-        if abs(denom) > tol:
-            beta = (f1 - f2) / denom
-            alpha = (lam1 * f2 - lam2 * f1) / denom
-        else:
-            lam = 0.5 * (lam1 + lam2)
-            sqrt_lam = np.sqrt(lam)
-            f = np.exp(-1j * k0 * thickness * sqrt_lam)
-            fp = f * (-1j * k0 * thickness) / (2 * sqrt_lam)
-
-            beta = fp
-            alpha = f - lam * fp
-
-        J = np.empty((2, 2), dtype=complex)
-        J[0, 0] = alpha + beta * a
-        J[0, 1] = beta * b
-        J[1, 0] = beta * c
-        J[1, 1] = alpha + beta * d
-
-        return J
-
-
     # ============================================================
     # Build Jones propagator field from dielectric tensor field
     # ============================================================
 
     def jones_from_eps_slice(self, eps_slice, wavelength, thickness):
         """
+        Fast vectorized Jones propagator for a field of 2x2 dielectric tensors.
+
         eps_slice: (Ny, Nx, 2, 2)
         returns:   (Ny, Nx, 2, 2)
+
+        Computes:
+            J = exp(-i k0 thickness sqrt(eps))
+        using the 2x2 matrix-function identity:
+            f(eps) = alpha I + beta eps
         """
         phase = -1j * (2 * np.pi / wavelength) * thickness
         tol = 1e-14
@@ -268,111 +225,6 @@ class wavefronts:
         return J
     
 
-
-    def jones_from_eps_slice_old(self, eps_slice, wavelength, thickness):
-        """
-        Fast vectorized Jones propagator for a field of 2x2 dielectric tensors.
-
-        eps_slice: (Ny, Nx, 2, 2)
-        returns:   (Ny, Nx, 2, 2)
-
-        Computes:
-            J = exp(-i k0 thickness sqrt(eps))
-        using the 2x2 matrix-function identity:
-            f(eps) = alpha I + beta eps
-        """
-
-        k0 = 2 * np.pi / wavelength
-        phase = -1j * k0* thickness
-        Ny, Nx = eps_slice.shape[:2]
-        tol = 1e-14
-
-        # ------------------------------------------------------------
-        # 0. Ultra-Fast path: spatially uniform dielectric tensor. almost useless because materials are never homogeneous (at least there is the ref hole)
-        # ------------------------------------------------------------
-        if False:
-            eps0 = eps_slice[0, 0]
-            if np.all(np.abs(eps_slice - eps0) < tol):
-                J0 = self.jones_from_single_eps(eps0, wavelength, thickness)
-                return np.broadcast_to(J0, (Ny, Nx, 2, 2)).copy()
-
-        # ------------------------------------------------------------
-        # Otherwise fall back to per-pixel optimized version
-        # ------------------------------------------------------------
-        
-        a = eps_slice[..., 0, 0]
-        b = eps_slice[..., 0, 1]
-        c = eps_slice[..., 1, 0]
-        d = eps_slice[..., 1, 1]
-
-        J = np.zeros_like(eps_slice, dtype=complex)
-
-        # ------------------------------------------------------------
-        # 1. Fast path: diagonal matrices
-        # ------------------------------------------------------------
-        is_diag = (np.abs(b) < tol) & (np.abs(c) < tol)
-
-        if np.any(is_diag):
-            J[..., 0, 0][is_diag] = np.exp(phase * np.sqrt(a[is_diag]))
-            J[..., 1, 1][is_diag] = np.exp(phase * np.sqrt(d[is_diag]))
-
-        # ------------------------------------------------------------
-        # 2. General 2x2 analytic matrix function
-        # ------------------------------------------------------------
-        mask = ~is_diag
-
-        if np.any(mask):
-            aa = a[mask]
-            bb = b[mask]
-            cc = c[mask]
-            dd = d[mask]
-
-            # Eigenvalues of 2x2 matrix [[a,b],[c,d]]
-            tr = aa + dd
-            discr = (aa - dd)**2 + 4 * bb * cc
-            root = np.sqrt(discr)
-
-            lam1 = 0.5 * (tr + root)
-            lam2 = 0.5 * (tr - root)
-
-            f1 = np.exp(phase * np.sqrt(lam1))
-            f2 = np.exp(phase * np.sqrt(lam2))
-
-            denom = lam1 - lam2
-            regular = np.abs(denom) > tol
-
-            alpha = np.empty_like(lam1, dtype=complex)
-            beta = np.empty_like(lam1, dtype=complex)
-
-            # Non-degenerate case
-            beta[regular] = (f1[regular] - f2[regular]) / denom[regular]
-            alpha[regular] = (
-                lam1[regular] * f2[regular]
-                - lam2[regular] * f1[regular]
-            ) / denom[regular]
-
-            # Degenerate case: lam1 ~= lam2
-            # f(eps) ≈ f(lam) I + f'(lam) (eps - lam I)
-            # so beta = f'(lam), alpha = f(lam) - lam f'(lam)
-            deg = ~regular
-            if np.any(deg):
-                lam = 0.5 * (lam1[deg] + lam2[deg])
-                sqrt_lam = np.sqrt(lam)
-                f = np.exp(-1j * k0 * thickness * sqrt_lam)
-                fp = f * (-1j * k0 * thickness) / (2 * sqrt_lam)
-
-                beta[deg] = fp
-                alpha[deg] = f - lam * fp
-
-            J_sub = np.empty((aa.size, 2, 2), dtype=complex)
-            J_sub[:, 0, 0] = alpha + beta * aa
-            J_sub[:, 0, 1] = beta * bb
-            J_sub[:, 1, 0] = beta * cc
-            J_sub[:, 1, 1] = alpha + beta * dd
-
-            J[mask] = J_sub
-
-        return J
 
 
     def jones_from_eps_slice_new(self, eps_slice, wavelength, thickness):
