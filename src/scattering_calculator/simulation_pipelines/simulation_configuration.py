@@ -4,6 +4,13 @@ import dataclasses
 from dataclasses import dataclass, field
 from typing import Literal
 
+import numpy as np
+
+from scattering_calculator.experimental_conditions import detector, light_beam
+from scattering_calculator.sample_generator import pattern_generator
+from scattering_calculator.sample_generator import structures
+from scattering_calculator.beam_propagator import Jones_propagator
+
 
 class _ConfigMixin:
     def to_dict(self) -> dict:
@@ -15,7 +22,7 @@ class _ConfigMixin:
 class XRayConfig(_ConfigMixin):
     energy: float  # eV
     photon_flux: float  # photons/s
-    polarization: Literal["circular", "linear"] = "circular"
+    polarization: Literal["CR", "CL", "x", "y"] = "CR"
     coherence_length: float = 10e-6  # m
 
     def __post_init__(self) -> None:
@@ -27,6 +34,15 @@ class XRayConfig(_ConfigMixin):
             raise ValueError(
                 f"coherence_length must be positive, got {self.coherence_length}"
             )
+        if self.polarization not in ["CR", "CL", "x", "y"]:
+            raise ValueError(
+                f"Polarisation must be in CR, CL, x or, got {self.polarization}"
+            )
+
+    def setup(self) -> light_beam.beam_parameters:
+        return light_beam.beam_parameters(
+            self.energy, self.photon_flux, self.polarization, self.coherence_length
+        )
 
 
 @dataclass(frozen=True)
@@ -43,6 +59,17 @@ class SimulationConfig(_ConfigMixin):
                 f"real_space_pixel_size must be positive, got {self.real_space_pixel_size}"
             )
 
+    def setup(self) -> dict:
+        y = (np.arange(self.shape[0]) - self.shape[0] / 2) * self.real_space_pixel_size
+        x = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.real_space_pixel_size
+        X, Y = np.meshgrid(x, y)
+        return {
+            "shape": self.shape,
+            "pixel_size": self.real_space_pixel_size,
+            "x": X,
+            "y": Y,
+        }
+
 
 @dataclass(frozen=True)
 class FrontApertureConfig(_ConfigMixin):
@@ -57,6 +84,17 @@ class FrontApertureConfig(_ConfigMixin):
                 f"aperture_thickness must be positive, got {self.aperture_thickness}"
             )
 
+    def setup(
+        self, shape: tuple[int, int], real_space_pixel_size: float
+    ) -> structures.Apertures2D:
+        aperture = structures.Apertures2D(shape, real_space_pixel_size)
+        if self.aperture_method == "circular":
+            aperture.create_circle_aperture(
+                center=self.aperture_center,
+                **self.aperture_config,
+            )
+        return aperture
+
 
 @dataclass(frozen=True)
 class IlluminationConfig(_ConfigMixin):
@@ -64,17 +102,51 @@ class IlluminationConfig(_ConfigMixin):
     illumination_center: tuple[int, int] = (0, 0)  # px
     illumination_config: dict = field(default_factory=dict)
 
+    def setup(
+        self,
+        beam_params: light_beam.beam_parameters,
+        shape: tuple[int, int],
+        real_space_pixel_size: float,
+    ) -> light_beam.illumination:
+        illum = light_beam.illumination(beam_params, shape, real_space_pixel_size)
+
+        if self.illumination_function == "gaussian":
+            illum.gauss_beam(
+                center=self.illumination_center, **self.illumination_config
+            )
+        elif self.illumination_function is None:
+            illum.plane_wave(shape)
+        return illum
+
 
 @dataclass(frozen=True)
 class SampleConfig(_ConfigMixin):
     recipe: str = "Recipe"
     other_config: dict = field(default_factory=dict)
 
+    def setup(self) -> structures.MultilayerRecipe:
+        return structures.parse_recipe(self.recipe, **self.other_config)
+
 
 @dataclass(frozen=True)
 class MagneticPatternConfig(_ConfigMixin):
     pattern_type_method: str = "skyrmion_pattern"
     pattern_config: dict = field(default_factory=dict)
+
+    def setup(self, shape: tuple[int, int], real_space_pixel_size: float):
+        _methods = {
+            "skyrmion_pattern": pattern_generator.create_skyrmion_pattern,
+        }
+        method = _methods.get(self.pattern_type_method)
+        if method is None:
+            raise ValueError(
+                f"Unknown pattern_type_method: {self.pattern_type_method!r}"
+            )
+        return method(
+            sz_array=list(shape),
+            real_space_pixel_size=real_space_pixel_size,
+            **self.pattern_config,
+        )
 
 
 @dataclass(frozen=True)
@@ -106,6 +178,14 @@ class DetectorConfig(_ConfigMixin):
                 f"detector_noise_rms must be non-negative, got {self.detector_noise_rms}"
             )
 
+    def setup(self) -> detector.detector_layout:
+        return detector.detector_layout(
+            pixel_size=self.pixel_size,
+            detector_shape=self.shape,
+            distance_sample_detector=self.sample_to_detector_distance,
+            detector_center=self.detector_center,
+        )
+
 
 @dataclass(frozen=True)
 class BeamstopConfig(_ConfigMixin):
@@ -119,3 +199,12 @@ class BeamstopConfig(_ConfigMixin):
             raise ValueError(
                 f"bs_detector_distance must be positive, got {self.bs_detector_distance}"
             )
+
+    def setup(self, detector_layout: detector.detector_layout) -> detector.beamstop:
+        bs = detector.beamstop(
+            detector_config=detector_layout,
+            distance_detector_beamstop=self.bs_detector_distance,
+        )
+        if self.bs_method == "circular":
+            bs.create_circle_beamstop(center=self.bs_center, **self.bs_config)
+        return bs

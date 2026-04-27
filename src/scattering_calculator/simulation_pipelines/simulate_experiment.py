@@ -1,7 +1,12 @@
 import numpy as np
 
+from scattering_calculator.experimental_conditions import detector, light_beam
+from scattering_calculator.sample_generator import pattern_generator
+from scattering_calculator.sample_generator import structures
+from scattering_calculator.beam_propagator import Jones_propagator
 
-class SimulationExperiment:
+
+class SetupSimulationExperiment:
     def __init__(
         xray_config,
         simulation_config,
