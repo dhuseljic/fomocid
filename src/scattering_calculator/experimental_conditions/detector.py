@@ -211,7 +211,7 @@ class detector_hologram:
         self.beamstop=beamstop
 
         # acquisition details
-        self.number_frames=20
+        self.number_frames=1
         self.max_counts_per_image=60e3
 
         # detector readout
