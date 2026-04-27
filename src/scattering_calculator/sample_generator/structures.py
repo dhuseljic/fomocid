@@ -614,6 +614,61 @@ class Structure:
     
 
     def calculate_final_dielectric_tensor(self) -> None:
+        """
+        Return the spatial-dependent dielectric tensor including XMCD and XMLD components
+        multiplies the correct elements of the dielectric tensors with the correct components of the magnetization,
+        to produce the magnetization dependent dielctric tensor.
+
+        Some efficient safety checks save time by doing these operations only when necessary
+
+        Returns
+        -------
+        ndarray of shape (Nz,Ny,Nx, 2, 2)
+            Thickness-weighted mean dielectric tensor.
+        """
+                
+        mask = self.mask
+        m = self.magnetization
+        dt = self.dielectric_tensors
+        if not isinstance(dt, np.ndarray):
+            dt = np.asarray(dt)
+            self.dielectric_tensors = dt
+
+        eps0   = dt[:, 0]   # (Nz, 2, 2)
+        eps_mz = dt[:, 1]   # (Nz, 2, 2)
+        eps_xy = dt[:, 2]   # (Nz, 2, 2)
+
+        out = np.empty((*mask.shape, 2, 2), dtype=dt.dtype)
+        out[:] = eps0[:, None, None, :, :]
+
+        # Cheap per-layer checks: shape (Nz,)
+        tol = 1e-14
+        has_mz = np.any(np.abs(eps_mz) > tol, axis=(1, 2))
+        has_xy = np.any(np.abs(eps_xy) > tol, axis=(1, 2))
+
+        if np.any(has_mz):
+            out[has_mz] += (
+                m[has_mz, ..., 2, None, None]
+                * eps_mz[has_mz, None, None, :, :]
+            )
+
+        if np.any(has_xy):
+            dxy = np.abs(m[..., 0])**2 - np.abs(m[..., 1])**2
+            out[has_xy] += (
+                dxy[has_xy, ..., None, None]
+                * eps_xy[has_xy, None, None, :, :]
+            )
+
+        out *= mask[..., None, None]
+
+        vac = 1.0 - mask
+        out[..., 0, 0] += vac
+        out[..., 1, 1] += vac
+
+        self.final_dielectric_tensor = out
+
+
+    def calculate_final_dielectric_tensor_old(self) -> None:
         mask = self.mask
         m = self.magnetization
         dt = self.dielectric_tensors
@@ -628,7 +683,7 @@ class Structure:
         out = np.empty((*mask.shape, 2, 2), dtype=dt.dtype)
         out[:] = eps0[:, None, None, :, :]
         out += m[..., 2, None, None] * eps_mz[:, None, None, :, :]
-        out += (np.abs(m[..., 0]) - np.abs(m[..., 1]))[..., None, None] * eps_xy[:, None, None, :, :]
+        out += (np.abs(m[..., 0])**2 - np.abs(m[..., 1])**2)[..., None, None] * eps_xy[:, None, None, :, :]
 
         out *= mask[..., None, None]
 
@@ -637,12 +692,6 @@ class Structure:
         out[..., 1, 1] += vac
 
         self.final_dielectric_tensor = out
-
-    def calculate_final_dielectric_tensor_old(self) -> None:
-        dielectric_tensor_vacuum=np.array([[1.+0.j, 0.+0.j],[0.+0.j, 1+0.j]])
-        self.dielectric_tensors=np.array(self.dielectric_tensors)
-        self.final_dielectric_tensor=np.einsum("ij,zyx->zyxij", dielectric_tensor_vacuum, 1-self.mask)+np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,0,:,:], self.mask)+np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,1,:,:], self.magnetization[:,:,:,2])+np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,2,:,:], self.magnetization[:,:,:,0])-np.einsum("zij,zyx->zyxij", self.dielectric_tensors[:,2,:,:], self.magnetization[:,:,:,1])
-
 
 
     def visualize_structure(self) -> None:

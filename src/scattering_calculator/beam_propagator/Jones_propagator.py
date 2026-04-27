@@ -206,6 +206,7 @@ class wavefronts:
             J[..., 0, 0] = np.exp(phase * np.sqrt(a))
             J[..., 1, 1] = np.exp(phase * np.sqrt(d))
             return J
+        
 
         # Fallback: your original mixed-case logic
         J = np.zeros_like(eps_slice, dtype=complex)
@@ -266,7 +267,7 @@ class wavefronts:
 
         return J
     
-    
+
 
     def jones_from_eps_slice_old(self, eps_slice, wavelength, thickness):
         """
