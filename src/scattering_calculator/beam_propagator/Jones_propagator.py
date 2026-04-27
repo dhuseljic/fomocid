@@ -172,8 +172,103 @@ class wavefronts:
     # Build Jones propagator field from dielectric tensor field
     # ============================================================
 
-
     def jones_from_eps_slice(self, eps_slice, wavelength, thickness):
+        """
+        eps_slice: (Ny, Nx, 2, 2)
+        returns:   (Ny, Nx, 2, 2)
+        """
+        phase = -1j * (2 * np.pi / wavelength) * thickness
+        tol = 1e-14
+
+        a = eps_slice[..., 0, 0]
+        b = eps_slice[..., 0, 1]
+        c = eps_slice[..., 1, 0]
+        d = eps_slice[..., 1, 1]
+
+        # Fast path: whole slice is exactly diagonal.
+        # This is cheap to test and avoids mask/gather/scatter overhead.
+        if not np.any(b) and not np.any(c):
+            a0 = a.reshape(-1)[0]
+            d0 = d.reshape(-1)[0]
+
+            # Fastest path: whole layer is one uniform diagonal tensor.
+            if np.all(a == a0) and np.all(d == d0):
+                j00 = np.exp(phase * np.sqrt(a0))
+                j11 = np.exp(phase * np.sqrt(d0))
+
+                J = np.zeros_like(eps_slice, dtype=complex)
+                J[..., 0, 0] = j00
+                J[..., 1, 1] = j11
+                return J
+
+            # Whole slice diagonal, but spatially varying.
+            J = np.zeros_like(eps_slice, dtype=complex)
+            J[..., 0, 0] = np.exp(phase * np.sqrt(a))
+            J[..., 1, 1] = np.exp(phase * np.sqrt(d))
+            return J
+
+        # Fallback: your original mixed-case logic
+        J = np.zeros_like(eps_slice, dtype=complex)
+
+        is_diag = (np.abs(b) < tol) & (np.abs(c) < tol)
+
+        if np.any(is_diag):
+            J[..., 0, 0][is_diag] = np.exp(phase * np.sqrt(a[is_diag]))
+            J[..., 1, 1][is_diag] = np.exp(phase * np.sqrt(d[is_diag]))
+
+        mask = ~is_diag
+
+        if np.any(mask):
+            aa = a[mask]
+            bb = b[mask]
+            cc = c[mask]
+            dd = d[mask]
+
+            tr = aa + dd
+            discr = (aa - dd) ** 2 + 4 * bb * cc
+            root = np.sqrt(discr)
+
+            lam1 = 0.5 * (tr + root)
+            lam2 = 0.5 * (tr - root)
+
+            f1 = np.exp(phase * np.sqrt(lam1))
+            f2 = np.exp(phase * np.sqrt(lam2))
+
+            denom = lam1 - lam2
+            regular = np.abs(denom) > tol
+
+            alpha = np.empty_like(lam1, dtype=complex)
+            beta = np.empty_like(lam1, dtype=complex)
+
+            beta[regular] = (f1[regular] - f2[regular]) / denom[regular]
+            alpha[regular] = (
+                lam1[regular] * f2[regular]
+                - lam2[regular] * f1[regular]
+            ) / denom[regular]
+
+            deg = ~regular
+            if np.any(deg):
+                lam = 0.5 * (lam1[deg] + lam2[deg])
+                sqrt_lam = np.sqrt(lam)
+                f = np.exp(phase * sqrt_lam)
+                fp = f * phase / (2 * sqrt_lam)
+
+                beta[deg] = fp
+                alpha[deg] = f - lam * fp
+
+            J_sub = np.empty((aa.size, 2, 2), dtype=complex)
+            J_sub[:, 0, 0] = alpha + beta * aa
+            J_sub[:, 0, 1] = beta * bb
+            J_sub[:, 1, 0] = beta * cc
+            J_sub[:, 1, 1] = alpha + beta * dd
+
+            J[mask] = J_sub
+
+        return J
+    
+    
+
+    def jones_from_eps_slice_old(self, eps_slice, wavelength, thickness):
         """
         Fast vectorized Jones propagator for a field of 2x2 dielectric tensors.
 
@@ -217,8 +312,8 @@ class wavefronts:
         is_diag = (np.abs(b) < tol) & (np.abs(c) < tol)
 
         if np.any(is_diag):
-            J[..., 0, 0][is_diag] = np.exp(-1j * k0 * thickness * np.sqrt(a[is_diag]))
-            J[..., 1, 1][is_diag] = np.exp(-1j * k0 * thickness * np.sqrt(d[is_diag]))
+            J[..., 0, 0][is_diag] = np.exp(phase * np.sqrt(a[is_diag]))
+            J[..., 1, 1][is_diag] = np.exp(phase * np.sqrt(d[is_diag]))
 
         # ------------------------------------------------------------
         # 2. General 2x2 analytic matrix function
