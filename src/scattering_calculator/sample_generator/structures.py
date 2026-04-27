@@ -592,7 +592,8 @@ class Structure:
         )
 
     def return_total_effective_dielectric_tensor(self):
-        """Return the thickness-weighted effective transverse dielectric tensor.
+        """
+        Return the thickness-weighted effective transverse dielectric tensor.
 
         Averages ``self.dielectric_tensors`` weighted by ``self.layer_thicknesses``.
 
@@ -613,34 +614,29 @@ class Structure:
     
 
     def calculate_final_dielectric_tensor(self) -> None:
-        self.dielectric_tensors = np.asarray(self.dielectric_tensors)
+        mask = self.mask
+        m = self.magnetization
+        dt = self.dielectric_tensors
+        if not isinstance(dt, np.ndarray):
+            dt = np.asarray(dt)
+            self.dielectric_tensors = dt
 
-        mask = self.mask              # (Nz, Ny, Nx)
-        m = self.magnetization        # (Nz, Ny, Nx, 3)
+        eps0   = dt[:, 0]
+        eps_mz = dt[:, 1]
+        eps_xy = dt[:, 2]
 
-        eps0   = self.dielectric_tensors[:, 0]  # (Nz, 2, 2)
-        eps_mz = self.dielectric_tensors[:, 1]  # (Nz, 2, 2)
-        eps_xy = self.dielectric_tensors[:, 2]  # (Nz, 2, 2)
-
-        Nz, Ny, Nx = mask.shape
-
-        out = np.zeros((Nz, Ny, Nx, 2, 2), dtype=complex)
-
-        # Build material dielectric tensor everywhere
-        out += eps0[:, None, None, :, :]
+        out = np.empty((*mask.shape, 2, 2), dtype=dt.dtype)
+        out[:] = eps0[:, None, None, :, :]
         out += m[..., 2, None, None] * eps_mz[:, None, None, :, :]
         out += (np.abs(m[..., 0]) - np.abs(m[..., 1]))[..., None, None] * eps_xy[:, None, None, :, :]
 
-        # Apply material mask once
         out *= mask[..., None, None]
 
-        # Add vacuum identity outside material
         vac = 1.0 - mask
         out[..., 0, 0] += vac
         out[..., 1, 1] += vac
 
         self.final_dielectric_tensor = out
-        
 
     def calculate_final_dielectric_tensor_old(self) -> None:
         dielectric_tensor_vacuum=np.array([[1.+0.j, 0.+0.j],[0.+0.j, 1+0.j]])

@@ -4,6 +4,18 @@ from scattering_calculator.utils import physics, image_transformator
 from scattering_calculator.experimental_conditions import light_beam
 
 def reconstruct(holo):
+    '''
+    FTH reconstruction functions
+
+    Parameters
+    ----------
+    holo : (Ny, Nx) float
+
+    Returns
+    -------
+    (Ny, Nx) complex
+        FTH reconstruction
+    '''
     return np.fft.fftshift(np.fft.fft2(np.fft.fftshift(holo)))
 
 class wavefronts:
@@ -175,6 +187,7 @@ class wavefronts:
         """
 
         k0 = 2 * np.pi / wavelength
+        phase = -1j * k0* thickness
         Ny, Nx = eps_slice.shape[:2]
         tol = 1e-14
 
@@ -226,8 +239,8 @@ class wavefronts:
             lam1 = 0.5 * (tr + root)
             lam2 = 0.5 * (tr - root)
 
-            f1 = np.exp(-1j * k0 * thickness * np.sqrt(lam1))
-            f2 = np.exp(-1j * k0 * thickness * np.sqrt(lam2))
+            f1 = np.exp(phase * np.sqrt(lam1))
+            f2 = np.exp(phase * np.sqrt(lam2))
 
             denom = lam1 - lam2
             regular = np.abs(denom) > tol

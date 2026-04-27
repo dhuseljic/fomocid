@@ -196,8 +196,6 @@ class beamstop:
         return self.beamstop
 
 
-
-
 class detector_hologram:
     def __init__(self,
                  detector_layout,
