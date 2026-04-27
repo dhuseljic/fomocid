@@ -222,8 +222,8 @@ class detector_hologram:
         # photon-detector interaction details
         self.counts_per_photon=100
         self.sigma_photon=0.75
-        self.photon_n_classes = 16
-        self.photon_n_variants = 6
+        self.photon_n_classes = 1
+        self.photon_n_variants = 30
         self.photon_tile_size = self.hologram.shape[0]
         self.photon_kernel_size = 9
         self.photon_irregularity = 2.0
@@ -299,7 +299,7 @@ class detector_hologram:
                     sigma_range=getattr(
                         self,
                         "photon_sigma_range",
-                        (0.5 * self.sigma_photon, 1.5 * self.sigma_photon),
+                        (1.0 * self.sigma_photon, 1.5 * self.sigma_photon),
                     ),
                     ellipticity_range=getattr(
                         self,
@@ -436,8 +436,8 @@ class detector_hologram:
         kernel[kernel < 0] = 0
 
         # Conserve photon number
-        if kernel.max() > 0:
-            kernel /= kernel.max()
+        if kernel.sum() > 0:
+            kernel /= kernel.sum()
 
         return kernel.astype(np.float64)
 
@@ -553,11 +553,11 @@ class detector_hologram:
             )
 
             for v, counts_v in enumerate(variant_counts):
-                if counts_v.max() == 0:
+                if counts_v.sum() == 0:
                     continue
 
                 kernel = kernel_bank[c, v]
-                kernel = kernel / kernel.max()
+                kernel = kernel / kernel.sum()
 
                 splatted += signal.fftconvolve(counts_v, kernel, mode="same")
 
