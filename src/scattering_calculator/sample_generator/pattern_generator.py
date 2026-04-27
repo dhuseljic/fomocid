@@ -475,3 +475,192 @@ def skyrmions_on_lattice(
         ax[2].set_xlabel("Diameter in nm")
 
     return pattern
+
+
+
+def create_wavy_stripe_pattern(
+    sz_array: list[int] | tuple[int, int],
+    stripe_width: float,
+    angle_stripes: float,
+    sigma: float | None = None,
+    plot: bool = False,
+    real_space_pixel_size: float = 1,
+    waviness_amplitude: float = 0.0,
+    waviness_scale: float = 10.0,
+    seed: int | None = None,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    
+    """Create an ordered stripe-domain pattern with optional smooth waviness.
+
+    Parameters
+    ----------
+    sz_array : list[int] or tuple[int, int]
+        Output array shape ``[rows, cols]`` in pixels.
+    stripe_width : float
+        Width of a single stripe in pixels.
+    angle_stripes : float
+        Stripe orientation angle in radians, measured counter-clockwise from
+        the +x direction.
+    sigma : float or None, optional
+        Standard deviation of the Gaussian smoothing filter applied to the
+        final binary stripe pattern. No smoothing when ``None``.
+        Default is ``None``.
+    plot : bool, optional
+        If ``True``, plot the stripe pattern. Default is ``False``.
+    real_space_pixel_size : float, optional
+        Physical size of one pixel in metres. Used only for plotting extents.
+        Default is ``1``.
+    waviness_amplitude : float, optional
+        Amplitude of the smooth positional disorder added to the stripe
+        coordinate, in pixels. Pass ``0`` for perfectly straight stripes.
+        Default is ``0.0``.
+    waviness_scale : float, optional
+        Standard deviation of the Gaussian filter used to smooth the random
+        noise field that bends the stripes. Larger values produce broader,
+        gentler undulations. Default is ``10.0``.
+    seed : int or None, optional
+        Random seed for reproducible waviness. Default is ``None``.
+
+    Returns
+    -------
+    pattern : ndarray of shape ``sz_array``
+        Stripe pattern with values in ``[-1, 1]``.
+    stripe_centers : ndarray
+        1-D array of stripe-centre positions along the direction normal to
+        the stripes, in pixel units.
+    """
+    rows, cols = sz_array
+    rng = np.random.default_rng(seed)
+
+    y = np.arange(rows) - rows / 2
+    x = np.arange(cols) - cols / 2
+    yy, xx = np.meshgrid(y, x, indexing="ij")
+
+    # Coordinate normal to the stripe direction
+    normal_coord = xx * np.cos(angle_stripes) + yy * np.sin(angle_stripes)
+
+    # Add smooth positional disorder to make stripes gently wavy
+    if waviness_amplitude > 0:
+        noise = rng.standard_normal((rows, cols))
+        noise = gaussian_filter(noise, waviness_scale)
+        max_abs = np.max(np.abs(noise))
+        if max_abs > 0:
+            noise = noise / max_abs
+        normal_coord = normal_coord + waviness_amplitude * noise
+
+    stripe_index = np.floor((normal_coord + stripe_width) / stripe_width).astype(int)
+    pattern = np.where(stripe_index % 2 == 0, 1.0, -1.0)
+
+    if sigma is not None:
+        pattern = gaussian_filter(pattern, sigma)
+        max_val = np.max(np.abs(pattern))
+        if max_val > 0:
+            pattern = pattern / max_val
+
+    min_n = normal_coord.min()
+    max_n = normal_coord.max()
+    stripe_centers = np.arange(min_n, max_n + stripe_width, 2 * stripe_width)
+
+    if plot:
+        if real_space_pixel_size != 1:
+            sample_y = (np.arange(rows) - rows / 2) * real_space_pixel_size
+            sample_x = (np.arange(cols) - cols / 2) * real_space_pixel_size
+            extent_real = 1e6 * np.array(
+                [sample_x[0], sample_x[-1], sample_y[0], sample_y[-1]]
+            )
+            xlabel = "x in µm"
+            ylabel = "y in µm"
+        else:
+            extent_real = None
+            xlabel = "x in px"
+            ylabel = "y in px"
+
+        plt.figure(figsize=(5, 5))
+        plt.imshow(pattern, cmap="gray", vmin=-1, vmax=1, extent=extent_real)
+        plt.title("Stripe pattern")
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+
+    return pattern, stripe_centers
+
+
+def create_stripe_pattern(
+    sz_array: list[int] | tuple[int, int],
+    stripe_width: float,
+    angle_stripes: float,
+    sigma: float | None = None,
+    plot: bool = False,
+    real_space_pixel_size: float = 1,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Create an ordered stripe-domain pattern.
+
+    Parameters
+    ----------
+    sz_array : list[int] or tuple[int, int]
+        Output array shape ``[rows, cols]`` in pixels.
+    stripe_width : float
+        Width of a single stripe in pixels.
+    angle_stripes : float
+        Stripe orientation angle in radians, measured counter-clockwise from
+        the +x direction.
+    sigma : float or None, optional
+        Standard deviation of the Gaussian smoothing filter. No smoothing when
+        ``None``. Default is ``None``.
+    plot : bool, optional
+        If ``True``, plot the stripe pattern. Default is ``False``.
+    real_space_pixel_size : float, optional
+        Physical size of one pixel in metres. Used only for plotting extents.
+        Default is ``1``.
+
+    Returns
+    -------
+    pattern : ndarray of shape ``sz_array``
+        Stripe pattern with values in ``[-1, 1]``.
+    stripe_centers : ndarray
+        1-D array of stripe-center positions along the direction normal to the
+        stripes, in pixel units.
+    """
+    rows, cols = sz_array
+
+    y = np.arange(rows) - rows / 2
+    x = np.arange(cols) - cols / 2
+    yy, xx = np.meshgrid(y, x, indexing="ij")
+
+    # Coordinate normal to the stripe direction
+    normal_coord = xx * np.cos(angle_stripes) + yy * np.sin(angle_stripes)
+
+    # Alternating +/- 1 stripes with period 2 * stripe_width
+    stripe_index = np.floor((normal_coord + stripe_width) / stripe_width).astype(int)
+    pattern = np.where(stripe_index % 2 == 0, 1.0, -1.0)
+
+    if sigma is not None:
+        pattern = gaussian_filter(pattern, sigma)
+        max_val = np.max(np.abs(pattern))
+        if max_val > 0:
+            pattern = pattern / max_val
+
+    min_n = normal_coord.min()
+    max_n = normal_coord.max()
+    stripe_centers = np.arange(min_n, max_n + stripe_width, 2 * stripe_width)
+
+    if plot:
+        if real_space_pixel_size != 1:
+            sample_y = (np.arange(rows) - rows / 2) * real_space_pixel_size
+            sample_x = (np.arange(cols) - cols / 2) * real_space_pixel_size
+            extent_real = 1e6 * np.array(
+                [sample_x[0], sample_x[-1], sample_y[0], sample_y[-1]]
+            )
+            xlabel = "x in µm"
+            ylabel = "y in µm"
+        else:
+            extent_real = None
+            xlabel = "x in px"
+            ylabel = "y in px"
+
+        plt.figure(figsize=(5, 5))
+        plt.imshow(pattern, cmap="gray", vmin=-1, vmax=1, extent=extent_real)
+        plt.title("Stripe pattern")
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+
+    return pattern, stripe_centers
