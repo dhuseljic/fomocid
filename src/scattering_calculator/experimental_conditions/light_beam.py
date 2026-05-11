@@ -5,48 +5,49 @@ from numpy.typing import ArrayLike, NDArray
 from scattering_calculator.utils import physics
 import matplotlib.pyplot as plt
 
+
 def polarization_vector(pol):
-    '''
+    """
     Return the Jones vector for a given polarization type.
-    
+
     Parameters
     ----------
     pol : str or float
         Polarization type: "CR" (circular right), "CL" (circular left), "x" (linear horizontal), "y" (linear vertical), or angle in radians for linear polarization at that angle.
-    
+
     Returns
     -------
     jones_vec : ndarray of shape (2,)
         Jones vector corresponding to the specified polarization.
-    '''
+    """
 
-    if pol=="CR":
+    if pol == "CR":
         return np.array([1, -1j]) / np.sqrt(2)
-    elif pol=="CL":
+    elif pol == "CL":
         return np.array([1, 1j]) / np.sqrt(2)
-    elif pol=="x":
+    elif pol == "x":
         return np.array([1, 0])
-    elif pol=="y":
+    elif pol == "y":
         return np.array([0, 1])
     else:
-        return np.array([np.sin(pol), np.cos(pol)]) 
-    
+        return np.array([np.sin(pol), np.cos(pol)])
+
 
 def scalar_to_jones(scalar_wavefield, pol):
-    '''Calculate Jones wavefield for given polarization.
-    
+    """Calculate Jones wavefield for given polarization.
+
     Parameters
     ----------
     scalar_wavefield : ndarray of shape (Ny, Nx)
         Input scalar wavefield.
     pol : int or str
-        Polarization index (0 for Ex, 1 for Ey) or polarization type ("CR", "CL", "x", "y", or angle in radians).        
-    
+        Polarization index (0 for Ex, 1 for Ey) or polarization type ("CR", "CL", "x", "y", or angle in radians).
+
     Returns
     -------
     Jones wavefield : ndarray of shape (Ny, Nx, 2)
         Jones wavefield corresponding to the specified polarization.
-    '''
+    """
     return np.einsum("yx,s->yxs", scalar_wavefield, polarization_vector(pol))
 
 
@@ -151,11 +152,21 @@ class beam_parameters:
         Polarization type, e.g. "CR", "CL", "x", "y", or angle in radians.
     """
 
-    def __init__(self, photon_energy: float, pol) -> None:
+    def __init__(
+        self,
+        photon_energy: float,
+        pol: str,
+        photon_flux: float,
+        coherence_length: float,
+    ) -> None:
         self.energy: float = photon_energy  # in eV
         self.wavelength: float = physics.photon_energy_wavelength(photon_energy)
-        self.k: float = 2*np.pi / physics.photon_energy_wavelength(photon_energy)
-        self.pol=pol
+        self.wavevector: float = (
+            2 * np.pi / physics.photon_energy_wavelength(photon_energy)
+        )
+        self.pol = pol
+        self.photon_flux: float = photon_flux  # in photons/s, set externally
+        self.coherence_length: float = coherence_length  # in m, set externally
 
 
 class illumination:
@@ -197,13 +208,13 @@ class illumination:
         self.beam_parameters = beam_parameters
         self.shape = sample_shape
         self.pixel_size = real_space_pixel_size
-        self.pol="CR"
+        self.pol = "CR"
         self.illumination: NDArray[np.complex128] | None = None
         self.illumination_jones: NDArray[np.complex128] | None = None
         # Calculate real-space coordinates of illumination plane in meters
         self.calc_real_space_coordinates()
         self.extent_real = self.get_illumination_extent_real_space()
-        
+
     def gauss_beam(
         self,
         center: ArrayLike,
@@ -227,14 +238,16 @@ class illumination:
         self.illumination = gauss_beam(
             self.shape,
             self.pixel_size,
-            center/self.pixel_size+self.shape[0]//2,
+            center / self.pixel_size + self.shape[0] // 2,
             distance,
             fwhm,
             self.beam_parameters.wavelength,
         )
 
     def get_illumination_jones(self) -> None:
-        self.illumination_jones=scalar_to_jones(self.illumination, self.beam_parameters.pol)
+        self.illumination_jones = scalar_to_jones(
+            self.illumination, self.beam_parameters.pol
+        )
 
     def calc_real_space_coordinates(self) -> None:
         """Compute real-space (x, y) coordinate grids for the illumination plane.
@@ -272,8 +285,6 @@ class illumination:
         """Set the beam cross-section to a plane wave with uniform amplitude and zero phase."""
         self.illumination = np.ones(shape, dtype=complex)
 
-
-
     def return_illumination(self) -> NDArray[np.complex128] | None:
         """Return the current beam cross-section array."""
         return self.illumination
@@ -282,11 +293,22 @@ class illumination:
         # Plot Gaussian beam
         fig, ax = plt.subplots(1, 2, figsize=(10, 5), sharex=True, sharey=True)
         ma = np.max(np.abs(self.illumination) ** 2)
-        ax[0].imshow(np.abs(self.illumination) ** 2, extent=1e6 * self.extent_real, vmin=0, vmax=ma)
+        ax[0].imshow(
+            np.abs(self.illumination) ** 2,
+            extent=1e6 * self.extent_real,
+            vmin=0,
+            vmax=ma,
+        )
         ax[0].set_title("Intensity")
         ax[0].set_xlabel("x in µm")
         ax[0].set_ylabel("y in µm")
-        ax[1].imshow(np.angle(self.illumination), extent=1e6 * self.extent_real, vmin=-np.pi, vmax=np.pi, cmap="hsv")
+        ax[1].imshow(
+            np.angle(self.illumination),
+            extent=1e6 * self.extent_real,
+            vmin=-np.pi,
+            vmax=np.pi,
+            cmap="hsv",
+        )
         ax[1].set_title("Phase")
         ax[1].set_xlabel("x in µm")
         ax[1].set_ylabel("y in µm")

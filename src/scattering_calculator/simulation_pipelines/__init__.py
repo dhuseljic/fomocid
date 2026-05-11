@@ -1,6 +1,6 @@
 """Simulation pipeline configuration for coherent scattering experiments."""
 
-from .simulate_experiment import SimulationExperiment
+from .simulate_experiment import SetupSimulationExperiment
 from .simulation_configuration import (
     BeamstopConfig,
     DetectorConfig,
@@ -26,7 +26,7 @@ from .simulation_configuration_range import (
 
 __all__ = [
     "BeamstopConfig",
-    "SimulationExperiment",
+    "SetupSimulationExperiment",
     "BeamstopConfigRange",
     "Choice",
     "DetectorConfig",

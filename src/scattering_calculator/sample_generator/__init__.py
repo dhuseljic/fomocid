@@ -10,6 +10,8 @@ from .gray_scott_generator import (
 from .pattern_generator import (
     create_lattice,
     create_skyrmion_pattern,
+    create_stripe_pattern,
+    create_wavy_stripe_pattern,
     map_magnetization_to_3d,
     skyrmions_on_lattice,
 )
@@ -38,6 +40,8 @@ __all__ = [
     "Structure",
     "create_lattice",
     "create_skyrmion_pattern",
+    "create_stripe_pattern",
+    "create_wavy_stripe_pattern",
     "generate",
     "map_magnetization_to_3d",
     "material_params",

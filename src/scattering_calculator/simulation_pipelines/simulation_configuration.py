@@ -18,7 +18,7 @@ class _ConfigMixin:
         return dataclasses.asdict(self)
 
 
-@dataclass(frozen=True)
+@dataclass
 class XRayConfig(_ConfigMixin):
     energy: float  # eV
     photon_flux: float  # photons/s
@@ -45,7 +45,75 @@ class XRayConfig(_ConfigMixin):
         )
 
 
-@dataclass(frozen=True)
+@dataclass
+class BeamstopConfig(_ConfigMixin):
+    bs_method: Literal["circular", None] | None = "circular"
+    bs_detector_distance: float = 0.01  # m
+    bs_center: tuple[int, int] = (0, 0)  # px
+    bs_config: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.bs_detector_distance <= 0:
+            raise ValueError(
+                f"bs_detector_distance must be positive, got {self.bs_detector_distance}"
+            )
+
+    def setup(self, detector_layout: detector.detector_layout) -> detector.beamstop:
+        bs = detector.beamstop(
+            detector_config=detector_layout,
+            distance_detector_beamstop=self.bs_detector_distance,
+        )
+        if self.bs_method is None:
+            return bs.create_empty_beamstop()
+        if self.bs_method == "circular":
+            bs.create_circle_beamstop(center=self.bs_center, **self.bs_config)
+        return bs
+
+
+@dataclass
+class DetectorConfig(_ConfigMixin):
+    shape: tuple[int, int] = (256, 256)  # px
+    pixel_size: float = 55e-6  # m/px
+    sample_to_detector_distance: float = 0.1  # m
+    detector_center: tuple[int, int] = (0, 0)  # px
+    detector_efficiency: float = 1.0  # 0–1
+    detector_noise_rms: float = 0.0  # counts
+    artifacts_method: str | None = None
+    artifacts_config: dict = field(default_factory=dict)
+    beamstop: BeamstopConfig | None = None
+
+    def __post_init__(self) -> None:
+        if any(s <= 0 for s in self.shape):
+            raise ValueError(f"shape dimensions must be positive, got {self.shape}")
+        if self.pixel_size <= 0:
+            raise ValueError(f"pixel_size must be positive, got {self.pixel_size}")
+        if self.sample_to_detector_distance <= 0:
+            raise ValueError(
+                f"sample_to_detector_distance must be positive, got {self.sample_to_detector_distance}"
+            )
+        if not (0.0 <= self.detector_efficiency <= 1.0):
+            raise ValueError(
+                f"detector_efficiency must be in [0, 1], got {self.detector_efficiency}"
+            )
+        if self.detector_noise_rms < 0:
+            raise ValueError(
+                f"detector_noise_rms must be non-negative, got {self.detector_noise_rms}"
+            )
+
+    def setup(self):
+        self.detector_layout = detector.detector_layout(
+            pixel_size=self.pixel_size,
+            detector_shape=self.shape,
+            distance_sample_detector=self.sample_to_detector_distance,
+            detector_center=self.detector_center,
+        )
+        if self.beamstop is not None:
+            bs = self.beamstop.setup(self.detector_layout)
+            self.detector_layout.assign_beamstop(bs.beamstop)
+        return self.detector_layout
+
+
+@dataclass
 class SimulationConfig(_ConfigMixin):
     shape: tuple[int, int] = (256, 256)  # px
     real_space_pixel_size: float = 10e-9  # m/px
@@ -71,7 +139,7 @@ class SimulationConfig(_ConfigMixin):
         }
 
 
-@dataclass(frozen=True)
+@dataclass
 class FrontApertureConfig(_ConfigMixin):
     aperture_method: Literal["circular", "rectangular"] | None = "circular"
     aperture_thickness: float = 0.01  # m
@@ -96,7 +164,7 @@ class FrontApertureConfig(_ConfigMixin):
         return aperture
 
 
-@dataclass(frozen=True)
+@dataclass
 class IlluminationConfig(_ConfigMixin):
     illumination_function: Literal["gaussian"] | None = "gaussian"
     illumination_center: tuple[int, int] = (0, 0)  # px
@@ -119,7 +187,7 @@ class IlluminationConfig(_ConfigMixin):
         return illum
 
 
-@dataclass(frozen=True)
+@dataclass
 class SampleConfig(_ConfigMixin):
     recipe: str = "Recipe"
     other_config: dict = field(default_factory=dict)
@@ -128,7 +196,7 @@ class SampleConfig(_ConfigMixin):
         return structures.parse_recipe(self.recipe, **self.other_config)
 
 
-@dataclass(frozen=True)
+@dataclass
 class MagneticPatternConfig(_ConfigMixin):
     pattern_type_method: str = "skyrmion_pattern"
     pattern_config: dict = field(default_factory=dict)
@@ -147,64 +215,3 @@ class MagneticPatternConfig(_ConfigMixin):
             real_space_pixel_size=real_space_pixel_size,
             **self.pattern_config,
         )
-
-
-@dataclass(frozen=True)
-class DetectorConfig(_ConfigMixin):
-    shape: tuple[int, int] = (256, 256)  # px
-    pixel_size: float = 55e-6  # m/px
-    sample_to_detector_distance: float = 0.1  # m
-    detector_center: tuple[int, int] = (0, 0)  # px
-    detector_efficiency: float = 1.0  # 0–1
-    detector_noise_rms: float = 0.0  # counts
-    artifacts_method: str | None = None
-    artifacts_config: dict = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if any(s <= 0 for s in self.shape):
-            raise ValueError(f"shape dimensions must be positive, got {self.shape}")
-        if self.pixel_size <= 0:
-            raise ValueError(f"pixel_size must be positive, got {self.pixel_size}")
-        if self.sample_to_detector_distance <= 0:
-            raise ValueError(
-                f"sample_to_detector_distance must be positive, got {self.sample_to_detector_distance}"
-            )
-        if not (0.0 <= self.detector_efficiency <= 1.0):
-            raise ValueError(
-                f"detector_efficiency must be in [0, 1], got {self.detector_efficiency}"
-            )
-        if self.detector_noise_rms < 0:
-            raise ValueError(
-                f"detector_noise_rms must be non-negative, got {self.detector_noise_rms}"
-            )
-
-    def setup(self) -> detector.detector_layout:
-        return detector.detector_layout(
-            pixel_size=self.pixel_size,
-            detector_shape=self.shape,
-            distance_sample_detector=self.sample_to_detector_distance,
-            detector_center=self.detector_center,
-        )
-
-
-@dataclass(frozen=True)
-class BeamstopConfig(_ConfigMixin):
-    bs_method: Literal["circular", "rectangular"] | None = "circular"
-    bs_detector_distance: float = 0.01  # m
-    bs_center: tuple[int, int] = (0, 0)  # px
-    bs_config: dict = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if self.bs_detector_distance <= 0:
-            raise ValueError(
-                f"bs_detector_distance must be positive, got {self.bs_detector_distance}"
-            )
-
-    def setup(self, detector_layout: detector.detector_layout) -> detector.beamstop:
-        bs = detector.beamstop(
-            detector_config=detector_layout,
-            distance_detector_beamstop=self.bs_detector_distance,
-        )
-        if self.bs_method == "circular":
-            bs.create_circle_beamstop(center=self.bs_center, **self.bs_config)
-        return bs

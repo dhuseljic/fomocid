@@ -34,7 +34,9 @@ class Uniform:
 
     def __post_init__(self) -> None:
         if self.low >= self.high:
-            raise ValueError(f"low must be less than high, got [{self.low}, {self.high}]")
+            raise ValueError(
+                f"low must be less than high, got [{self.low}, {self.high}]"
+            )
 
     def sample(self) -> float:
         """Draw one sample uniformly from [low, high]."""
@@ -101,8 +103,8 @@ class XRayConfigRange:
 class SimulationConfigRange:
     """Parameter ranges for :class:`SimulationConfig`."""
 
-    shape: tuple[int, int] | Choice = (256, 256)          # px
-    real_space_pixel_size: float | Uniform = 10e-9         # m/px
+    shape: tuple[int, int] | Choice = (256, 256)  # px
+    real_space_pixel_size: float | Uniform = 10e-9  # m/px
     other_config: dict = field(default_factory=dict)
 
     def sample(self) -> SimulationConfig:
@@ -119,8 +121,8 @@ class FrontApertureConfigRange:
     """Parameter ranges for :class:`FrontApertureConfig`."""
 
     aperture_method: str | None | Choice = "circular"
-    aperture_thickness: float | Uniform = 0.01             # m
-    aperture_center: tuple[int, int] | Choice = (0, 0)     # px
+    aperture_thickness: float | Uniform = 0.01  # m
+    aperture_center: tuple[int, int] | Choice = (0, 0)  # px
     aperture_config: dict = field(default_factory=dict)
 
     def sample(self) -> FrontApertureConfig:
@@ -194,12 +196,12 @@ class DetectorConfigRange:
     >>> cfg = r.sample()
     """
 
-    shape: tuple[int, int] | Choice = (256, 256)           # px
-    pixel_size: float | Uniform = 55e-6                    # m/px
-    sample_to_detector_distance: float | Uniform = 0.1     # m
-    detector_center: tuple[int, int] | Choice = (0, 0)     # px
-    detector_efficiency: float | Uniform = 1.0             # 0–1
-    detector_noise_rms: float | Uniform = 0.0              # counts
+    shape: tuple[int, int] | Choice = (256, 256)  # px
+    pixel_size: float | Uniform = 55e-6  # m/px
+    sample_to_detector_distance: float | Uniform = 0.1  # m
+    detector_center: tuple[int, int] | Choice = (0, 0)  # px
+    detector_efficiency: float | Uniform = 1.0  # 0–1
+    detector_noise_rms: float | Uniform = 0.0  # counts
     artifacts_method: str | None | Choice = None
     artifacts_config: dict = field(default_factory=dict)
 
@@ -222,8 +224,8 @@ class BeamstopConfigRange:
     """Parameter ranges for :class:`BeamstopConfig`."""
 
     bs_method: str | None | Choice = "circular"
-    bs_detector_distance: float | Uniform = 0.01           # m
-    bs_center: tuple[int, int] | Choice = (0, 0)           # px
+    bs_detector_distance: float | Uniform = 0.01  # m
+    bs_center: tuple[int, int] | Choice = (0, 0)  # px
     bs_config: dict = field(default_factory=dict)
 
     def sample(self) -> BeamstopConfig:
