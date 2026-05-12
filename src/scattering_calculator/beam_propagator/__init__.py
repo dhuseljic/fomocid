@@ -1,18 +1,12 @@
-"""Beam propagation through optical elements and free space.
+"""Beam propagation through optical elements and free space."""
 
-from .Jones_propagator import (
-    apply_jones_field,
-    jones_from_eps_slice,
-    propagate_free_space_jones,
-    propagate_jones_multislice,
-    propagate_jones_single_slice,
-)
+from .Jones_propagator import E_I, E_j, reconstruct, wavefronts
+from .detector_effects import detector_hologram
 
 __all__ = [
-    "apply_jones_field",
-    "jones_from_eps_slice",
-    "propagate_free_space_jones",
-    "propagate_jones_multislice",
-    "propagate_jones_single_slice",
+    "E_I",
+    "E_j",
+    "detector_hologram",
+    "reconstruct",
+    "wavefronts",
 ]
-"""

@@ -28,7 +28,7 @@ class detector_layout:
         pixel_size: float = 10e-6,
         detector_shape: tuple[int, int] = (2048, 2048),
         distance_sample_detector: float = 0.15,
-        detector_center: tuple[float, float] = (1024,1024),
+        detector_center: tuple[float, float] = (1024, 1024),
     ) -> None:
         self.pixel_size = pixel_size
         self.detector_shape = detector_shape
@@ -44,8 +44,12 @@ class detector_layout:
         Sets ``self.detx`` and ``self.dety`` as 2-D arrays of physical
         coordinates in metres, centred on the optical axis.
         """
-        x = (np.arange(self.detector_shape[1]) - self.detector_center[1]) * self.pixel_size
-        y = (np.arange(self.detector_shape[0]) - self.detector_center[0]) * self.pixel_size
+        x = (
+            np.arange(self.detector_shape[1]) - self.detector_center[1]
+        ) * self.pixel_size
+        y = (
+            np.arange(self.detector_shape[0]) - self.detector_center[0]
+        ) * self.pixel_size
         print(np.amin(x), np.amax(x), self.detector_center, self.pixel_size)
         X, Y = np.meshgrid(x, y)
         self.detx = X
@@ -57,12 +61,19 @@ class detector_layout:
         Sets ``self.detqx`` and ``self.detqy`` as 2-D arrays of physical
         coordinates in metres, centred on the optical axis.
         """
-        
-        r = np.sqrt(self.detx**2 + self.dety**2)
-        theta=np.arctan2(self.dety, self.detx)
-        self.detqx = beam_parameters.k*np.sin(np.arctan(r/self.distance_sample_detector))*np.cos(theta)
-        self.detqy = beam_parameters.k*np.sin(np.arctan(r/self.distance_sample_detector))*np.sin(theta)
 
+        r = np.sqrt(self.detx**2 + self.dety**2)
+        theta = np.arctan2(self.dety, self.detx)
+        self.detqx = (
+            beam_parameters.wavevector
+            * np.sin(np.arctan(r / self.distance_sample_detector))
+            * np.cos(theta)
+        )
+        self.detqy = (
+            beam_parameters.wavevector
+            * np.sin(np.arctan(r / self.distance_sample_detector))
+            * np.sin(theta)
+        )
 
     def get_detector_extent_real_space(self) -> NDArray[np.float64]:
         """Calculate the physical extent of the detector plane in metres.
@@ -103,6 +114,19 @@ class detector_layout:
         ax[1].set_title("Beamstop in mm")
         ax[1].set_xlabel("x in mm")
         ax[1].set_ylabel("y in mm")
+
+    def calc_resolution_from_detector(self) -> float:
+        """Calculate the real-space resolution corresponding to the detector's maximum q.
+
+        Returns
+        -------
+        resolution : float
+            Real-space resolution in metres.
+        """
+        q_max = np.sqrt(np.max(self.detqx**2 + self.detqy**2))
+        resolution = 2 * np.pi / q_max
+        self.real_space_resolution = resolution
+        return resolution
 
 
 class beamstop:
@@ -183,7 +207,13 @@ class beamstop:
         if use_real_space_coordinates:
             radius_effective = radius_effective / self.detector_pixel_size
 
-        self.beamstop = circle_mask(self.detector_shape, center, radius_effective, sigma=sigma)
+        self.beamstop = circle_mask(
+            self.detector_shape, center, radius_effective, sigma=sigma
+        )
+
+    def create_empty_beamstop(self) -> None:
+        """Create an empty beamstop mask (all zeros)."""
+        self.beamstop = np.zeros(self.detector_shape)
 
     def return_beamstop(self) -> NDArray[np.float64]:
         """Return the current beamstop mask array.
@@ -197,31 +227,32 @@ class beamstop:
 
 
 class detector_hologram:
-    def __init__(self,
-                 detector_layout,
-                 hologram,
-                 beam_parameters,
-                 real_space_pixel_size,
-                 beamstop,
-                 ):
+    def __init__(
+        self,
+        detector_layout,
+        hologram,
+        beam_parameters,
+        real_space_pixel_size,
+        beamstop,
+    ):
         self.detector_layout = detector_layout
         self.hologram = hologram
         self.beam_parameters = beam_parameters
-        self.real_space_pixel_size=real_space_pixel_size
-        self.beamstop=beamstop
+        self.real_space_pixel_size = real_space_pixel_size
+        self.beamstop = beamstop
 
         # acquisition details
-        self.number_frames=1
-        self.max_counts_per_image=60e3
+        self.number_frames = 1
+        self.max_counts_per_image = 60e3
 
         # detector readout
-        self.readout_noise_average=50
-        self.readout_noise_sigma=3
-        self.detector_threshold=64e3
+        self.readout_noise_average = 50
+        self.readout_noise_sigma = 3
+        self.detector_threshold = 64e3
 
         # photon-detector interaction details
-        self.counts_per_photon=100
-        self.sigma_photon=0.75
+        self.counts_per_photon = 100
+        self.sigma_photon = 0.75
         self.photon_n_classes = 1
         self.photon_n_variants = 30
         self.photon_tile_size = self.hologram.shape[0]
@@ -230,12 +261,16 @@ class detector_hologram:
         self.regenerate_photon_kernels = True
 
         # beam properties
+<<<<<<< HEAD
         self.sigma_y=0.
         self.sigma_x=0.
+=======
+        self.sigma_y = 0.1
+        self.sigma_x = 0.1
+>>>>>>> 033403a2a638326e90fa6707da2ed52b5b71bcd4
 
-   
     def add_noise(self):
-        '''
+        """
         Given the hologram, the function simulates the holograms introducing drift,
          coherence effects and Poisson noise
         INPUT:
@@ -244,29 +279,34 @@ class detector_hologram:
                 max_counts_per_image: max number of counts the camera can take in one image
                 counts_per_photon:
                 number_of_frames: number of acquired frames. The more, the lower the noise
-                
+
         ----------
         Author: RB_2020
-        '''
+        """
 
         # 0. we start with holo, the FFT of the exit wave, hence the distribution of photons (or counts) at a certain point in the detector for a single image
         rng = np.random.default_rng()
-        holo=self.hologram_detector
-        npx,npy=holo.shape
+        holo = self.hologram_detector
+        npx, npy = holo.shape
 
         # 1. convolution with a gaussian to simulate vibrations and partial transversal coherence
         if (self.sigma_x > 0) or (self.sigma_y > 0):
-            kernel = np.outer(signal.windows.gaussian(npx, self.sigma_y), signal.windows.gaussian(npx, self.sigma_x))
+            kernel = np.outer(
+                signal.windows.gaussian(npx, self.sigma_y),
+                signal.windows.gaussian(npx, self.sigma_x),
+            )
             if kernel.sum() > 0:
                 kernel /= kernel.sum()
-                holo = signal.fftconvolve(holo,kernel,mode='same')
+                holo = signal.fftconvolve(holo, kernel, mode="same")
 
         # 2. adjust the maximum count to self.max_counts_per_image for a single frame.
         # holo is not the count number
-        holo*=((self.max_counts_per_image)/np.amax((1.-self.beamstop.beamstop)*holo))
+        holo *= (self.max_counts_per_image) / np.amax(
+            (1.0 - self.beamstop.beamstop) * holo
+        )
 
         # 3. multiply by frame number to get counts of the entire set
-        holo *= self.number_frames        
+        holo *= self.number_frames
 
         # 4. divide by counts_per_photons to get photon number
         expected_photons = holo / self.counts_per_photon
@@ -274,7 +314,6 @@ class detector_hologram:
 
         # 5. Poisson photon sampling. Add poisson noise to number of photons
         photon_counts = rng.poisson(expected_photons).astype(np.int64)
- 
 
         # 6. photon splatting with spatial kernel classes + event variants
         # this makes the photon events blobs affecting multiple pixels
@@ -294,7 +333,9 @@ class detector_hologram:
             if regenerate or not hasattr(self, "photon_kernel_bank"):
                 self.photon_kernel_bank = self.make_photon_kernel_bank(
                     n_classes=getattr(self, "photon_n_classes", self.photon_n_classes),
-                    n_variants=getattr(self, "photon_n_variants", self.photon_n_variants),
+                    n_variants=getattr(
+                        self, "photon_n_variants", self.photon_n_variants
+                    ),
                     size=getattr(self, "photon_kernel_size", self.photon_kernel_size),
                     sigma_range=getattr(
                         self,
@@ -306,7 +347,9 @@ class detector_hologram:
                         "photon_ellipticity_range",
                         (0.6, 1.6),
                     ),
-                    irregularity=getattr(self, "photon_irregularity", self.photon_irregularity),
+                    irregularity=getattr(
+                        self, "photon_irregularity", self.photon_irregularity
+                    ),
                     seed=getattr(self, "photon_kernel_seed", None),
                 )
 
@@ -317,55 +360,58 @@ class detector_hologram:
                 rng=rng,
             )
 
-
         # 7. convert photons back to detector counts
         holo = photon_counts * self.counts_per_photon
 
-
         # 8. apply beamstop mask to shadow
-        holo*=(1.- self.beamstop.beamstop)
+        holo *= 1.0 - self.beamstop.beamstop
 
         # 9. add gaussian readout noise from detector
-        if (self.readout_noise_average > 0 or self.readout_noise_sigma > 0):
+        if self.readout_noise_average > 0 or self.readout_noise_sigma > 0:
             holo += np.random.normal(
-                self.readout_noise_average*self.number_frames,
-                self.readout_noise_sigma*np.sqrt(self.number_frames),
-                holo.shape)
-            
+                self.readout_noise_average * self.number_frames,
+                self.readout_noise_sigma * np.sqrt(self.number_frames),
+                holo.shape,
+            )
+
         # 10. round to integers and cap image at thresholding camera value
         holo = np.round(holo, 0)
-        holo=np.minimum(holo, self.number_frames*self.detector_threshold)
+        holo = np.minimum(holo, self.number_frames * self.detector_threshold)
 
         # 11. divide by frame number: it is an average
-        holo/= self.number_frames
-            
+        holo /= self.number_frames
+
         # 12. just making sure the final product is positive
-        holo[holo<0]=0
+        holo[holo < 0] = 0
 
-        self.hologram_exp=holo.copy()
-
-
+        self.hologram_exp = holo.copy()
 
     def gnomonic_projection(self) -> NDArray[np.float64]:
-        '''Apply gnomonic projection to the hologram to correct for curvature of the Ewald sphere.
+        """Apply gnomonic projection to the hologram to correct for curvature of the Ewald sphere.
         Returns
         -------
             hologram_gnomonic : ndarray of shape (Ny, Nx)
-            Gnomonic-projected hologram.        
-        '''
+            Gnomonic-projected hologram.
+        """
 
         # how much is a pixel in q space
-        Dq=np.pi/self.real_space_pixel_size
+        Dq = np.pi / self.real_space_pixel_size
 
         ## we just need to rescale detqx so they are expressed in absolute pixel value
-        self.hologram_detector =map_coordinates(self.hologram, 
-                                                [self.detector_layout.detqy/Dq*self.hologram.shape[0]+1*self.hologram.shape[0]/2,
-                                                 self.detector_layout.detqx/Dq*self.hologram.shape[1]+1*self.hologram.shape[1]/2], 
-                                                 order=5, mode='constant', cval=0)
+        self.hologram_detector = map_coordinates(
+            self.hologram,
+            [
+                self.detector_layout.detqy / Dq * self.hologram.shape[0]
+                + 1 * self.hologram.shape[0] / 2,
+                self.detector_layout.detqx / Dq * self.hologram.shape[1]
+                + 1 * self.hologram.shape[1] / 2,
+            ],
+            order=5,
+            mode="constant",
+            cval=0,
+        )
 
-
-
-    def make_tile_class_map(self,shape, tile_size=256, n_classes=32, seed=None):
+    def make_tile_class_map(self, shape, tile_size=256, n_classes=32, seed=None):
         """
         Assign each detector tile to one of n_classes response classes.
 
@@ -397,7 +443,6 @@ class detector_hologram:
 
         return class_map
 
-
     def make_random_photon_kernel(
         self,
         size=11,
@@ -424,9 +469,7 @@ class detector_hologram:
         xr = np.cos(theta) * x + np.sin(theta) * y
         yr = -np.sin(theta) * x + np.cos(theta) * y
 
-        kernel = np.exp(
-            -0.5 * ((xr / sigma_x) ** 2 + (yr / sigma_y) ** 2)
-        )
+        kernel = np.exp(-0.5 * ((xr / sigma_x) ** 2 + (yr / sigma_y) ** 2))
 
         # Add smooth irregularity
         noise = 1 + irregularity * rng.normal(size=(size, size))
@@ -440,7 +483,6 @@ class detector_hologram:
             kernel /= kernel.sum()
 
         return kernel.astype(np.float64)
-
 
     def make_photon_kernel_bank(
         self,
@@ -475,8 +517,7 @@ class detector_hologram:
 
         return kernels
 
-
-    def split_counts_into_variants(self,counts, n_variants, rng):
+    def split_counts_into_variants(self, counts, n_variants, rng):
         """
         Split an integer photon-count image into n_variants images,
         preserving the total photon number per pixel.
@@ -495,7 +536,6 @@ class detector_hologram:
         variants.append(remaining.astype(np.float64))
 
         return variants
-
 
     def photon_splat_with_spatial_classes(
         self,
@@ -562,5 +602,3 @@ class detector_hologram:
                 splatted += signal.fftconvolve(counts_v, kernel, mode="same")
 
         return splatted
-
-                        
