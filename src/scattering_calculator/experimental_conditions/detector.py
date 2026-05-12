@@ -115,6 +115,19 @@ class detector_layout:
         ax[1].set_xlabel("x in mm")
         ax[1].set_ylabel("y in mm")
 
+    def calc_resolution_from_detector(self) -> float:
+        """Calculate the real-space resolution corresponding to the detector's maximum q.
+
+        Returns
+        -------
+        resolution : float
+            Real-space resolution in metres.
+        """
+        q_max = np.sqrt(np.max(self.detqx**2 + self.detqy**2))
+        resolution = 2 * np.pi / q_max
+        self.real_space_resolution = resolution
+        return resolution
+
 
 class beamstop:
     """Beamstop model for a coherent scattering experiment.

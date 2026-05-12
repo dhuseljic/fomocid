@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from scattering_calculator.experimental_conditions import detector, light_beam
 from scattering_calculator.sample_generator import pattern_generator
@@ -40,9 +41,12 @@ class XRayConfig(_ConfigMixin):
             )
 
     def setup(self) -> light_beam.beam_parameters:
-        return light_beam.beam_parameters(
+        self.beam_params = light_beam.beam_parameters(
             self.energy, self.photon_flux, self.polarization, self.coherence_length
         )
+        self.beam_params.calc_wavevector()
+        self.wavevector = self.beam_params.wavevector
+        return self.beam_params
 
 
 @dataclass
@@ -112,6 +116,12 @@ class DetectorConfig(_ConfigMixin):
             self.detector_layout.assign_beamstop(bs.beamstop)
         return self.detector_layout
 
+    def calc_realspace_resolution(self, beam_parameters: light_beam.beam_parameters):
+        self.detector_layout.calc_q_space_coordinates(beam_parameters)
+        self.detector_layout.calc_resolution_from_detector()
+
+        return self.detector_layout.real_space_resolution
+
 
 @dataclass
 class SimulationConfig(_ConfigMixin):
@@ -130,13 +140,116 @@ class SimulationConfig(_ConfigMixin):
     def setup(self) -> dict:
         y = (np.arange(self.shape[0]) - self.shape[0] / 2) * self.real_space_pixel_size
         x = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.real_space_pixel_size
-        X, Y = np.meshgrid(x, y)
-        return {
-            "shape": self.shape,
-            "pixel_size": self.real_space_pixel_size,
-            "x": X,
-            "y": Y,
+        self.xgrid, self.ygrid = np.meshgrid(x, y)
+
+
+@dataclass
+class SampleConfig(_ConfigMixin):
+    recipe: str = ("Recipe",)
+    sample_shape: tuple[int, int, int] | None = (None,)
+    real_space_pixel_size: float | None = (None,)
+    xray_config: XRayConfig | None = (None,)
+    sample_name: str | None = (None,)
+    comments: str | None = (None,)
+    other_config: dict = field(default_factory=dict)
+
+    def setup(self) -> structures.MultilayerRecipe:
+        # Define stack
+        self.multilayer_recipe = structures.parse_recipe(
+            self.recipe,
+            sample_name=self.sample_name,
+            comments=self.comments,
+        )
+
+        # Load material parameters
+        self.material_params = structures.material_params(
+            materials=set(
+                [element.material for element in self.multilayer_recipe.layers]
+            ),
+            x_ray_energy=self.xray_config.energy,
+        )
+
+        # Create sample structure
+        self.sample_structure = structures.Structure(
+            name=self.sample_name,
+            material_params=self.material_params,
+            sample_shape=self.sample_shape,
+            real_space_pixel_size=self.real_space_pixel_size,
+        )
+        for layer in self.multilayer_recipe.layers:
+            self.sample_structure.add_layer(layer.material, thickness=layer.thickness)
+
+    def assign_magnetic_pattern(self, magnetic_pattern: np.ndarray):
+        self.magnetic_pattern = magnetic_pattern
+        self.magnetization = pattern_generator.map_magnetization_to_3d(
+            0 * magnetic_pattern,
+            np.sqrt(1 - np.abs(magnetic_pattern) ** 2),
+            magnetic_pattern,
+            nr_repeats=self.sample_shape[0],
+        )
+
+
+@dataclass
+class MagneticPatternConfig(_ConfigMixin):
+    pattern_type_method: Literal["skyrmion_pattern", "wavy_stripe_pattern"] = (
+        "skyrmion_pattern"
+    )
+    shape: tuple[int, int] | None = None
+    real_space_pixel_size: float | None = None
+    pattern_config: dict = field(default_factory=dict)
+    pattern_config_length: dict = field(default_factory=dict)
+
+    def setup(self):
+        _methods = {
+            "skyrmion_pattern": pattern_generator.create_skyrmion_pattern,
+            "wavy_stripe_pattern": pattern_generator.create_wavy_stripe_pattern,
         }
+        method = _methods.get(self.pattern_type_method)
+        if method is None:
+            raise ValueError(
+                f"Unknown pattern_type_method: {self.pattern_type_method!r}"
+            )
+        return method
+
+    def create_pattern(self):
+        pattern_function = self.setup()
+        converted_lengths = {
+            k: v / self.real_space_pixel_size
+            for k, v in self.pattern_config_length.items()
+        }
+        self.magnetic_pattern, self.pattern_coordinates = pattern_function(
+            sz_array=self.shape,
+            real_space_pixel_size=self.real_space_pixel_size,
+            **converted_lengths,
+            **self.pattern_config,
+        )
+        return self.magnetic_pattern, self.pattern_coordinates
+
+    def plot_pattern(self):
+        if self.real_space_pixel_size != 1:
+            sample_y = (
+                np.arange(self.shape[0]) - self.shape[0] / 2
+            ) * self.real_space_pixel_size
+            sample_x = (
+                np.arange(self.shape[1]) - self.shape[1] / 2
+            ) * self.real_space_pixel_size
+            extent_real = 1e6 * np.array(
+                [sample_x[0], sample_x[-1], sample_y[0], sample_y[-1]]
+            )
+            xlabel = "x in µm"
+            ylabel = "y in µm"
+        else:
+            extent_real = None
+            xlabel = "x in px"
+            ylabel = "y in px"
+
+        plt.figure(figsize=(5, 5))
+        plt.imshow(
+            self.magnetic_pattern, cmap="gray", vmin=-1, vmax=1, extent=extent_real
+        )
+        plt.title(self.pattern_type_method)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
 
 
 @dataclass
@@ -185,33 +298,3 @@ class IlluminationConfig(_ConfigMixin):
         elif self.illumination_function is None:
             illum.plane_wave(shape)
         return illum
-
-
-@dataclass
-class SampleConfig(_ConfigMixin):
-    recipe: str = "Recipe"
-    other_config: dict = field(default_factory=dict)
-
-    def setup(self) -> structures.MultilayerRecipe:
-        return structures.parse_recipe(self.recipe, **self.other_config)
-
-
-@dataclass
-class MagneticPatternConfig(_ConfigMixin):
-    pattern_type_method: str = "skyrmion_pattern"
-    pattern_config: dict = field(default_factory=dict)
-
-    def setup(self, shape: tuple[int, int], real_space_pixel_size: float):
-        _methods = {
-            "skyrmion_pattern": pattern_generator.create_skyrmion_pattern,
-        }
-        method = _methods.get(self.pattern_type_method)
-        if method is None:
-            raise ValueError(
-                f"Unknown pattern_type_method: {self.pattern_type_method!r}"
-            )
-        return method(
-            sz_array=list(shape),
-            real_space_pixel_size=real_space_pixel_size,
-            **self.pattern_config,
-        )

@@ -168,6 +168,9 @@ class beam_parameters:
         self.photon_flux: float = photon_flux  # in photons/s, set externally
         self.coherence_length: float = coherence_length  # in m, set externally
 
+    def calc_wavevector(self):
+        self.wavevector = 2 * np.pi / self.wavelength
+
 
 class illumination:
     """Illumination field in the sample plane for a coherent scattering experiment.
