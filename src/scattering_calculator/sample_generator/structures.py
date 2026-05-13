@@ -357,7 +357,13 @@ class Structure:
     mask : (Nz,Ny,Nx) float ndarray for mask. if 1 the material is there if 0 vacuum. Used for aperture function or magnetic tracks
     """
 
-    def __init__(self, name: str, material_params: material_params, sample_shape: list[int, int, int], real_space_pixel_size: float) -> None:
+    def __init__(
+        self,
+        name: str,
+        material_params: material_params,
+        sample_shape: list[int, int, int],
+        real_space_pixel_size: float,
+    ) -> None:
         self.name = name
         self.material_params = material_params
         self.sample_shape = sample_shape
@@ -372,11 +378,15 @@ class Structure:
         self.effective_dielectric_tensors: list[NDArray[np.complex128]] = (
             []
         )  # Optional: store effective dielectric tensors if needed
-        self.magnetization: NDArray[np.float64] | None = None  # Optional: store magnetization map
-        self.mask: NDArray[np.float64] | None = None  # Optional: store sample mask for aperture function
+        self.magnetization: NDArray[np.float64] | None = (
+            None  # Optional: store magnetization map
+        )
+        self.mask: NDArray[np.float64] | None = (
+            None  # Optional: store sample mask for aperture function
+        )
 
-        if self.sample_shape[0]==0:
-            self.sample_shape[0]=len(self.layer_names)
+        if self.sample_shape[0] == 0:
+            self.sample_shape[0] = len(self.layer_names)
 
     def dielectric_tensor_mixed(self, n, theta=0.0):
         """Build a 3-element array of 2×2 transverse dielectric tensors.
@@ -469,7 +479,7 @@ class Structure:
         self.layer_refractive_indices.append(refractive_index)
         self.dielectric_tensors.append(dielectric_tensor)
         self.effective_refractive_indices.append(effective_index)
-        self.sample_shape[0]=len(self.layer_names)
+        self.sample_shape[0] = len(self.layer_names)
 
     def return_layer_refractive_indices(self) -> NDArray[np.complex128]:
         """Return all layer refractive indices as a NumPy array.
@@ -611,7 +621,6 @@ class Structure:
         eps_eff /= D
 
         return eps_eff
-    
 
     def calculate_final_dielectric_tensor(self) -> None:
         """
@@ -626,7 +635,7 @@ class Structure:
         ndarray of shape (Nz,Ny,Nx, 2, 2)
             Thickness-weighted mean dielectric tensor.
         """
-                
+
         mask = self.mask
         m = self.magnetization
         dt = self.dielectric_tensors
@@ -634,9 +643,9 @@ class Structure:
             dt = np.asarray(dt)
             self.dielectric_tensors = dt
 
-        eps0   = dt[:, 0]   # (Nz, 2, 2)
-        eps_mz = dt[:, 1]   # (Nz, 2, 2)
-        eps_xy = dt[:, 2]   # (Nz, 2, 2)
+        eps0 = dt[:, 0]  # (Nz, 2, 2)
+        eps_mz = dt[:, 1]  # (Nz, 2, 2)
+        eps_xy = dt[:, 2]  # (Nz, 2, 2)
 
         out = np.empty((*mask.shape, 2, 2), dtype=dt.dtype)
         out[:] = eps0[:, None, None, :, :]
@@ -648,15 +657,13 @@ class Structure:
 
         if np.any(has_mz):
             out[has_mz] += (
-                m[has_mz, ..., 2, None, None]
-                * eps_mz[has_mz, None, None, :, :]
+                m[has_mz, ..., 2, None, None] * eps_mz[has_mz, None, None, :, :]
             )
 
         if np.any(has_xy):
-            dxy = np.abs(m[..., 0])**2 - np.abs(m[..., 1])**2
+            dxy = np.abs(m[..., 0]) ** 2 - np.abs(m[..., 1]) ** 2
             out[has_xy] += (
-                dxy[has_xy, ..., None, None]
-                * eps_xy[has_xy, None, None, :, :]
+                dxy[has_xy, ..., None, None] * eps_xy[has_xy, None, None, :, :]
             )
 
         out *= mask[..., None, None]
@@ -666,7 +673,6 @@ class Structure:
         out[..., 1, 1] += vac
 
         self.final_dielectric_tensor = out
-
 
     def calculate_final_dielectric_tensor_old(self) -> None:
         mask = self.mask
@@ -676,14 +682,16 @@ class Structure:
             dt = np.asarray(dt)
             self.dielectric_tensors = dt
 
-        eps0   = dt[:, 0]
+        eps0 = dt[:, 0]
         eps_mz = dt[:, 1]
         eps_xy = dt[:, 2]
 
         out = np.empty((*mask.shape, 2, 2), dtype=dt.dtype)
         out[:] = eps0[:, None, None, :, :]
         out += m[..., 2, None, None] * eps_mz[:, None, None, :, :]
-        out += (np.abs(m[..., 0])**2 - np.abs(m[..., 1])**2)[..., None, None] * eps_xy[:, None, None, :, :]
+        out += (np.abs(m[..., 0]) ** 2 - np.abs(m[..., 1]) ** 2)[
+            ..., None, None
+        ] * eps_xy[:, None, None, :, :]
 
         out *= mask[..., None, None]
 
@@ -692,7 +700,6 @@ class Structure:
         out[..., 1, 1] += vac
 
         self.final_dielectric_tensor = out
-
 
     def visualize_structure(self) -> None:
         """Plot the layer stack coloured by real and imaginary refractive index.
@@ -980,19 +987,23 @@ class Apertures3D:
                 np.abs(np.append(0, np.cumsum(self.layer_thicknesses)) - depth)
             )
             pixel_sigma = sigma / np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
-            pixel_center=np.array(center)/self.pixel_size+self.shape[1]//2
+            pixel_center = np.array(center) / self.pixel_size + self.shape[1] // 2
         else:
             pixel_radius = radius
             pixel_depth = depth
             pixel_sigma = sigma
-            pixel_center=np.array(center)
+            pixel_center = np.array(center)
 
-        #self.aperture_design = np.ones(self.shape)
-        #print(pixel_depth)
-        for i in range(0, pixel_depth ):
-            self.aperture_design[i, :, :] *= (1 - circle_mask3D(
+        # self.aperture_design = np.ones(self.shape)
+        # print(pixel_depth)
+        for i in range(0, pixel_depth):
+            self.aperture_design[i, :, :] *= 1 - circle_mask3D(
                 self.shape, pixel_center, pixel_radius, pixel_sigma
-            ))
+            )
+
+    def create_empty_aperture(self) -> None:
+        """Create an empty aperture mask (all zeros) and store it in ``self.aperture_design``."""
+        self.aperture_design = np.zeros(self.shape)
 
     def return_aperture_mask(self) -> NDArray[np.float64]:
         """Return the current aperture design as a NumPy array.
