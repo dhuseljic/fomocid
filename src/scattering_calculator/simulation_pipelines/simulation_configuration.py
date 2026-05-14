@@ -74,6 +74,9 @@ class XRayConfig(_ConfigMixin):
         )
         self.beam_params.calc_wavevector()
         self.wavevector = self.beam_params.wavevector
+
+    def return_params(self) -> light_beam.beam_parameters:
+        """Return the beam parameters object."""
         return self.beam_params
 
 
@@ -208,7 +211,9 @@ class DetectorConfig(_ConfigMixin):
             self.detector_layout.assign_beamstop(bs.beamstop)
         return self.detector_layout
 
-    def calc_realspace_resolution(self, beam_parameters: light_beam.beam_parameters) -> float:
+    def calc_realspace_resolution(
+        self, beam_parameters: light_beam.beam_parameters
+    ) -> float:
         """Compute the real-space resolution limit imposed by the detector.
 
         Parameters
@@ -328,22 +333,15 @@ class SampleConfig(_ConfigMixin):
         for layer in self.multilayer_recipe.layers:
             self.sample_structure.add_layer(layer.material, thickness=layer.thickness)
 
-    def assign_magnetic_pattern(self, magnetic_pattern: np.ndarray) -> None:
+    def assign_magnetic_pattern(self, magnetic_vector_field: np.ndarray) -> None:
         """Map a 2-D scalar magnetization pattern onto the 3-D sample stack.
 
         Parameters
         ----------
-        magnetic_pattern : ndarray of shape (Ny, Nx)
-            Out-of-plane magnetization component, values in [-1, 1].
-            The in-plane components are derived as ``sqrt(1 - |m_z|^2)``.
+        magnetic_vector_field : ndarray of shape (nr_layer,mx, my, mz)
+            (4-D) 3-D magnetic vector field.
         """
-        self.magnetic_pattern = magnetic_pattern
-        self.magnetization = pattern_generator.map_magnetization_to_3d(
-            0 * magnetic_pattern,
-            np.sqrt(1 - np.abs(magnetic_pattern) ** 2),
-            magnetic_pattern,
-            nr_repeats=self.sample_shape[0],
-        )
+        self.sample_structure.magnetization = magnetic_vector_field
 
     def assign_aperture_mask(self, aperture_mask: np.ndarray) -> None:
         """Attach a 3-D aperture mask and store its 2-D projection.
@@ -353,8 +351,8 @@ class SampleConfig(_ConfigMixin):
         aperture_mask : ndarray of shape (Nz, Ny, Nx)
             3-D binary/soft aperture mask.
         """
-        self.aperture_mask3D = aperture_mask
-        self.aperture_mask = np.average(aperture_mask, axis=0)
+        self.sample_structure.mask = aperture_mask
+        self.sample_structure.aperture_mask2D = np.average(aperture_mask, axis=0)
 
 
 @dataclass
@@ -584,16 +582,13 @@ class IlluminationConfig(_ConfigMixin):
         (e.g. ``focus_distance`` and ``fwhm`` for a Gaussian beam).
     """
 
+    XRayConfig: XRayConfig
+    shape: tuple[int, int]
+    real_space_pixel_size: float
     illumination_function: Literal["gaussian"] | None = "gaussian"
-    illumination_center: tuple[int, int] = (0, 0)  # px
     illumination_config: dict = field(default_factory=dict)
 
-    def setup(
-        self,
-        beam_params: light_beam.beam_parameters,
-        shape: tuple[int, int],
-        real_space_pixel_size: float,
-    ) -> light_beam.illumination:
+    def setup(self) -> light_beam.illumination:
         """Build the illumination wavefield.
 
         Parameters
@@ -610,12 +605,44 @@ class IlluminationConfig(_ConfigMixin):
         light_beam.illumination
             The configured illumination object.
         """
-        illum = light_beam.illumination(beam_params, shape, real_space_pixel_size)
+        self.beam_params = self.XRayConfig.return_params()
+        illumination = light_beam.illumination(
+            self.beam_params, self.shape, self.real_space_pixel_size
+        )
 
         if self.illumination_function == "gaussian":
-            illum.gauss_beam(
-                center=self.illumination_center, **self.illumination_config
-            )
-        elif self.illumination_function is None:
-            illum.plane_wave(shape)
-        return illum
+            illumination.gauss_beam(**self.illumination_config)
+        elif (
+            self.illumination_function == "plane_wave"
+            or self.illumination_function is None
+        ):
+            illumination.plane_wave(self.shape)
+
+        self.illumination = illumination
+
+    def visualize_illumination(self) -> None:
+        extend_real = self.illumination.get_illumination_extent_real_space()
+        fig, ax = plt.subplots(1, 2, figsize=(10, 4), sharex=True, sharey=True)
+        ma = np.max(np.abs(self.illumination.illumination) ** 2)
+        m0 = ax[0].imshow(
+            np.abs(self.illumination.illumination) ** 2,
+            extent=1e6 * extend_real,
+            vmin=0,
+            vmax=ma,
+        )
+        ax[0].set_title("Intensity")
+        ax[0].set_xlabel("x in µm")
+        ax[0].set_ylabel("y in µm")
+        plt.colorbar(m0, ax=ax[0], label="Intensity")
+
+        m1 = ax[1].imshow(
+            np.angle(self.illumination.illumination),
+            extent=1e6 * extend_real,
+            vmin=-np.pi,
+            vmax=np.pi,
+            cmap="hsv",
+        )
+        ax[1].set_title("Phase")
+        ax[1].set_xlabel("x in µm")
+        ax[1].set_ylabel("y in µm")
+        plt.colorbar(m1, ax=ax[1], label="Phase in rad")

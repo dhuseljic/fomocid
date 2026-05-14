@@ -10,9 +10,9 @@ from scattering_calculator.utils.masking import circle_mask
 
 
 def map_magnetization_to_3d(
-    magnetic_pattern_z: NDArray[np.float64] | None = None,
-    magnetic_pattern_y: NDArray[np.float64] | None = None,
     magnetic_pattern_x: NDArray[np.float64] | None = None,
+    magnetic_pattern_y: NDArray[np.float64] | None = None,
+    magnetic_pattern_z: NDArray[np.float64] | None = None,
     nr_repeats: int | None = None,
 ) -> tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
@@ -36,7 +36,7 @@ def map_magnetization_to_3d(
 
     shapes = [
         a.shape
-        for a in (magnetic_pattern_z, magnetic_pattern_y, magnetic_pattern_x)
+        for a in (magnetic_pattern_x, magnetic_pattern_y, magnetic_pattern_z)
         if a is not None
     ]
 
@@ -56,8 +56,8 @@ def map_magnetization_to_3d(
     my = magnetic_pattern_y if magnetic_pattern_y is not None else np.zeros(ref_shape)
     mx = magnetic_pattern_x if magnetic_pattern_x is not None else np.zeros(ref_shape)
 
-    magnetization = np.stack((mz, my, mx))
-    magnetization=np.transpose(magnetization, (1, 2, 0))
+    magnetization = np.stack((mx, my, mz))
+    magnetization = np.transpose(magnetization, (1, 2, 0))
 
     if nr_repeats is not None:
         magnetization = np.repeat(
@@ -477,7 +477,6 @@ def skyrmions_on_lattice(
     return pattern
 
 
-
 def create_wavy_stripe_pattern(
     sz_array: list[int] | tuple[int, int],
     stripe_width: float,
@@ -489,7 +488,6 @@ def create_wavy_stripe_pattern(
     waviness_scale: float = 10.0,
     seed: int | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    
     """Create an ordered stripe-domain pattern with optional smooth waviness.
 
     Parameters
