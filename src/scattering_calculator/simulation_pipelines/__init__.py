@@ -8,6 +8,7 @@ from .simulation_configuration import (
     IlluminationConfig,
     MagneticPatternConfig,
     SampleConfig,
+    SamplePropagatorConfig,
     SimulationConfig,
     XRayConfig,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "MagneticPatternConfigRange",
     "SampleConfig",
     "SampleConfigRange",
+    "SamplePropagatorConfig",
     "SimulationConfig",
     "SimulationConfigRange",
     "Uniform",

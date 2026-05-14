@@ -57,7 +57,7 @@ def gauss_beam(
     center: ArrayLike,
     distance: float,
     fwhm: float,
-    wlambda: float,
+    wavelength: float,
 ) -> NDArray[np.complex128]:
     """Compute the cross-section of a Gaussian beam at a given propagation distance.
 
@@ -74,7 +74,7 @@ def gauss_beam(
         Pass ``0`` to evaluate at the focus.
     fwhm : float
         Full-width at half-maximum of the beam at the waist in metres.
-    wlambda : float
+    wavelength : float
         Photon wavelength in metres.
 
     Returns
@@ -99,7 +99,7 @@ def gauss_beam(
     # position with respect to waist
     w0 = fwhm / (np.sqrt(2 * np.log(2)))
     # Waist radius
-    zR = np.pi * w0**2 / wlambda
+    zR = np.pi * w0**2 / wavelength
     # rayleigh range
     w = w0 * np.sqrt(1 + (z / zR) ** 2)
 
@@ -170,6 +170,10 @@ class beam_parameters:
 
     def calc_wavevector(self):
         self.wavevector = 2 * np.pi / self.wavelength
+
+    def return_params(self) -> beam_parameters:
+        """Return the beam parameters object."""
+        return self.asdict(self)
 
 
 class illumination:

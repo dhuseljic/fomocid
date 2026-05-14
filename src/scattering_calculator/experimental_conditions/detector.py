@@ -101,7 +101,7 @@ class detector_layout:
         beamstop_mask : ndarray
             Boolean or float mask with the same shape as the detector.
         """
-        self.beamstop_mask = beamstop_mask
+        self.beamstop = beamstop
 
     def visualize_beamstop(self) -> None:
         """Visualize the beamstop mask in both pixel and real-space coordinates."""

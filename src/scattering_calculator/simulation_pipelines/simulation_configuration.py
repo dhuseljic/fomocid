@@ -44,7 +44,7 @@ class XRayConfig(_ConfigMixin):
 
     energy: float  # eV
     photon_flux: float  # photons/s
-    polarization: Literal["CR", "CL", "x", "y"] = "CR"
+    pol: Literal["CR", "CL", "x", "y"] = "CR"
     coherence_length: float = 10e-6  # m
 
     def __post_init__(self) -> None:
@@ -56,7 +56,7 @@ class XRayConfig(_ConfigMixin):
             raise ValueError(
                 f"coherence_length must be positive, got {self.coherence_length}"
             )
-        if self.polarization not in ["CR", "CL", "x", "y"]:
+        if self.pol not in ["CR", "CL", "x", "y"]:
             raise ValueError(
                 f"Polarisation must be in CR, CL, x or, got {self.polarization}"
             )
@@ -70,13 +70,9 @@ class XRayConfig(_ConfigMixin):
             The configured beam parameter object.
         """
         self.beam_params = light_beam.beam_parameters(
-            self.energy, self.photon_flux, self.polarization, self.coherence_length
+            self.energy, self.pol, self.photon_flux, self.coherence_length
         )
         self.beam_params.calc_wavevector()
-        self.wavevector = self.beam_params.wavevector
-
-    def return_params(self) -> light_beam.beam_parameters:
-        """Return the beam parameters object."""
         return self.beam_params
 
 
@@ -128,7 +124,9 @@ class BeamstopConfig(_ConfigMixin):
         if self.bs_method is None:
             return bs.create_empty_beamstop()
         if self.bs_method == "circular":
-            bs.create_circle_beamstop(center=self.bs_center, **self.bs_config)
+            bs.create_circle_beamstop(
+                center=self.bs_center, use_real_space_coordinates=True, **self.bs_config
+            )
         return bs
 
 
@@ -146,10 +144,6 @@ class DetectorConfig(_ConfigMixin):
         Sample-to-detector distance in metres.
     detector_center : tuple of int
         Position of the direct beam on the detector in pixels (row, col).
-    detector_efficiency : float
-        Quantum efficiency, in [0, 1].
-    detector_noise_rms : float
-        RMS read-out noise in counts. Must be non-negative.
     artifacts_method : str or None
         Method for simulating detector artifacts. Not yet implemented.
     artifacts_config : dict
@@ -168,11 +162,13 @@ class DetectorConfig(_ConfigMixin):
     pixel_size: float = 55e-6  # m/px
     sample_to_detector_distance: float = 0.1  # m
     detector_center: tuple[int, int] = (0, 0)  # px
-    detector_efficiency: float = 1.0  # 0–1
-    detector_noise_rms: float = 0.0  # counts
+    detector_params: dict = field(
+        default_factory=lambda: {"quantum_efficiency": 1.0, "noise_rms": 0.0}
+    )
     artifacts_method: str | None = None
     artifacts_config: dict = field(default_factory=dict)
-    beamstop: BeamstopConfig | None = None
+    measurement_config: dict = field(default_factory=lambda: {"number_frames": 1})
+    beamstop_config: BeamstopConfig | None = None
 
     def __post_init__(self) -> None:
         if any(s <= 0 for s in self.shape):
@@ -182,14 +178,6 @@ class DetectorConfig(_ConfigMixin):
         if self.sample_to_detector_distance <= 0:
             raise ValueError(
                 f"sample_to_detector_distance must be positive, got {self.sample_to_detector_distance}"
-            )
-        if not (0.0 <= self.detector_efficiency <= 1.0):
-            raise ValueError(
-                f"detector_efficiency must be in [0, 1], got {self.detector_efficiency}"
-            )
-        if self.detector_noise_rms < 0:
-            raise ValueError(
-                f"detector_noise_rms must be non-negative, got {self.detector_noise_rms}"
             )
 
     def setup(self) -> detector.detector_layout:
@@ -206,10 +194,11 @@ class DetectorConfig(_ConfigMixin):
             distance_sample_detector=self.sample_to_detector_distance,
             detector_center=self.detector_center,
         )
-        if self.beamstop is not None:
-            bs = self.beamstop.setup(self.detector_layout)
-            self.detector_layout.assign_beamstop(bs.beamstop)
-        return self.detector_layout
+        if self.beamstop_config is not None:
+            self.beamstop = self.beamstop_config.setup(self.detector_layout)
+            self.detector_layout.assign_beamstop(self.beamstop)
+
+        self.detector_layout.calc_real_space_coordinates()
 
     def calc_realspace_resolution(
         self, beam_parameters: light_beam.beam_parameters
@@ -230,6 +219,37 @@ class DetectorConfig(_ConfigMixin):
         self.detector_layout.calc_resolution_from_detector()
 
         return self.detector_layout.real_space_resolution
+
+    def assign_propagated_wavefront(self, samplepropagationconfig) -> None:
+        """Assign a simulated hologram to the detector layout for later retrieval."""
+        self.propagator = samplepropagationconfig
+        self.wavefront = self.propagator.return_wavefront()
+
+    def detect_hologram(self) -> np.ndarray:
+        """Simulate the detection of the hologram on the detector, including noise and artifacts."""
+        if not hasattr(self, "wavefront"):
+            raise ValueError("No propagated wavefront assigned to detector layout.")
+        self.hologram_exp = detector.detector_hologram(
+            self.detector_layout,
+            self.wavefront.hologram,
+            self.propagator.IlluminationConfig.beam_params,
+            self.propagator.SampleConfig.real_space_pixel_size,
+            self.beamstop,
+        )
+        self.hologram_exp.gnomonic_projection()
+
+    def return_ideal_hologram(self) -> np.ndarray:
+        """Return the ideal (noise-free, artifact-free) hologram as a 2-D array."""
+        if not hasattr(self, "wavefront"):
+            raise ValueError("No propagated wavefront assigned to detector layout.")
+        return self.hologram_exp.hologram_detector
+
+    def return_detected_hologram(self) -> np.ndarray:
+        """Return the simulated detected hologram as a 2-D array."""
+        self.hologram_exp.add_noise()
+        if not hasattr(self, "hologram_exp"):
+            raise ValueError("No hologram detected yet. Call detect_hologram() first.")
+        return self.hologram_exp.hologram_exp
 
 
 @dataclass
@@ -588,37 +608,99 @@ class IlluminationConfig(_ConfigMixin):
     illumination_function: Literal["gaussian"] | None = "gaussian"
     illumination_config: dict = field(default_factory=dict)
 
-    def setup(self) -> light_beam.illumination:
-        """Build the illumination wavefield.
+    def _apply_illumination_function(self) -> None:
+        """Apply the current illumination function to the existing illumination object."""
+        if self.illumination_function == "gaussian":
+            self.illumination.gauss_beam(**self.illumination_config)
+        elif self.illumination_function in ("plane_wave", None):
+            self.illumination.plane_wave(self.shape)
+
+    def setup(self) -> None:
+        """Compute the spatial wavefield and initialise Jones vectors.
+
+        Builds the beam envelope (Gaussian or plane wave) from the current
+        ``XRayConfig``. Expensive — call once. Use ``update_polarization()``
+        to switch polarisation state without rebuilding the envelope.
+        """
+        self.beam_params = self.XRayConfig.setup()
+        self.illumination = light_beam.illumination(
+            self.beam_params, self.shape, self.real_space_pixel_size
+        )
+        self._apply_illumination_function()
+        self.illumination.get_illumination_jones()
+
+    def update_polarization(self, pol: str) -> None:
+        """Switch polarisation and recompute Jones vectors without rebuilding the wavefield.
 
         Parameters
         ----------
-        beam_params : light_beam.beam_parameters
-            X-ray beam parameters.
-        shape : tuple of int
-            2-D array shape ``(Ny, Nx)`` of the simulation grid.
-        real_space_pixel_size : float
-            Physical pixel size in metres.
-
-        Returns
-        -------
-        light_beam.illumination
-            The configured illumination object.
+        pol : {"CR", "CL", "x", "y"}
+            New polarisation state.
         """
-        self.beam_params = self.XRayConfig.return_params()
-        illumination = light_beam.illumination(
-            self.beam_params, self.shape, self.real_space_pixel_size
+        self.XRayConfig.polarization = pol
+        self.illumination.beam_parameters.pol = pol
+        self.illumination.get_illumination_jones()
+
+    def update_illumination_config(self, illumination_config: dict) -> None:
+        """Update beam profile parameters and recompute the envelope and Jones vectors.
+
+        Use when the spatial beam parameters change (e.g. ``fwhm``, ``distance``,
+        ``center``) without a change in energy or polarisation.
+
+        Parameters
+        ----------
+        illumination_config : dict
+            New keyword arguments forwarded to ``gauss_beam``.
+        """
+        self.illumination_config = illumination_config
+        self._apply_illumination_function()
+        self.illumination.get_illumination_jones()
+
+    def update_energy(self, energy: float) -> None:
+        """Update photon energy, recompute beam envelope and Jones vectors.
+
+        Rebuilds ``beam_params`` (new wavevector/wavelength) and re-runs
+        ``gauss_beam`` if the illumination function is Gaussian, since the
+        beam profile depends on wavelength. Cheaper than a full ``setup()``
+        because the illumination object and its coordinate grids are reused.
+
+        Parameters
+        ----------
+        energy : float
+            New photon energy in eV.
+        """
+        self.XRayConfig.energy = energy
+        self.beam_params = self.XRayConfig.setup()
+        self.illumination.beam_parameters = self.beam_params
+        self._apply_illumination_function()
+        self.illumination.get_illumination_jones()
+
+    def update(self, new_xray_config: XRayConfig) -> None:
+        """Update illumination from a new XRayConfig, calling only what changed.
+
+        Compares ``new_xray_config`` against the current ``self.XRayConfig``
+        field by field and dispatches the minimal set of update functions.
+        Replaces ``self.XRayConfig`` with ``new_xray_config`` afterwards.
+        No-op if nothing changed.
+
+        Parameters
+        ----------
+        new_xray_config : XRayConfig
+            New X-ray source configuration to apply.
+        """
+        energy_changed = (
+            new_xray_config.beam_params.energy != self.XRayConfig.beam_params.energy
         )
+        pol_changed = new_xray_config.beam_params.pol != self.XRayConfig.beam_params.pol
 
-        if self.illumination_function == "gaussian":
-            illumination.gauss_beam(**self.illumination_config)
-        elif (
-            self.illumination_function == "plane_wave"
-            or self.illumination_function is None
-        ):
-            illumination.plane_wave(self.shape)
+        if not energy_changed and not pol_changed:
+            return
 
-        self.illumination = illumination
+        if energy_changed:
+            self.update_energy(new_xray_config.energy)
+
+        if pol_changed:
+            self.update_polarization(new_xray_config.pol)
 
     def visualize_illumination(self) -> None:
         extend_real = self.illumination.get_illumination_extent_real_space()
@@ -646,3 +728,57 @@ class IlluminationConfig(_ConfigMixin):
         ax[1].set_xlabel("x in µm")
         ax[1].set_ylabel("y in µm")
         plt.colorbar(m1, ax=ax[1], label="Phase in rad")
+
+
+@dataclass
+class SamplePropagatorConfig(_ConfigMixin):
+    """Configuration for the beam propagation through the sample structure.
+
+    Parameters
+    ----------
+    SampleConfig : SampleConfig
+        Sample configuration used to build the sample structure and compute the
+        refractive index distribution for propagation.
+    IlluminationConfig : IlluminationConfig
+        Illumination configuration used to define the incident beam properties.
+    propagator_method : {"Jones"} or None
+        Which beam propagation method to use. ``None`` produces an empty
+        propagator that returns the input wavefield unchanged.
+    propagator_config : dict
+        Reserved for future extension.
+    """
+
+    SampleConfig: SampleConfig
+    IlluminationConfig: IlluminationConfig
+    propagator_method: Literal["Jones"] | None = "Jones"
+    propagator_config: dict = field(default_factory=dict)
+
+    def setup(self) -> Jones_propagator.wavefronts:
+        """Build the beam propagator object based on the current sample and illumination.
+
+        Returns
+        -------
+        Jones_propagator.JonesPropagator
+            The configured beam propagator object.
+        """
+        if self.propagator_method == "Jones":
+            self.wavefront = self._jones_propagation()
+        elif self.propagator_method is None:
+            return None
+        else:
+            raise ValueError(f"Unknown propagator method: {self.propagator_method!r}")
+
+    def _jones_propagation(self):
+        wavefront = Jones_propagator.wavefronts(
+            beam_parameters=self.IlluminationConfig.beam_params,
+            eps_stack=self.SampleConfig.sample_structure.final_dielectric_tensor,
+            layer_thicknesses=self.SampleConfig.sample_structure.layer_thicknesses,
+            real_space_pixel_size=self.SampleConfig.real_space_pixel_size,
+            E_in=self.IlluminationConfig.illumination.illumination_jones,
+            propagate=False,
+        )
+        return wavefront
+
+    def return_wavefront(self) -> Jones_propagator.wavefronts:
+        """Return the configured wavefront object."""
+        return self.wavefront
