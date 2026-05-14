@@ -261,13 +261,8 @@ class detector_hologram:
         self.regenerate_photon_kernels = True
 
         # beam properties
-<<<<<<< HEAD
-        self.sigma_y=0.
-        self.sigma_x=0.
-=======
-        self.sigma_y = 0.1
-        self.sigma_x = 0.1
->>>>>>> 033403a2a638326e90fa6707da2ed52b5b71bcd4
+        self.sigma_y = 0.0
+        self.sigma_x = 0.0
 
     def add_noise(self):
         """
