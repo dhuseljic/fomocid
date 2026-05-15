@@ -104,7 +104,7 @@ def gauss_beam(
     w = w0 * np.sqrt(1 + (z / zR) ** 2)
 
     # wavevector
-    k = 2 * np.pi / wlambda
+    k = 2 * np.pi / wavelength
 
     # Transversal gaussian
     Gauss_trans = np.exp(-((rho / w) ** 2))
