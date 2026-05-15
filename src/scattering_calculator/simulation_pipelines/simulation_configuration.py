@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
+from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 
 from scattering_calculator.experimental_conditions import detector, light_beam
@@ -782,3 +783,511 @@ class SamplePropagatorConfig(_ConfigMixin):
     def return_wavefront(self) -> Jones_propagator.wavefronts:
         """Return the configured wavefront object."""
         return self.wavefront
+
+    def calculate_scalar_wavefield(self) -> np.ndarray:
+        amp = (
+            np.abs(self.wavefront.exit_wave[..., 0]) ** 2
+            + np.abs(self.wavefront.exit_wave[..., 1]) ** 2
+        ) / np.sqrt(2)
+        phase = np.angle(self.wavefront.exit_wave[..., 0])
+
+        self.exit_wavefield = amp * np.exp(1j * phase)
+
+    def return_scalar_wavefield(self) -> np.ndarray:
+        """Return the scalar exit wavefield after sample propagation."""
+        if not hasattr(self, "exit_wavefield"):
+            self.calculate_scalar_wavefield()
+        return self.exit_wavefield
+
+    def visualize_exit_wavefront(self) -> None:
+        """Display the intensity and phase of the exit wavefront."""
+        self.calculate_scalar_wavefield()
+        extend_real = (
+            self.IlluminationConfig.illumination.get_illumination_extent_real_space()
+        )
+        fig, ax = plt.subplots(1, 2, figsize=(10, 4), sharex=True, sharey=True)
+        fig.suptitle(
+            "Exit wavefield after sample propagation, Polarization: "
+            + self.IlluminationConfig.beam_params.pol
+        )
+        ma = np.max(np.abs(self.exit_wavefield) ** 2)
+        m0 = ax[0].imshow(
+            np.abs(self.exit_wavefield) ** 2,
+            extent=1e6 * extend_real,
+            vmin=0,
+            vmax=ma,
+        )
+        ax[0].set_title("Amplitude")
+        ax[0].set_xlabel("x in µm")
+        ax[0].set_ylabel("y in µm")
+        plt.colorbar(m0, ax=ax[0], label="Amplitude")
+
+        m1 = ax[1].imshow(
+            np.angle(self.exit_wavefield),
+            extent=1e6 * extend_real,
+            vmin=-np.pi,
+            vmax=np.pi,
+            cmap="hsv",
+        )
+        ax[1].set_title("Phase")
+        ax[1].set_xlabel("x in µm")
+        ax[1].set_ylabel("y in µm")
+        plt.colorbar(m1, ax=ax[1], label="Phase in rad")
+
+
+@dataclass
+class HologramConfig(_ConfigMixin):
+    """Container for ideal/detected holograms and scalar exit waves, indexed by helicity.
+
+    Parameters
+    ----------
+    ideal_holograms : dict[str, ndarray]
+        Noise-free holograms keyed by helicity, e.g.
+        ``{"CR": array_CR, "CL": array_CL}``.
+        Each array may be 2-D ``(Ny, Nx)`` for a single frame or 3-D
+        ``(N_frames, Ny, Nx)`` for a stack of frames.
+    detected_holograms : dict[str, ndarray]
+        Detected (noisy) holograms keyed by helicity, same key set as
+        ``ideal_holograms``. Same shape convention as above.
+    exit_waves : dict[str, ndarray]
+        Scalar exit wavefields keyed by helicity, e.g.
+        ``{"CR": wave_CR, "CL": wave_CL}``.
+        Each array may be 2-D ``(Ny, Nx)`` (complex) or 3-D
+        ``(N_frames, Ny, Nx)`` for a stack of frames.
+    detector_layout : detector.detector_layout or None
+        Detector geometry associated with these holograms, as returned by
+        ``DetectorConfig.setup()``. Used to provide q-space / real-space
+        coordinate context for downstream analysis.
+    sample_x : NDArray[np.float64] or None
+        2-D meshgrid of sample-plane x-coordinates in metres ``(Ny, Nx)``.
+        Used to set real-space axes when visualising exit waves.
+    sample_y : NDArray[np.float64] or None
+        2-D meshgrid of sample-plane y-coordinates in metres ``(Ny, Nx)``.
+    """
+
+    ideal_holograms: dict = field(default_factory=dict)
+    detected_holograms: dict = field(default_factory=dict)
+    exit_waves: dict = field(default_factory=dict)
+    detector_layout: detector.detector_layout | None = None
+    sample_x: NDArray[np.float64] | None = None
+    sample_y: NDArray[np.float64] | None = None
+
+    _VALID_HELICITIES: tuple = field(
+        default=("CR", "CL", "x", "y"), init=False, repr=False
+    )
+
+    def __post_init__(self) -> None:
+        for store_name, store in (
+            ("ideal_holograms", self.ideal_holograms),
+            ("detected_holograms", self.detected_holograms),
+            ("exit_waves", self.exit_waves),
+        ):
+            for helicity, arr in store.items():
+                if helicity not in self._VALID_HELICITIES:
+                    raise ValueError(
+                        f"Invalid helicity {helicity!r} in {store_name}. "
+                        f"Must be one of {self._VALID_HELICITIES}."
+                    )
+                if arr.ndim < 2:
+                    raise ValueError(
+                        f"{store_name}[{helicity!r}] must be 2-D or 3-D, "
+                        f"got shape {arr.shape}."
+                    )
+
+    def _get_store(self, source: Literal["ideal", "detected", "exit_wave"]) -> dict:
+        if source == "ideal":
+            return self.ideal_holograms
+        if source == "detected":
+            return self.detected_holograms
+        if source == "exit_wave":
+            return self.exit_waves
+        raise ValueError(
+            f"Unknown source {source!r}. Must be 'ideal', 'detected', or 'exit_wave'."
+        )
+
+    @property
+    def helicities(self) -> list[str]:
+        """Helicity keys present in the ideal hologram dict."""
+        return list(self.ideal_holograms.keys())
+
+    def add_ideal_hologram(self, helicity: str, hologram: np.ndarray) -> None:
+        """Add or replace an ideal hologram for *helicity*.
+
+        *hologram* may be 2-D ``(Ny, Nx)`` or 3-D ``(N_frames, Ny, Nx)``.
+        """
+        if helicity not in self._VALID_HELICITIES:
+            raise ValueError(
+                f"Invalid helicity {helicity!r}. Must be one of {self._VALID_HELICITIES}."
+            )
+        if hologram.ndim < 2:
+            raise ValueError(
+                f"hologram must be 2-D or 3-D, got shape {hologram.shape}."
+            )
+        self.ideal_holograms[helicity] = hologram
+
+    def add_detected_hologram(self, helicity: str, hologram: np.ndarray) -> None:
+        """Add or replace a detected hologram for *helicity*.
+
+        *hologram* may be 2-D ``(Ny, Nx)`` or 3-D ``(N_frames, Ny, Nx)``.
+        """
+        if helicity not in self._VALID_HELICITIES:
+            raise ValueError(
+                f"Invalid helicity {helicity!r}. Must be one of {self._VALID_HELICITIES}."
+            )
+        if hologram.ndim < 2:
+            raise ValueError(
+                f"hologram must be 2-D or 3-D, got shape {hologram.shape}."
+            )
+        self.detected_holograms[helicity] = hologram
+
+    def _stack_into(self, store: dict, data: dict) -> None:
+        """Concatenate *data* arrays into *store* along axis 0."""
+        for helicity, arr in data.items():
+            if helicity not in self._VALID_HELICITIES:
+                raise ValueError(
+                    f"Invalid helicity {helicity!r}. Must be one of {self._VALID_HELICITIES}."
+                )
+            if arr.ndim < 2:
+                raise ValueError(
+                    f"Array for helicity {helicity!r} must be 2-D or 3-D, "
+                    f"got shape {arr.shape}."
+                )
+            new = arr[np.newaxis] if arr.ndim == 2 else arr
+            if helicity not in store:
+                store[helicity] = new
+            else:
+                existing = store[helicity]
+                if existing.ndim == 2:
+                    existing = existing[np.newaxis]
+                store[helicity] = np.concatenate([existing, new], axis=0)
+
+    def add_holograms(
+        self,
+        holograms: dict,
+        source: Literal["ideal", "detected"] = "detected",
+    ) -> None:
+        """Stack new holograms onto the existing store for each helicity.
+
+        Parameters
+        ----------
+        holograms : dict[str, ndarray]
+            Mapping of helicity → array. Each array may be 2-D ``(Ny, Nx)``
+            or 3-D ``(N_frames, Ny, Nx)``.
+        source : {"ideal", "detected"}
+            Which hologram store to append to.
+        """
+        self._stack_into(self._get_store(source), holograms)
+
+    def add_exit_waves(self, exit_waves: dict) -> None:
+        """Stack new scalar exit wavefields onto the exit-wave store.
+
+        Parameters
+        ----------
+        exit_waves : dict[str, ndarray]
+            Mapping of helicity → complex array. Each array may be 2-D
+            ``(Ny, Nx)`` or 3-D ``(N_frames, Ny, Nx)``.
+        """
+        self._stack_into(self.exit_waves, exit_waves)
+
+    def average_stack(
+        self, source: Literal["ideal", "detected", "exit_wave"] = "detected"
+    ) -> dict[str, np.ndarray]:
+        """Average frame stacks along axis 0 for each helicity.
+
+        2-D arrays are returned unchanged. 3-D arrays of shape
+        ``(N_frames, Ny, Nx)`` are reduced to ``(Ny, Nx)`` by mean.
+
+        Parameters
+        ----------
+        source : {"ideal", "detected", "exit_wave"}
+            Which store to average.
+
+        Returns
+        -------
+        dict[str, ndarray]
+            New dict with the same helicity keys and 2-D averaged arrays.
+        """
+        store = self._get_store(source)
+        return {
+            h: arr.mean(axis=0) if arr.ndim == 3 else arr for h, arr in store.items()
+        }
+
+    def difference(
+        self, source: Literal["ideal", "detected", "exit_wave"] = "detected"
+    ) -> np.ndarray:
+        """Compute CR − CL, store as ``"diff"`` in the source store, and return it.
+
+        Parameters
+        ----------
+        source : {"ideal", "detected", "exit_wave"}
+            Which store to use.
+        """
+        store = self._get_store(source)
+        if "CR" not in store or "CL" not in store:
+            raise ValueError(
+                f"Both 'CR' and 'CL' entries are required for a difference "
+                f"(source={source!r})."
+            )
+        store["diff"] = store["CR"] - store["CL"]
+        return store["diff"]
+
+    def sum(
+        self, source: Literal["ideal", "detected", "exit_wave"] = "detected"
+    ) -> np.ndarray:
+        """Compute CR + CL, store as ``"sum"`` in the source store, and return it.
+
+        Parameters
+        ----------
+        source : {"ideal", "detected", "exit_wave"}
+            Which store to use.
+        """
+        store = self._get_store(source)
+        if "CR" not in store or "CL" not in store:
+            raise ValueError(
+                f"Both 'CR' and 'CL' entries are required for a sum "
+                f"(source={source!r})."
+            )
+        store["sum"] = store["CR"] + store["CL"]
+        return store["sum"]
+
+    def compute_differences(self):
+        for source in ["ideal", "detected", "exit_wave"]:
+            self.difference(source)
+
+    def compute_sums(self):
+        for source in ["ideal", "detected", "exit_wave"]:
+            self.sum(source)
+
+    def compute_reconstructions(self):
+        for source in ["ideal", "detected", "exit_wave"]:
+            store = self._get_store(source)
+            for helicity in list(store.keys()):
+                self.reconstruct(source, helicity)
+
+    @staticmethod
+    def _fth_reconstruct(holo: np.ndarray) -> np.ndarray:
+        return np.fft.fftshift(np.fft.fft2(np.fft.fftshift(holo)))
+
+    def reconstruct(
+        self,
+        source: Literal["ideal", "detected", "exit_wave"] = "ideal",
+        helicity: str = "diff",
+    ) -> np.ndarray:
+        """Apply FTH reconstruction to a hologram and store the result.
+
+        The reconstruction is ``fftshift(fft2(fftshift(holo)))``.
+        Results are accumulated in ``self.reconstructions[source][helicity]``.
+
+        Parameters
+        ----------
+        source : {"ideal", "detected", "exit_wave"}
+            Which store to read from.
+        helicity : str
+            Key within that store, e.g. ``"diff"``, ``"sum"``, ``"CR"``.
+
+        Returns
+        -------
+        ndarray of shape (Ny, Nx), complex
+            The reconstructed image.
+        """
+        store = self._get_store(source)
+        if helicity not in store:
+            raise ValueError(
+                f"{helicity!r} not found in {source!r} store. "
+                f"Available keys: {list(store.keys())}."
+            )
+        result = self._fth_reconstruct(store[helicity])
+        if not hasattr(self, "reconstructions"):
+            self.reconstructions: dict = {}
+        self.reconstructions.setdefault(source, {})[helicity] = result
+        return result
+
+    def visualize_reconstruction(
+        self,
+        source: Literal["ideal", "detected", "exit_wave"] = "detected",
+        helicity: str = "diff",
+        frame: int | None = None,
+    ) -> None:
+        """Display abs, phase, real, and imaginary parts of a reconstruction.
+
+        By default (``frame=None``) the averaged hologram is reconstructed.
+        Pass a frame index to reconstruct a specific slice from the raw stack.
+
+        Parameters
+        ----------
+        source : {"ideal", "detected", "exit_wave"}
+            Which store to reconstruct from.
+        helicity : str
+            Key within that store, e.g. ``"diff"``, ``"sum"``, ``"CR"``.
+        frame : int or None
+            If ``None`` (default), use the frame-averaged hologram.
+            If an integer, select that frame from the raw 3-D stack
+            ``(N_frames, Ny, Nx)`` stored in the source store.
+        """
+        if frame is None:
+            if not hasattr(self, "exit_waves_avg"):
+                self.compute_averages()
+            avg_store = {
+                "ideal": self.ideal_holograms_avg,
+                "detected": self.detected_holograms_avg,
+                "exit_wave": self.exit_waves_avg,
+            }[source]
+            if helicity not in avg_store:
+                raise ValueError(
+                    f"{helicity!r} not found in averaged {source!r} store. "
+                    f"Available keys: {list(avg_store.keys())}."
+                )
+            holo = avg_store[helicity]
+            frame_label = "averaged"
+        else:
+            raw_store = self._get_store(source)
+            if helicity not in raw_store:
+                raise ValueError(
+                    f"{helicity!r} not found in {source!r} store. "
+                    f"Available keys: {list(raw_store.keys())}."
+                )
+            arr = raw_store[helicity]
+            if arr.ndim != 3:
+                raise ValueError(
+                    f"{source!r}[{helicity!r}] is not a stack (shape {arr.shape}). "
+                    "Pass frame=None to use the 2-D array directly."
+                )
+            if not (0 <= frame < arr.shape[0]):
+                raise IndexError(
+                    f"frame={frame} out of range for stack of {arr.shape[0]} frames."
+                )
+            holo = arr[frame]
+            frame_label = f"frame {frame}"
+
+        rec = self._fth_reconstruct(holo)
+
+        panels = [
+            (np.abs(rec), "Amplitude", "inferno", None, None, "Amplitude"),
+            (np.angle(rec), "Phase", "hsv", -np.pi, np.pi, "Phase in rad"),
+            (np.real(rec), "Real", "gray", None, None, "Real part"),
+            (np.imag(rec), "Imaginary", "gray", None, None, "Imag part"),
+        ]
+
+        fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+        fig.suptitle(f"Reconstruction — source: {source!r}, helicity: {helicity!r}, {frame_label}")
+
+        for ax, (data, title, cmap, vmin, vmax, clabel) in zip(axes.flat, panels):
+            if vmin is None:
+                vmin, vmax = np.nanpercentile(data, [1, 99])
+            m = ax.imshow(data, cmap=cmap, vmin=vmin, vmax=vmax)
+            ax.set_title(title)
+            ax.set_xlabel("x in px")
+            ax.set_ylabel("y in px")
+            fig.colorbar(m, ax=ax, label=clabel)
+
+    def compute_averages(self) -> None:
+        """Average all frame stacks and store results as instance attributes.
+
+        Populates:
+
+        - ``ideal_holograms_avg``   — averaged ideal holograms per helicity
+        - ``detected_holograms_avg`` — averaged detected holograms per helicity
+        - ``exit_waves_avg``         — averaged exit wavefields per helicity
+
+        3-D arrays ``(N_frames, Ny, Nx)`` are reduced to ``(Ny, Nx)`` by
+        mean along axis 0. 2-D arrays are stored unchanged.
+        """
+        self.ideal_holograms_avg = self.average_stack("ideal")
+        self.detected_holograms_avg = self.average_stack("detected")
+        self.exit_waves_avg = self.average_stack("exit_wave")
+
+    def visualize_averages(self) -> None:
+        """Display averaged exit waves and holograms for the first two helicities.
+
+        Calls ``compute_averages()`` first if the averaged attributes are not
+        yet present.
+
+        Layout (4 rows × 2 columns):
+
+        - Row 1: Amplitude | Phase  of averaged exit wave — helicity 1
+        - Row 2: Amplitude | Phase  of averaged exit wave — helicity 2
+        - Row 3: Ideal     | Detected hologram            — helicity 1
+        - Row 4: Ideal     | Detected hologram            — helicity 2
+        """
+        if not hasattr(self, "exit_waves_avg"):
+            self.compute_averages()
+
+        helicities = list(self.exit_waves_avg.keys())
+        if len(helicities) < 2:
+            raise ValueError(
+                f"At least two helicities are required for this plot, "
+                f"got {helicities}."
+            )
+        h1, h2 = helicities[:2]
+
+        # sample-plane extent in µm (exit wave rows)
+        if self.sample_x is not None and self.sample_y is not None:
+            sx, sy = self.sample_x, self.sample_y
+            sample_extent = 1e6 * np.array([sx[0, 0], sx[0, -1], sy[0, 0], sy[-1, 0]])
+            sample_xlabel = sample_ylabel = "µm"
+        else:
+            sample_extent = None
+            sample_xlabel = sample_ylabel = "px"
+
+        # detector q-space extent in nm⁻¹ (hologram rows)
+        if self.detector_layout is not None and hasattr(self.detector_layout, "detqx"):
+            qx = self.detector_layout.detqx
+            qy = self.detector_layout.detqy
+            det_extent = 1e-9 * np.array([qx[0, 0], qx[0, -1], qy[0, 0], qy[-1, 0]])
+            det_xlabel = det_ylabel = "nm⁻¹"
+        else:
+            det_extent = None
+            det_xlabel = det_ylabel = "px"
+
+        fig, axes = plt.subplots(4, 2, figsize=(10, 16))
+        fig.suptitle("Averaged exit waves and holograms")
+
+        for row, helicity in enumerate([h1, h2]):
+            wave = self.exit_waves_avg[helicity]
+            amp = np.abs(wave)
+            phase = np.angle(wave)
+
+            m0 = axes[row, 0].imshow(amp, cmap="inferno", extent=sample_extent)
+            axes[row, 0].set_title(f"Exit wave amplitude — {helicity}")
+            axes[row, 0].set_xlabel(f"x in {sample_xlabel}")
+            axes[row, 0].set_ylabel(f"y in {sample_ylabel}")
+            fig.colorbar(m0, ax=axes[row, 0], label="Amplitude")
+
+            m1 = axes[row, 1].imshow(
+                phase, cmap="hsv", vmin=-np.pi, vmax=np.pi, extent=sample_extent
+            )
+            axes[row, 1].set_title(f"Exit wave phase — {helicity}")
+            axes[row, 1].set_xlabel(f"x in {sample_xlabel}")
+            axes[row, 1].set_ylabel(f"y in {sample_ylabel}")
+            fig.colorbar(m1, ax=axes[row, 1], label="Phase in rad")
+
+        for row, helicity in enumerate([h1, h2], start=2):
+            ideal = self.ideal_holograms_avg[helicity]
+            detected = self.detected_holograms_avg[helicity]
+
+            ideal_vmin, ideal_vmax = np.nanpercentile(ideal, [0.1, 99.9])
+            det_vmin, det_vmax = np.nanpercentile(detected, [0.1, 99.9])
+
+            m2 = axes[row, 0].imshow(
+                ideal,
+                cmap="viridis",
+                vmin=ideal_vmin,
+                vmax=ideal_vmax,
+                extent=det_extent,
+            )
+            axes[row, 0].set_title(f"Ideal hologram — {helicity}")
+            axes[row, 0].set_xlabel(f"x in {det_xlabel}")
+            axes[row, 0].set_ylabel(f"y in {det_ylabel}")
+            fig.colorbar(m2, ax=axes[row, 0], label="counts")
+
+            m3 = axes[row, 1].imshow(
+                detected,
+                cmap="viridis",
+                vmin=det_vmin,
+                vmax=det_vmax,
+                extent=det_extent,
+            )
+            axes[row, 1].set_title(f"Detected hologram — {helicity}")
+            axes[row, 1].set_xlabel(f"x in {det_xlabel}")
+            axes[row, 1].set_ylabel(f"y in {det_ylabel}")
+            fig.colorbar(m3, ax=axes[row, 1], label="counts")

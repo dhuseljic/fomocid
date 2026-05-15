@@ -388,6 +388,9 @@ class Structure:
         if self.sample_shape[0] == 0:
             self.sample_shape[0] = len(self.layer_names)
 
+        self.calc_real_space_coordinates()
+        self.get_extent_real_space()
+
     def dielectric_tensor_mixed(self, n, theta=0.0):
         """Build a 3-element array of 2×2 transverse dielectric tensors.
 
@@ -762,6 +765,42 @@ class Structure:
         ax[1].set_ylabel("Thickness (nm)")
         plt.show()
 
+    def calc_real_space_coordinates(self) -> None:
+        """Compute real-space (x, y) coordinate grids for the illumination plane.
+
+        Sets ``self.x`` and ``self.y`` as 2-D arrays of physical
+        coordinates in metres, centred on the optical axis.
+        """
+
+        x = (
+            np.arange(self.sample_shape[-1]) - self.sample_shape[-1] / 2
+        ) * self.real_space_pixel_size
+        y = (
+            np.arange(self.sample_shape[-2]) - self.sample_shape[-2] / 2
+        ) * self.real_space_pixel_size
+        X, Y = np.meshgrid(x, y)
+        self.x = X
+        self.y = Y
+
+    def get_extent_real_space(self) -> NDArray[np.float64]:
+        """Calculate the physical extent of the sample plane in metres.
+
+        Returns
+        -------
+        extent : tuple of float
+            Physical size of the detector plane in metres as (min_x, max_x, min_y, max_y).
+        """
+
+        self.extent_real = np.array(
+            [
+                np.min(self.x),
+                np.max(self.x),
+                np.min(self.y),
+                np.max(self.y),
+            ]
+        )
+        return self.extent_real
+
 
 class Apertures2D:
     """2-D circular aperture mask generator.
@@ -802,8 +841,12 @@ class Apertures2D:
         coordinates in metres, centred on the optical axis.
         """
 
-        x = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.pixel_size
-        y = (np.arange(self.shape[0]) - self.shape[0] / 2) * self.pixel_size
+        x = (
+            np.arange(self.sample_shape[1]) - self.sample_shape[1] / 2
+        ) * self.pixel_size
+        y = (
+            np.arange(self.sample_shape[0]) - self.sample_shape[0] / 2
+        ) * self.pixel_size
         X, Y = np.meshgrid(x, y)
         self.x = X
         self.y = Y
