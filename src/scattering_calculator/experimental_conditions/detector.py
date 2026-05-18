@@ -101,16 +101,16 @@ class detector_layout:
         beamstop_mask : ndarray
             Boolean or float mask with the same shape as the detector.
         """
-        self.beamstop = beamstop
+        self.beamstop = beamstop_mask
 
     def visualize_beamstop(self) -> None:
         """Visualize the beamstop mask in both pixel and real-space coordinates."""
         extent_det_real = self.get_detector_extent_real_space()
 
         fig, ax = plt.subplots(1, 2, figsize=(8, 4))
-        ax[0].imshow(self.beamstop_mask)
+        ax[0].imshow(self.beamstop)
         ax[0].set_title("Beamstop in px")
-        ax[1].imshow(self.beamstop_mask, extent=1e3 * extent_det_real)
+        ax[1].imshow(self.beamstop, extent=1e3 * extent_det_real)
         ax[1].set_title("Beamstop in mm")
         ax[1].set_xlabel("x in mm")
         ax[1].set_ylabel("y in mm")

@@ -19,6 +19,46 @@ class _ConfigMixin:
         """Return all configuration fields and their current values as a dict."""
         return dataclasses.asdict(self)
 
+    def get_metadata(self, prefix: str = "") -> dict[str, int | float | str | bool]:
+        """Return scalar and string configuration parameters, suitable for HDF5 attributes.
+
+        Recursively flattens nested dicts and skips array-like values and
+        nested dataclass instances.
+
+        Parameters
+        ----------
+        prefix : str
+            Prepended to every key, e.g. ``"detector/"`` to namespace the output.
+
+        Returns
+        -------
+        dict[str, int | float | str | bool]
+            Flat mapping of parameter name to scalar value.
+        """
+        _SCALAR_TYPES = (int, float, str, bool, np.integer, np.floating)
+
+        def _flatten(value, key: str) -> dict:
+            if value is None:
+                return {key: "None"}
+            if isinstance(value, _SCALAR_TYPES):
+                return {key: value}
+            if isinstance(value, dict):
+                out = {}
+                for k, v in value.items():
+                    out.update(_flatten(v, f"{key}/{k}"))
+                return out
+            if isinstance(value, (list, tuple)) and all(
+                isinstance(v, _SCALAR_TYPES) for v in value
+            ):
+                return {key: str(value)}
+            return {}
+
+        result: dict[str, int | float | str | bool] = {}
+        for f in dataclasses.fields(self):
+            val = getattr(self, f.name)
+            result.update(_flatten(val, f"{prefix}{f.name}"))
+        return result
+
 
 @dataclass
 class XRayConfig(_ConfigMixin):
@@ -75,6 +115,16 @@ class XRayConfig(_ConfigMixin):
         )
         self.beam_params.calc_wavevector()
         return self.beam_params
+
+    def get_metadata(self, prefix: str = "") -> dict[str, int | float | str | bool]:
+        """Return config fields plus derived beam parameters as scalar metadata."""
+        meta = super().get_metadata(prefix=prefix)
+        if hasattr(self, "beam_params"):
+            bp = self.beam_params
+            bp_prefix = f"{prefix}beam_params/"
+            for attr in ("energy", "wavelength", "wavevector", "pol", "photon_flux", "coherence_length"):
+                meta[f"{bp_prefix}{attr}"] = getattr(bp, attr)
+        return meta
 
 
 @dataclass
@@ -197,7 +247,7 @@ class DetectorConfig(_ConfigMixin):
         )
         if self.beamstop_config is not None:
             self.beamstop = self.beamstop_config.setup(self.detector_layout)
-            self.detector_layout.assign_beamstop(self.beamstop)
+            self.detector_layout.assign_beamstop(self.beamstop.return_beamstop())
 
         self.detector_layout.calc_real_space_coordinates()
 
@@ -251,6 +301,14 @@ class DetectorConfig(_ConfigMixin):
         if not hasattr(self, "hologram_exp"):
             raise ValueError("No hologram detected yet. Call detect_hologram() first.")
         return self.hologram_exp.hologram_exp
+
+    def visualize_beamstop(self) -> None:
+        """Display the beamstop mask using the detector layout's visualizer."""
+        if not hasattr(self, "beamstop"):
+            raise ValueError(
+                "No beamstop configured. Set beamstop_config and call setup() first."
+            )
+        self.detector_layout.visualize_beamstop()
 
 
 @dataclass
@@ -514,13 +572,13 @@ class FrontApertureConfig(_ConfigMixin):
     aperture_method: Literal["FTH_circular"] | None = "FTH_circular"
     aperture_shape: tuple[int, int] = (256, 256)  # px
     real_space_pixel_size: float = 10e-9  # m/px
-    aperture_thickness: float = 0.01  # m
+    aperture_thicknesses: list[float] = field(default_factory=lambda: [0.01])  # m
     aperture_config: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.aperture_thickness <= 0:
+        if any(thickness <= 0 for thickness in self.aperture_thicknesses):
             raise ValueError(
-                f"aperture_thickness must be positive, got {self.aperture_thickness}"
+                f"aperture_thickness must be positive, got {self.aperture_thicknesses}"
             )
 
     def setup(self) -> structures.Apertures3D:
@@ -534,7 +592,7 @@ class FrontApertureConfig(_ConfigMixin):
         self.aperture = structures.Apertures3D(
             self.aperture_shape,
             self.real_space_pixel_size,
-            layer_thicknesses=self.aperture_thickness,
+            layer_thicknesses=self.aperture_thicknesses,
         )
         if self.aperture_method == "FTH_circular":
             self.create_fth_apertures()
@@ -559,7 +617,7 @@ class FrontApertureConfig(_ConfigMixin):
             if type == "OH":
                 depth = self.aperture_config.get("thickness_OH", None)
             elif type == "RH":
-                depth = self.aperture_thickness
+                depth = np.sum(self.aperture_thicknesses)
             else:
                 raise ValueError(f"Aperture type not defined, got {type}")
 
@@ -1169,7 +1227,9 @@ class HologramConfig(_ConfigMixin):
         ]
 
         fig, axes = plt.subplots(2, 2, figsize=(10, 8))
-        fig.suptitle(f"Reconstruction — source: {source!r}, helicity: {helicity!r}, {frame_label}")
+        fig.suptitle(
+            f"Reconstruction — source: {source!r}, helicity: {helicity!r}, {frame_label}"
+        )
 
         for ax, (data, title, cmap, vmin, vmax, clabel) in zip(axes.flat, panels):
             if vmin is None:
@@ -1291,3 +1351,45 @@ class HologramConfig(_ConfigMixin):
             axes[row, 1].set_xlabel(f"x in {det_xlabel}")
             axes[row, 1].set_ylabel(f"y in {det_ylabel}")
             fig.colorbar(m3, ax=axes[row, 1], label="counts")
+
+    def to_dict(
+        self,
+        helicities: list[str] | None = None,
+        sources: list[Literal["exit_wave", "ideal", "detected"]] | None = None,
+    ) -> dict[str, dict[str, np.ndarray]]:
+        """Return exit waves, ideal holograms, and detected holograms grouped by helicity.
+
+        Parameters
+        ----------
+        helicities : list of str or None
+            Helicity keys to include, e.g. ``["CR", "CL"]``.
+            If ``None`` (default), all available helicities are returned.
+        sources : list of {"exit_wave", "ideal", "detected"} or None
+            Which data stores to include. If ``None`` (default), all three are returned.
+
+        Returns
+        -------
+        dict[str, dict[str, ndarray]]
+            Outer key: helicity (e.g. ``"CR"``, ``"CL"``).
+            Inner keys: ``"exit_wave"``, ``"ideal"``, ``"detected"``.
+            Missing entries for a given helicity are omitted.
+        """
+        _store_map = {
+            "exit_wave": self.exit_waves,
+            "ideal": self.ideal_holograms,
+            "detected": self.detected_holograms,
+        }
+        active_sources = set(sources) if sources is not None else set(_store_map)
+
+        available = set().union(*(s.keys() for s in _store_map.values()))
+        keys = set(helicities) if helicities is not None else available
+
+        result: dict[str, dict[str, np.ndarray]] = {}
+        for h in keys:
+            entry: dict[str, np.ndarray] = {}
+            for source in active_sources:
+                store = _store_map[source]
+                if h in store:
+                    entry[source] = store[h]
+            result[h] = entry
+        return result
