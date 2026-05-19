@@ -1,0 +1,606 @@
+"""Hologram simulation pipeline for generating paired CR/CL datasets.
+
+The pipeline follows the same config-object sequence as the interactive
+tutorial (test.ipynb): XRayConfig → DetectorConfig → SampleConfig →
+MagneticPatternConfig → FrontApertureConfig → IlluminationConfig →
+SamplePropagatorConfig → HologramConfig.
+
+Typical usage
+-------------
+from scattering_calculator.simulation_pipelines.pipelines import (
+    HologramPipeline,
+    HologramPipelineConfig,
+    HologramPipelineRanges,
+)
+from scattering_calculator.simulation_pipelines import Uniform, Choice
+import numpy as np
+
+config = HologramPipelineConfig(
+    recipe="Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)",
+    pattern_config={"angle_stripes": np.pi / 4},
+    pattern_config_length={
+        "stripe_width": 20e-9,
+        "sigma": 1e-9,
+        "waviness_amplitude": 20e-9,
+        "waviness_scale": 20e-9,
+    },
+)
+
+ranges = HologramPipelineRanges(
+    xray_energy=Uniform(770, 790),
+    detector_distance=Choice((0.02, 0.04)),
+    pattern_config_length={
+        "stripe_width": Uniform(10e-9, 50e-9),
+        "waviness_amplitude": Uniform(5e-9, 30e-9),
+    },
+)
+
+pipeline = HologramPipeline(config, ranges, "dataset.h5", n_samples=100)
+pipeline.run()
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import h5py
+import numpy as np
+
+from scattering_calculator.sample_generator import pattern_generator
+from scattering_calculator.simulation_pipelines.simulation_configuration import (
+    BeamstopConfig,
+    DetectorConfig,
+    FrontApertureConfig,
+    HologramConfig,
+    IlluminationConfig,
+    MagneticPatternConfig,
+    SampleConfig,
+    SamplePropagatorConfig,
+    XRayConfig,
+)
+from scattering_calculator.simulation_pipelines.simulation_configuration_range import (
+    Choice,
+    Uniform,
+    _s,
+    _sample_dict,
+)
+
+
+@dataclass
+class HologramPipelineConfig:
+    """Fixed physical parameters shared across all simulation runs.
+
+    Any parameter can be overridden or swept using :class:`HologramPipelineRanges`.
+    Physical lengths are in SI units (metres, eV).
+
+    Parameters
+    ----------
+    recipe : str
+        Multilayer thin-film recipe, e.g. ``"Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"``.
+        Thicknesses are in angstroms, ordered top-to-bottom.
+    sample_name : str or None
+        Optional label stored in the HDF5 metadata.
+    xray_energy : float
+        Photon energy in eV.
+    xray_photon_flux : float
+        Photon flux in photons per pulse.
+    xray_coherence_length : float
+        Transverse coherence length in metres.
+    detector_shape : tuple of int
+        Detector size ``(rows, cols)`` in pixels.
+    detector_pixel_size : float
+        Physical pixel pitch in metres.
+    detector_distance : float
+        Sample-to-detector distance in metres.
+    detector_center : tuple of int or None
+        Pixel position of the direct beam. ``None`` → ``shape // 2``.
+    detector_noise_rms : float
+        RMS readout noise in detector counts.
+    detector_quantum_efficiency : float
+        Detector quantum efficiency (0–1).
+    beamstop_method : {"circular"} or None
+        Beamstop shape. ``None`` → transparent (no beamstop).
+    beamstop_distance : float
+        Sample-to-beamstop distance in metres.
+    beamstop_radius : float
+        Physical beamstop radius in metres (for ``"circular"``).
+    aperture_method : {"FTH_circular"} or None
+        Holography mask layout. ``None`` → fully transparent.
+    aperture_types : list of {"OH", "RH"}
+        Object hole (OH) or reference hole (RH) for each aperture.
+    aperture_radii : list of float
+        Aperture radii in metres.
+    aperture_centers : list of (float, float)
+        Aperture centres ``(y, x)`` in metres relative to the sample centre.
+    aperture_sigmas : list of float
+        Edge-softening sigma in metres for each aperture.
+    illumination_function : {"gaussian"} or None
+        Spatial beam profile. ``None`` → plane wave.
+    illumination_center : (float, float)
+        Beam centre ``(y, x)`` in metres.
+    illumination_focus_distance : float
+        Propagation distance from the Gaussian waist to the sample plane, in metres.
+    illumination_fwhm : float
+        Gaussian beam FWHM at the waist in metres.
+    pattern_type : {"wavy_stripe_pattern", "skyrmion_pattern"}
+        Which magnetic domain pattern generator to use.
+    pattern_config : dict
+        Dimensionless pattern parameters forwarded to the generator
+        (e.g. ``{"angle_stripes": np.pi/4, "seed": 0}``).
+    pattern_config_length : dict
+        Physical-length pattern parameters in metres, converted to pixel units
+        before calling the generator
+        (e.g. ``{"stripe_width": 20e-9, "sigma": 1e-9,
+        "waviness_amplitude": 20e-9, "waviness_scale": 20e-9}``).
+    oversampling : int
+        Oversampling factor relative to the Nyquist limit from the detector.
+        ``real_space_pixel_size = detector_resolution / oversampling``.
+        Default 2.
+    """
+
+    recipe: str
+    sample_name: str | None = None
+
+    # X-ray source
+    xray_energy: float = 787.9  # eV
+    xray_photon_flux: float = 1e12  # photons/pulse
+    xray_coherence_length: float = 100e-6  # m
+
+    # Detector
+    detector_shape: tuple[int, int] = (1300, 1300)  # px
+    detector_pixel_size: float = 20e-6  # m/px
+    detector_distance: float = 0.02  # m
+    detector_center: tuple[int, int] | None = None  # None → shape // 2
+    detector_noise_rms: float = 0.0
+    detector_quantum_efficiency: float = 1.0
+
+    # Beamstop
+    beamstop_method: str | None = "circular"
+    beamstop_distance: float = 0.001  # m
+    beamstop_radius: float = 0.5e-3  # m
+
+    # FTH holography mask
+    aperture_method: str | None = "FTH_circular"
+    aperture_types: list[str] = field(
+        default_factory=lambda: ["OH", "RH", "RH"]
+    )
+    aperture_radii: list[float] = field(
+        default_factory=lambda: [60e-9, 6e-9, 4e-9]
+    )  # m
+    aperture_centers: list[tuple] = field(
+        default_factory=lambda: [
+            (0.0, 0.0),
+            (0.2e-6, -0.15e-6),
+            (0.15e-6, 0.15e-6),
+        ]
+    )  # m, (y, x)
+    aperture_sigmas: list[float] = field(
+        default_factory=lambda: [1e-9, 2e-9, 2e-9]
+    )  # m
+
+    # Illumination
+    illumination_function: str | None = "gaussian"
+    illumination_center: tuple[float, float] = (0.0, 0.0)  # m
+    illumination_focus_distance: float = 1e-3  # m
+    illumination_fwhm: float = 0.5e-6  # m
+
+    # Magnetic domain pattern
+    pattern_type: str = "wavy_stripe_pattern"
+    pattern_config: dict = field(default_factory=dict)
+    pattern_config_length: dict = field(default_factory=dict)
+
+    # Simulation grid
+    oversampling: int = 2
+
+
+@dataclass
+class HologramPipelineRanges:
+    """Parameter distributions for sweeping across simulation runs.
+
+    Set a field to:
+
+    * ``None`` — use the fixed value from :class:`HologramPipelineConfig`.
+    * A scalar — override with that fixed value for every run.
+    * :class:`Uniform` ``(low, high)`` — sample uniformly each run.
+    * :class:`Choice` ``((a, b, ...))`` — sample from a discrete set each run.
+
+    For ``pattern_config`` and ``pattern_config_length``, individual dict
+    values can themselves be :class:`Uniform` or :class:`Choice` samplers;
+    keys not listed in the range dict fall back to the base config value.
+
+    Examples
+    --------
+    >>> ranges = HologramPipelineRanges(
+    ...     xray_energy=Uniform(770, 790),
+    ...     detector_distance=Choice((0.02, 0.04, 0.08)),
+    ...     pattern_config_length={"stripe_width": Uniform(10e-9, 50e-9)},
+    ... )
+    """
+
+    # X-ray
+    xray_energy: float | Uniform | None = None
+    xray_photon_flux: float | Uniform | None = None
+    xray_coherence_length: float | Uniform | None = None
+
+    # Detector
+    detector_distance: float | Uniform | None = None
+    detector_pixel_size: float | Uniform | None = None
+    detector_noise_rms: float | Uniform | None = None
+
+    # Magnetic pattern
+    pattern_type: str | Choice | None = None
+    pattern_config: dict | None = None
+    pattern_config_length: dict | None = None
+
+
+class HologramPipeline:
+    """Generate paired CR/CL holograms for *n_samples* parameter configurations.
+
+    For each configuration the pipeline builds and calls the full chain of
+    simulation_configuration config objects in the same order as the
+    interactive tutorial (test.ipynb):
+
+    1. :class:`XRayConfig` — photon energy, flux, coherence
+    2. :class:`BeamstopConfig` + :class:`DetectorConfig` — detector geometry
+       and derived sample-plane pixel size
+    3. :class:`SampleConfig` — multilayer structure at the derived resolution
+    4. :class:`MagneticPatternConfig` — domain pattern generation
+    5. :class:`FrontApertureConfig` — FTH holography mask
+    6. :class:`IlluminationConfig` — beam profile
+    7. :class:`SamplePropagatorConfig` + :class:`HologramConfig` — Jones
+       propagation and hologram accumulation for CR and CL
+
+    HDF5 output layout
+    ------------------
+    ::
+
+        output.h5
+        ├── _pipeline_config/       ← top-level fixed parameters
+        ├── 00000/
+        │   ├── CR/
+        │   │   ├── ideal           ← float32 2D hologram
+        │   │   ├── detected        ← float32 2D hologram
+        │   │   └── exit_wave       ← complex64 2D wavefield
+        │   ├── CL/
+        │   │   └── ...
+        │   ├── beamstop_mask       ← 2D boolean mask
+        │   └── metadata/           ← all scalar parameters as datasets
+        │       ├── xray/
+        │       ├── detector/
+        │       ├── magnetic_pattern/
+        │       └── aperture/
+        ├── 00001/
+        │   └── ...
+
+    Parameters
+    ----------
+    config : HologramPipelineConfig
+        Fixed parameters shared across all runs.
+    ranges : HologramPipelineRanges
+        Distributions for parameters that vary between runs.
+    output_path : Path or str
+        Output HDF5 file path. Created (or overwritten) when ``run()`` is called.
+    n_samples : int
+        Number of parameter configurations to simulate.
+    verbose : bool
+        Print per-sample timing to stdout. Default ``True``.
+    """
+
+    _POLARIZATIONS = ("CR", "CL")
+
+    def __init__(
+        self,
+        config: HologramPipelineConfig,
+        ranges: HologramPipelineRanges,
+        output_path: Path | str,
+        n_samples: int,
+        verbose: bool = True,
+    ) -> None:
+        self.config = config
+        self.ranges = ranges
+        self.output_path = Path(output_path)
+        self.n_samples = n_samples
+        self.verbose = verbose
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def run(self) -> None:
+        """Execute the simulation loop and write all results to HDF5."""
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        width = len(str(self.n_samples))
+        t_start = time.time()
+        with h5py.File(self.output_path, "w") as h5:
+            self._write_pipeline_config(h5)
+            for i in range(self.n_samples):
+                if self.verbose:
+                    print(
+                        f"  [{i + 1:>{width}}/{self.n_samples}] Simulating...",
+                        end=" ",
+                        flush=True,
+                    )
+                t0 = time.time()
+                self._simulate_one(h5, i)
+                if self.verbose:
+                    print(f"done ({time.time() - t0:.1f} s)")
+        if self.verbose:
+            elapsed = time.time() - t_start
+            print(
+                f"Pipeline complete: {self.n_samples} configurations in "
+                f"{elapsed:.1f} s → {self.output_path}"
+            )
+
+    # ------------------------------------------------------------------
+    # Parameter sampling
+    # ------------------------------------------------------------------
+
+    def _sample_params(self) -> dict[str, Any]:
+        """Draw one sampled parameter set, merging ranges over the base config."""
+        cfg = self.config
+        rng = self.ranges
+
+        def _pick(range_val: Any, base_val: Any) -> Any:
+            return base_val if range_val is None else _s(range_val)
+
+        def _merge_dict(range_dict: dict | None, base_dict: dict) -> dict:
+            merged = dict(base_dict)
+            if range_dict is not None:
+                merged.update(_sample_dict(range_dict))
+            return merged
+
+        return {
+            "energy": _pick(rng.xray_energy, cfg.xray_energy),
+            "photon_flux": _pick(rng.xray_photon_flux, cfg.xray_photon_flux),
+            "coherence_length": _pick(rng.xray_coherence_length, cfg.xray_coherence_length),
+            "detector_distance": _pick(rng.detector_distance, cfg.detector_distance),
+            "detector_pixel_size": _pick(rng.detector_pixel_size, cfg.detector_pixel_size),
+            "detector_noise_rms": _pick(rng.detector_noise_rms, cfg.detector_noise_rms),
+            "pattern_type": _pick(rng.pattern_type, cfg.pattern_type),
+            "pattern_config": _merge_dict(rng.pattern_config, cfg.pattern_config),
+            "pattern_config_length": _merge_dict(
+                rng.pattern_config_length, cfg.pattern_config_length
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # Core simulation — mirrors test.ipynb cell by cell
+    # ------------------------------------------------------------------
+
+    def _simulate_one(self, h5: h5py.File, idx: int) -> None:
+        """Run one configuration and write holograms + metadata to HDF5."""
+        p = self._sample_params()
+        cfg = self.config
+        metadata: dict[str, Any] = {}
+
+        # ---- X-ray config ------------------------------------------------
+        xray_config = XRayConfig(
+            energy=p["energy"],
+            pol="CR",
+            photon_flux=p["photon_flux"],
+            coherence_length=p["coherence_length"],
+        )
+        xray_config.setup()
+
+        # ---- Detector + beamstop config ----------------------------------
+        detector_center = cfg.detector_center or tuple(
+            np.array(cfg.detector_shape) // 2
+        )
+        beamstop_config = BeamstopConfig(
+            bs_method=cfg.beamstop_method,
+            bs_detector_distance=cfg.beamstop_distance,
+            bs_center=np.array(detector_center),
+            bs_config=(
+                {"radius": cfg.beamstop_radius}
+                if cfg.beamstop_method == "circular"
+                else {}
+            ),
+        )
+        detector_config = DetectorConfig(
+            pixel_size=p["detector_pixel_size"],
+            shape=cfg.detector_shape,
+            sample_to_detector_distance=p["detector_distance"],
+            detector_center=detector_center,
+            detector_params={
+                "quantum_efficiency": cfg.detector_quantum_efficiency,
+                "noise_rms": p["detector_noise_rms"],
+            },
+            beamstop_config=beamstop_config,
+        )
+        detector_config.setup()
+        real_space_pixel_size = (
+            detector_config.calc_realspace_resolution(xray_config.beam_params)
+            / cfg.oversampling
+        )
+        metadata.update(beamstop_config.get_metadata(prefix="beamstop/"))
+        metadata.update(detector_config.get_metadata(prefix="detector/"))
+
+        # ---- Sample config -----------------------------------------------
+        sample_shape = np.array(
+            [
+                0,
+                cfg.oversampling * cfg.detector_shape[0],
+                cfg.oversampling * cfg.detector_shape[1],
+            ],
+            dtype=int,
+        )
+        sample_config = SampleConfig(
+            recipe=cfg.recipe,
+            sample_shape=sample_shape,
+            real_space_pixel_size=real_space_pixel_size,
+            xray_config=xray_config,
+            sample_name=cfg.sample_name,
+        )
+        sample_config.setup()
+
+        # ---- Magnetic pattern config -------------------------------------
+        magnetic_pattern_config = MagneticPatternConfig(
+            pattern_type_method=p["pattern_type"],
+            shape=sample_shape[1:],
+            real_space_pixel_size=real_space_pixel_size,
+            pattern_config_length=p["pattern_config_length"],
+            pattern_config=p["pattern_config"],
+        )
+        magnetic_pattern_config.create_pattern()
+        magnetic_pattern = magnetic_pattern_config.magnetic_pattern
+        magnetization = pattern_generator.map_magnetization_to_3d(
+            np.zeros_like(magnetic_pattern),
+            np.sqrt(1 - np.abs(magnetic_pattern) ** 2),
+            magnetic_pattern,
+            nr_repeats=sample_shape[0],
+        )
+        sample_config.assign_magnetic_pattern(magnetization)
+        metadata.update(magnetic_pattern_config.get_metadata(prefix="magnetic_pattern/"))
+
+        # ---- Front aperture config ---------------------------------------
+        front_aperture_config = FrontApertureConfig(
+            aperture_method=cfg.aperture_method,
+            aperture_shape=sample_shape,
+            real_space_pixel_size=sample_config.sample_structure.real_space_pixel_size,
+            aperture_thicknesses=sample_config.sample_structure.layer_thicknesses,
+            aperture_config=dict(
+                apertures_type=cfg.aperture_types,
+                apertures_radius=cfg.aperture_radii,
+                apertures_center=cfg.aperture_centers,
+                apertures_sigma=cfg.aperture_sigmas,
+                thickness_OH=float(
+                    np.sum(
+                        sample_config.sample_structure.layer_thicknesses[
+                            : sample_config.sample_structure.layer_names.index("SiN")
+                        ]
+                    )
+                ),
+            ),
+        )
+        front_aperture_config.setup()
+        sample_config.assign_aperture_mask(front_aperture_config.return_aperture())
+        metadata.update(front_aperture_config.get_metadata(prefix="aperture/"))
+
+        sample_config.sample_structure.calculate_final_dielectric_tensor()
+
+        # ---- Illumination config -----------------------------------------
+        illumination_config = IlluminationConfig(
+            XRayConfig=xray_config,
+            shape=sample_shape[1:],
+            real_space_pixel_size=real_space_pixel_size,
+            illumination_function=cfg.illumination_function,
+            illumination_config={
+                "center": np.array(cfg.illumination_center),
+                "distance": cfg.illumination_focus_distance,
+                "fwhm": cfg.illumination_fwhm,
+            },
+        )
+        illumination_config.setup()
+
+        # ---- Hologram simulation loop ------------------------------------
+        hologram_config = HologramConfig(
+            sample_x=sample_config.sample_structure.x,
+            sample_y=sample_config.sample_structure.y,
+            detector_layout=detector_config.detector_layout,
+        )
+
+        for pol in self._POLARIZATIONS:
+            illumination_config.update_polarization(pol)
+
+            propagator_config = SamplePropagatorConfig(
+                SampleConfig=sample_config,
+                IlluminationConfig=illumination_config,
+                propagator_method="Jones",
+            )
+            propagator_config.setup()
+
+            detector_config.assign_propagated_wavefront(propagator_config)
+            detector_config.detect_hologram()
+            detector_config.hologram_exp.gnomonic_projection()
+
+            hologram_config.add_exit_waves(
+                {pol: propagator_config.return_scalar_wavefield()}
+            )
+            hologram_config.add_holograms(
+                {pol: detector_config.return_ideal_hologram()}, source="ideal"
+            )
+            hologram_config.add_holograms(
+                {pol: detector_config.return_detected_hologram()}, source="detected"
+            )
+
+        metadata.update(propagator_config.get_metadata())
+        metadata.update(xray_config.get_metadata(prefix="xray/"))
+
+        # ---- Write to HDF5 ----------------------------------------------
+        self._write_sample(h5, idx, hologram_config, detector_config, metadata)
+
+    # ------------------------------------------------------------------
+    # HDF5 I/O
+    # ------------------------------------------------------------------
+
+    def _write_sample(
+        self,
+        h5: h5py.File,
+        idx: int,
+        hologram_config: HologramConfig,
+        detector_config: DetectorConfig,
+        metadata: dict[str, Any],
+    ) -> None:
+        """Write one simulation's holograms and metadata to an HDF5 group."""
+        grp = h5.create_group(f"{idx:05d}")
+
+        # Hologram arrays — same structure as test.ipynb save_data dict
+        save_arrays = hologram_config.to_dict(
+            helicities=["CR", "CL"],
+            sources=["exit_wave", "ideal", "detected"],
+        )
+        for helicity, per_source in save_arrays.items():
+            for source, arr in per_source.items():
+                arr = np.asarray(arr)
+                arr = arr.astype(np.complex64 if np.iscomplexobj(arr) else np.float32)
+                grp.create_dataset(
+                    f"{helicity}/{source}", data=arr, compression="gzip"
+                )
+
+        # Beamstop mask
+        if hasattr(detector_config.detector_layout, "beamstop"):
+            grp.create_dataset(
+                "beamstop_mask",
+                data=np.asarray(detector_config.detector_layout.beamstop),
+                compression="gzip",
+            )
+
+        # Metadata — scalar datasets under metadata/ subgroup
+        meta_grp = grp.create_group("metadata")
+        for key, value in metadata.items():
+            parts = key.split("/")
+            sub = meta_grp
+            for part in parts[:-1]:
+                sub = sub.require_group(part)
+            if isinstance(value, str):
+                value = np.bytes_(value)
+            try:
+                sub.create_dataset(parts[-1], data=value)
+            except (TypeError, ValueError):
+                pass  # skip non-serialisable values (arrays, complex objects)
+
+    def _write_pipeline_config(self, h5: h5py.File) -> None:
+        """Store top-level fixed pipeline parameters as datasets."""
+        cfg = self.config
+        grp = h5.create_group("_pipeline_config")
+        grp.create_dataset("recipe", data=np.bytes_(cfg.recipe))
+        grp.create_dataset("n_samples", data=self.n_samples)
+        grp.create_dataset("oversampling", data=cfg.oversampling)
+        grp.create_dataset("aperture_method", data=np.bytes_(str(cfg.aperture_method)))
+        grp.create_dataset(
+            "illumination_function", data=np.bytes_(str(cfg.illumination_function))
+        )
+        grp.create_dataset("beamstop_method", data=np.bytes_(str(cfg.beamstop_method)))
+        grp.create_dataset("beamstop_radius_m", data=cfg.beamstop_radius)
+        grp.create_dataset("beamstop_distance_m", data=cfg.beamstop_distance)
+        grp.create_dataset("illumination_fwhm_m", data=cfg.illumination_fwhm)
+        grp.create_dataset(
+            "illumination_focus_distance_m", data=cfg.illumination_focus_distance
+        )
+        grp.create_dataset("detector_shape", data=np.array(cfg.detector_shape))
+        grp.create_dataset(
+            "detector_quantum_efficiency", data=cfg.detector_quantum_efficiency
+        )

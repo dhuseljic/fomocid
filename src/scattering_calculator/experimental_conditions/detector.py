@@ -50,7 +50,7 @@ class detector_layout:
         y = (
             np.arange(self.detector_shape[0]) - self.detector_center[0]
         ) * self.pixel_size
-        print(np.amin(x), np.amax(x), self.detector_center, self.pixel_size)
+
         X, Y = np.meshgrid(x, y)
         self.detx = X
         self.dety = Y

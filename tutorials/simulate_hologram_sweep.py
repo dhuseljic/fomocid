@@ -1,0 +1,299 @@
+# %%
+# Import general libraries
+import os
+import numpy as np
+import h5py
+
+# Imports from our own codebase
+from fomocid import DATA_ROOT
+from scattering_calculator.simulation_pipelines import (
+    Uniform,
+    Choice,
+)
+from scattering_calculator.simulation_pipelines.pipelines import (
+    HologramPipeline,
+    HologramPipelineConfig,
+    HologramPipelineRanges,
+)
+
+# %%
+# ===================
+# OUTPUT PATH
+# ===================
+output_folder = DATA_ROOT / "Data" / "hologram_sweep"
+output_path = output_folder / "simulation_sweep.h5"
+
+os.makedirs(output_folder, exist_ok=True)
+
+# %%
+# ===================
+# FIXED PARAMETERS
+# ===================
+# These are the baseline values used whenever a parameter is NOT swept.
+# Any field here can be moved into HologramPipelineRanges to vary it.
+
+# --- X-ray source ---
+x_ray_energy = 787.9  # eV  (Co L-edge)
+x_ray_photon_flux = 1e12  # photons/pulse
+coherence_length = 100e-6  # m
+
+# --- Detector ---
+detector_pixel_size = 20e-6  # m/px
+detector_pixel_shape = (1300, 1300)
+detector_distance = 0.02  # m
+detector_center = (650, 650)  # px
+
+# --- Beamstop ---
+beamstop_method = "circular"
+beamstop_distance = 0.001  # m
+beamstop_radius = 0.5e-3  # m
+
+# --- Material stack ---
+recipe = "Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"
+
+# --- Magnetic domain pattern ---
+stripe_width = 20e-9  # m
+sigma = 1e-9  # m
+angle_stripes = np.pi / 4
+waviness_amplitude = 20e-9  # m
+waviness_scale = 20e-9  # m
+
+# --- FTH holography mask ---
+aperture_types = ["OH", "RH", "RH"]
+aperture_radii = [60e-9, 6e-9, 4e-9]  # m
+aperture_centers = [(0, 0), (0.2e-6, -0.15e-6), (0.15e-6, 0.15e-6)]  # m (y, x)
+aperture_sigmas = [1e-9, 2e-9, 2e-9]  # m
+
+# --- Illumination ---
+illumination_function = "gaussian"
+illumination_center = (0.0, 0.0)  # m
+illumination_focus_distance = 1e-3  # m
+illumination_fwhm = 0.5e-6  # m
+
+# %%
+# ===================
+# PIPELINE CONFIG
+# ===================
+config = HologramPipelineConfig(
+    # Sample material stack
+    recipe=recipe,
+    sample_name="Co_Pt_multilayer",
+    # X-ray source
+    xray_energy=x_ray_energy,
+    xray_photon_flux=x_ray_photon_flux,
+    xray_coherence_length=coherence_length,
+    # Detector geometry
+    detector_shape=detector_pixel_shape,
+    detector_pixel_size=detector_pixel_size,
+    detector_distance=detector_distance,
+    detector_center=detector_center,
+    # Beamstop
+    beamstop_method=beamstop_method,
+    beamstop_distance=beamstop_distance,
+    beamstop_radius=beamstop_radius,
+    # FTH holography mask
+    aperture_method="FTH_circular",
+    aperture_types=aperture_types,
+    aperture_radii=aperture_radii,
+    aperture_centers=aperture_centers,
+    aperture_sigmas=aperture_sigmas,
+    # Illumination
+    illumination_function=illumination_function,
+    illumination_center=illumination_center,
+    illumination_focus_distance=illumination_focus_distance,
+    illumination_fwhm=illumination_fwhm,
+    # Magnetic domain pattern
+    pattern_type="wavy_stripe_pattern",
+    pattern_config={
+        "angle_stripes": angle_stripes,
+    },
+    pattern_config_length={
+        "stripe_width": stripe_width,
+        "sigma": sigma,
+        "waviness_amplitude": waviness_amplitude,
+        "waviness_scale": waviness_scale,
+    },
+    # Simulation grid: sample_shape = oversampling * detector_shape
+    oversampling=2,
+)
+
+# %%
+# ===================
+# PARAMETER RANGES
+# ===================
+# Define which parameters vary across runs and how they are sampled.
+#
+# Uniform(low, high)  — draw uniformly from [low, high]
+# Choice((a, b, ...)) — pick uniformly from a discrete set
+# None                — use the fixed value from HologramPipelineConfig
+
+ranges = HologramPipelineRanges(
+    # Sweep X-ray energy across the Co L-edge absorption region
+    xray_energy=Uniform(775, 795),
+    # Vary detector distance to change real-space resolution
+    detector_distance=Choice((0.02, 0.04, 0.08)),
+    # Vary magnetic stripe parameters independently
+    pattern_config_length={
+        "stripe_width": Uniform(10e-9, 50e-9),
+        "waviness_amplitude": Uniform(0e-9, 30e-9),
+    },
+    # All other parameters use the fixed values from config above
+)
+
+# %%
+# ===================
+# RUN PIPELINE
+# ===================
+nr_simulations = 10  # increase to e.g. 1000 for a full training dataset
+
+pipeline = HologramPipeline(
+    config=config,
+    ranges=ranges,
+    output_path=output_path,
+    n_samples=nr_simulations,
+    verbose=True,
+)
+
+pipeline.run()
+
+# %%
+# ===================
+# INSPECT OUTPUT + FIGURE
+# ===================
+# Each group '00000/', '00001/', ... contains:
+#
+#   CR/ideal       — ideal (noise-free) hologram for circular-right polarisation
+#   CR/detected    — detected (noisy) hologram
+#   CR/exit_wave   — complex scalar exit wavefield
+#   CL/...         — same for circular-left
+#   beamstop_mask  — 2D beamstop mask
+#   metadata/      — all physical parameters used for this run
+import matplotlib.pyplot as plt
+
+with h5py.File(output_path, "r") as h5:
+    print(f"File contains {nr_simulations} simulations.")
+    print(f"Top-level keys: {list(h5.keys())}\n")
+
+    # Show structure of the first simulation
+    grp = h5["00000"]
+    print("Datasets in '00000/':")
+    grp.visit(lambda name: print(f"  {name}"))
+
+    print("\nMetadata for '00000/':")
+
+    def _print_meta(name, obj):
+        if hasattr(obj, "shape") and obj.shape == ():
+            print(f"  {name} = {obj[()]}")
+
+    grp["metadata"].visititems(_print_meta)
+
+    # Load all arrays for the first simulation (exit wave kept complex)
+    # Datasets have shape (N_frames, Ny, Nx); select one frame for display.
+    frame = 0
+    cr_exit     = grp["CR/exit_wave"][frame]
+    cr_ideal    = grp["CR/ideal"][frame]
+    cr_detected = grp["CR/detected"][frame]
+
+    cl_exit     = grp["CL/exit_wave"][frame]
+    cl_ideal    = grp["CL/ideal"][frame]
+    cl_detected = grp["CL/detected"][frame]
+
+print(f"Hologram shape: {cr_ideal.shape}")
+
+# ------------------------------------------------------------------
+# Helper: colour limits matching HologramConfig.visualize_averages()
+# ------------------------------------------------------------------
+def _clim(arr):
+    return np.nanpercentile(arr, [0.1, 99.9])
+
+def _sym_clim(diff):
+    d = np.nanpercentile(np.abs(diff), 99.9)
+    return -d, d
+
+# ------------------------------------------------------------------
+# Figure 1 — CR, CL, CR−CL difference
+#
+# Layout (4 rows × 3 cols), mirrors HologramConfig.visualize_averages():
+#
+#   Row 0  Exit wave amplitude   inferno    [0.1–99.9 pct]
+#   Row 1  Exit wave phase       hsv        [−π, π]
+#   Row 2  Ideal hologram        viridis    [0.1–99.9 pct]
+#   Row 3  Detected hologram     viridis    [0.1–99.9 pct]
+#   Cols   CR  |  CL  |  CR−CL (RdBu_r, symmetric ±99.9 pct)
+# ------------------------------------------------------------------
+cr_amp, cl_amp = np.abs(cr_exit), np.abs(cl_exit)
+cr_pha, cl_pha = np.angle(cr_exit), np.angle(cl_exit)
+
+rows_spec = [
+    # (cr_data,    cl_data,    cmap,      label,               cbar_label)
+    (cr_amp,     cl_amp,     "inferno", "Exit wave |E|",      "amplitude"),
+    (cr_pha,     cl_pha,     "hsv",     "Exit wave phase",    "rad"),
+    (cr_ideal,   cl_ideal,   "viridis", "Ideal hologram",     "counts"),
+    (cr_detected, cl_detected, "viridis", "Detected hologram", "counts"),
+]
+
+fig1, axes1 = plt.subplots(4, 3, figsize=(13, 17), constrained_layout=True)
+fig1.suptitle("Simulation 00000 — CR, CL, CR−CL difference", fontsize=13)
+
+for row_idx, (cr_d, cl_d, cmap, label, cbar_label) in enumerate(rows_spec):
+    diff = cr_d - cl_d
+
+    if cmap == "hsv":
+        lo_cr, hi_cr = -np.pi, np.pi
+        lo_cl, hi_cl = -np.pi, np.pi
+    else:
+        lo_cr, hi_cr = _clim(cr_d)
+        lo_cl, hi_cl = _clim(cl_d)
+
+    diff_lo, diff_hi = _sym_clim(diff)
+
+    panels = [
+        (cr_d,  f"CR — {label}",    lo_cr,    hi_cr,    cmap),
+        (cl_d,  f"CL — {label}",    lo_cl,    hi_cl,    cmap),
+        (diff,  f"CR−CL — {label}", diff_lo,  diff_hi,  "RdBu_r"),
+    ]
+
+    for col_idx, (img, title, lo, hi, cm) in enumerate(panels):
+        ax = axes1[row_idx, col_idx]
+        m = ax.imshow(img, cmap=cm, vmin=lo, vmax=hi, origin="upper")
+        ax.set_title(title, fontsize=10)
+        ax.set_xlabel("x (px)")
+        ax.set_ylabel("y (px)")
+        fig1.colorbar(m, ax=ax, fraction=0.046, pad=0.04, label=cbar_label)
+
+plt.show()
+
+# ------------------------------------------------------------------
+# Figure 2 — FTH reconstruction of the ideal CR−CL difference
+#
+# Mirrors HologramConfig.visualize_reconstruction(source="ideal",
+#                                                  helicity="diff")
+# Reconstruction: fftshift(fft2(fftshift(hologram)))
+# ------------------------------------------------------------------
+diff_ideal = cr_ideal - cl_ideal
+rec = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(diff_ideal)))
+
+rec_panels = [
+    (np.abs(rec),   "Amplitude",  "inferno", None,   None,   "Amplitude"),
+    (np.angle(rec), "Phase",      "hsv",     -np.pi, np.pi,  "Phase (rad)"),
+    (np.real(rec),  "Real",       "gray",    None,   None,   "Real part"),
+    (np.imag(rec),  "Imaginary",  "gray",    None,   None,   "Imag part"),
+]
+
+fig2, axes2 = plt.subplots(2, 2, figsize=(10, 9), constrained_layout=True)
+fig2.suptitle(
+    "FTH reconstruction — ideal CR−CL difference (simulation 00000)", fontsize=12
+)
+
+for ax, (data, title, cmap, vmin, vmax, cbar_label) in zip(axes2.flat, rec_panels):
+    if vmin is None:
+        vmin, vmax = np.nanpercentile(data, [0.1, 99.9])
+    m = ax.imshow(data, cmap=cmap, vmin=vmin, vmax=vmax, origin="upper")
+    ax.set_title(title, fontsize=10)
+    ax.set_xlabel("x (px)")
+    ax.set_ylabel("y (px)")
+    fig2.colorbar(m, ax=ax, fraction=0.046, pad=0.04, label=cbar_label)
+
+plt.show()
+
+# %%

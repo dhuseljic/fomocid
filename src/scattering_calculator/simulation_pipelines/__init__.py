@@ -1,5 +1,10 @@
 """Simulation pipeline configuration for coherent scattering experiments."""
 
+from .pipelines.hologram_pipeline import (
+    HologramPipeline,
+    HologramPipelineConfig,
+    HologramPipelineRanges,
+)
 from .simulate_experiment import SetupSimulationExperiment
 from .simulation_configuration import (
     BeamstopConfig,
@@ -28,6 +33,9 @@ from .simulation_configuration_range import (
 
 __all__ = [
     "BeamstopConfig",
+    "HologramPipeline",
+    "HologramPipelineConfig",
+    "HologramPipelineRanges",
     "SetupSimulationExperiment",
     "BeamstopConfigRange",
     "Choice",

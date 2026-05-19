@@ -14,6 +14,7 @@ from scattering_calculator.simulation_pipelines.simulation_configuration import 
     SampleConfig,
     SimulationConfig,
     XRayConfig,
+    HologramConfig,
 )
 
 
@@ -71,6 +72,11 @@ def _s(v: Any) -> Any:
     return v
 
 
+def _sample_dict(d: dict) -> dict:
+    """Apply _s() to every value in *d*, recursively for nested dicts."""
+    return {k: _sample_dict(v) if isinstance(v, dict) else _s(v) for k, v in d.items()}
+
+
 @dataclass
 class XRayConfigRange:
     """Parameter ranges for :class:`XRayConfig`.
@@ -86,7 +92,7 @@ class XRayConfigRange:
 
     energy: float | Uniform
     photon_flux: float | Uniform
-    polarization: str | Choice = "circular"
+    pol: str | Choice = "circular"
     coherence_length: float | Uniform = 10e-6  # m
 
     def sample(self) -> XRayConfig:
@@ -94,7 +100,7 @@ class XRayConfigRange:
         return XRayConfig(
             energy=_s(self.energy),
             photon_flux=_s(self.photon_flux),
-            polarization=_s(self.polarization),
+            pol=_s(self.pol),
             coherence_length=_s(self.coherence_length),
         )
 
@@ -169,16 +175,31 @@ class SampleConfigRange:
 
 @dataclass
 class MagneticPatternConfigRange:
-    """Parameter ranges for :class:`MagneticPatternConfig`."""
+    """Parameter ranges for :class:`MagneticPatternConfig`.
+
+    Dict values inside ``pattern_config`` and ``pattern_config_length`` can
+    be :class:`Uniform` or :class:`Choice` samplers, allowing individual
+    pattern parameters to be swept independently.
+
+    Examples
+    --------
+    >>> r = MagneticPatternConfigRange(
+    ...     pattern_config={"angle_stripes": Uniform(0, np.pi)},
+    ...     pattern_config_length={"stripe_width": Uniform(10e-9, 50e-9)},
+    ... )
+    >>> cfg = r.sample()  # MagneticPatternConfig with sampled stripe_width
+    """
 
     pattern_type_method: str | Choice = "skyrmion_pattern"
     pattern_config: dict = field(default_factory=dict)
+    pattern_config_length: dict = field(default_factory=dict)
 
     def sample(self) -> MagneticPatternConfig:
         """Sample one :class:`MagneticPatternConfig` from the defined ranges."""
         return MagneticPatternConfig(
             pattern_type_method=_s(self.pattern_type_method),
-            pattern_config=self.pattern_config,
+            pattern_config=_sample_dict(self.pattern_config),
+            pattern_config_length=_sample_dict(self.pattern_config_length),
         )
 
 
