@@ -33,7 +33,7 @@ def save_simulation_arrays_hdf5(
     Args:
         file_path: Destination path for the HDF5 file.
         arrays: Mapping of dataset name to array.
-        metadata: Optional key-value pairs stored as root-level attributes.
+        metadata: Optional key-value pairs stored as datasets under a ``metadata/`` group.
         overwrite: If False (default), raise FileExistsError when the file
             already exists.
 
@@ -66,6 +66,12 @@ def save_simulation_arrays_hdf5(
 
         if metadata:
             for key, value in metadata.items():
-                f.attrs[key] = value
+                parts = f"metadata/{key}".split("/")
+                grp = f
+                for part in parts[:-1]:
+                    grp = grp.require_group(part)
+                if isinstance(value, str):
+                    value = np.bytes_(value)
+                grp.create_dataset(parts[-1], data=value)
 
     return file_path

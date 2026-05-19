@@ -788,6 +788,16 @@ class IlluminationConfig(_ConfigMixin):
         ax[1].set_ylabel("y in µm")
         plt.colorbar(m1, ax=ax[1], label="Phase in rad")
 
+    def get_metadata(self, prefix: str = "") -> dict[str, int | float | str | bool]:
+        """Return config fields plus derived beam parameters as scalar metadata."""
+        meta = super().get_metadata(prefix=prefix)
+        if hasattr(self, "beam_params"):
+            bp = self.beam_params
+            bp_prefix = f"{prefix}beam_params/"
+            for attr in ("energy", "wavelength", "wavevector", "pol", "photon_flux", "coherence_length"):
+                meta[f"{bp_prefix}{attr}"] = getattr(bp, attr)
+        return meta
+
 
 @dataclass
 class SamplePropagatorConfig(_ConfigMixin):
@@ -891,6 +901,13 @@ class SamplePropagatorConfig(_ConfigMixin):
         ax[1].set_xlabel("x in µm")
         ax[1].set_ylabel("y in µm")
         plt.colorbar(m1, ax=ax[1], label="Phase in rad")
+
+    def get_metadata(self, prefix: str = "") -> dict[str, int | float | str | bool]:
+        """Return own fields plus SampleConfig and IlluminationConfig metadata."""
+        meta = super().get_metadata(prefix=prefix)
+        meta.update(self.SampleConfig.get_metadata(prefix=f"{prefix}sample/"))
+        meta.update(self.IlluminationConfig.get_metadata(prefix=f"{prefix}illumination/"))
+        return meta
 
 
 @dataclass
