@@ -476,8 +476,9 @@ class detector_hologram:
             Gnomonic-projected hologram.
         """
 
-        # how much is a pixel in q space
-        Dq = np.pi / self.real_space_pixel_size
+        # Full reciprocal-space span of the shifted FFT grid. One FFT pixel is
+        # therefore Dq / N, so q maps to q / Dq * N + N / 2.
+        Dq = 2.0 * np.pi / self.real_space_pixel_size
 
         ## we just need to rescale detqx so they are expressed in absolute pixel value
         self.hologram_detector = map_coordinates(

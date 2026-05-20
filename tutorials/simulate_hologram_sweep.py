@@ -160,7 +160,7 @@ ranges = HologramPipelineRanges(
 # ===================
 # RUN PIPELINE
 # ===================
-nr_simulations = 10  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 2  # increase to e.g. 1000 for a full training dataset
 
 pipeline = HologramPipeline(
     config=config,

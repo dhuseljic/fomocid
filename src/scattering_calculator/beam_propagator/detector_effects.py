@@ -373,8 +373,9 @@ class detector_hologram:
         #qx = (np.arange(self.sample_shape[1])) * (np.pi/self.real_space_pixel_size) 
         #qy = (np.arange(self.sample_shape[0])) * (np.pi/self.real_space_pixel_size) 
         #QX, QY = np.meshgrid(qx, qy)
-        # how much is a pixel in q space
-        Dq=np.pi/self.real_space_pixel_size
+        # Full reciprocal-space span of the shifted FFT grid. One FFT pixel is
+        # therefore Dq / N, so q maps to q / Dq * N + N / 2.
+        Dq=2.0*np.pi/self.real_space_pixel_size
 
         # we can use detx and dety to calculate the qx, qy coordinates in the far field corresponding to the real-space coordinates of the detector pixels
         # and then we can use these to decide where to sample hologram to have a gnomonic projection effect.

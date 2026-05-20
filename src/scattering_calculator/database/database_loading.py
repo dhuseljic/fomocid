@@ -77,8 +77,8 @@ class material_params:
             X-ray energy in eV.
         db_path : str or Path or None, optional
             Path to the refractive-index database directory. Defaults to
-            ``../src/scattering_calculator/database/material_parameter/refractive_indexes``
-            relative to the current working directory.
+            the package's bundled
+            ``database/material_parameter/refractive_indexes`` directory.
 
         Returns
         -------
@@ -88,8 +88,10 @@ class material_params:
             ``n_circ = -delta_c - i*beta_c``, and ``n_lin = 0`` (reserved).
         """
         if db_path is None:
-            db_path = Path(
-                "../src/scattering_calculator/database/material_parameter/refractive_indexes"
+            db_path = (
+                Path(__file__).resolve().parent
+                / "material_parameter"
+                / "refractive_indexes"
             )
         else:
             db_path = Path(db_path)
