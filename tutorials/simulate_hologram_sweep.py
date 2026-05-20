@@ -47,7 +47,15 @@ detector_center = (650, 650)  # px
 beamstop_method = "circular"
 beamstop_distance = 0.001  # m
 beamstop_config = {
-    "radius": 0.5e-3,  # m
+    "radius": 0.5e-3,
+    "angle": 0,
+    "sigma": 1,
+    "ellipticity": (0.8, 1.2),
+    "roughness": 0.05,
+    "roughness_modes": (3, 9),
+    "wire_width": 0.05e-3,
+    "wire_bend": 0.1e-3,
+    "seed": None,
 }
 
 # --- Material stack ---
@@ -138,6 +146,12 @@ ranges = HologramPipelineRanges(
     pattern_config_length={
         "stripe_width": Uniform(10e-9, 50e-9),
         "waviness_amplitude": Uniform(0e-9, 30e-9),
+    },
+    beamstop_config={
+        "radius": Uniform(0.5e-3, 2.5e-3),
+        "angle": Uniform(0.0, np.pi),
+        "wire_width": Uniform(0.0, 0.08e-3),
+        "wire_bend": Uniform(0.0, 0.2e-3),
     },
     # All other parameters use the fixed values from config above
 )
