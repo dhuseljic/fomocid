@@ -90,13 +90,21 @@ class SetupSimulationExperiment:
         self.exp_detector.calc_q_space_coordinates(self.beam_params)
 
     def _setup_beamstop(self):
+        if hasattr(self.beamstop_config, "setup"):
+            self.beamstop = self.beamstop_config.setup(self.exp_detector)
+            self.exp_detector.assign_beamstop(self.beamstop.return_beamstop())
+            return
+
         self.beamstop = detector.beamstop(
             self.exp_detector, self.beamstop_config.beamstop_distance
         )
+        beamstop_kwargs = dict(getattr(self.beamstop_config, "bs_config", {}))
+        if not beamstop_kwargs and hasattr(self.beamstop_config, "beamstop_radius"):
+            beamstop_kwargs["radius"] = self.beamstop_config.beamstop_radius
         self.beamstop.create_circle_beamstop(
             self.beamstop_config.beamstop_center,
-            self.beamstop_config.beamstop_radius,
             use_real_space_coordinates=True,
+            **beamstop_kwargs,
         )
         self.exp_detector.assign_beamstop(self.beamstop.return_beamstop())
 

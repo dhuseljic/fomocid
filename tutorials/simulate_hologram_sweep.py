@@ -46,7 +46,9 @@ detector_center = (650, 650)  # px
 # --- Beamstop ---
 beamstop_method = "circular"
 beamstop_distance = 0.001  # m
-beamstop_radius = 0.5e-3  # m
+beamstop_config = {
+    "radius": 0.5e-3,  # m
+}
 
 # --- Material stack ---
 recipe = "Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"
@@ -90,7 +92,7 @@ config = HologramPipelineConfig(
     # Beamstop
     beamstop_method=beamstop_method,
     beamstop_distance=beamstop_distance,
-    beamstop_radius=beamstop_radius,
+    beamstop_config=beamstop_config,
     # FTH holography mask
     aperture_method="FTH_circular",
     aperture_types=aperture_types,

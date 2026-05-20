@@ -105,8 +105,9 @@ class HologramPipelineConfig:
         Beamstop shape. ``None`` → transparent (no beamstop).
     beamstop_distance : float
         Sample-to-beamstop distance in metres.
-    beamstop_radius : float
-        Physical beamstop radius in metres (for ``"circular"``).
+    beamstop_config : dict
+        Optional keyword arguments forwarded to the beamstop generator. If
+        ``"radius"`` is missing, no beamstop or wire is created.
     aperture_method : {"FTH_circular"} or None
         Holography mask layout. ``None`` → fully transparent.
     aperture_types : list of {"OH", "RH"}
@@ -160,7 +161,7 @@ class HologramPipelineConfig:
     # Beamstop
     beamstop_method: str | None = "circular"
     beamstop_distance: float = 0.001  # m
-    beamstop_radius: float = 0.5e-3  # m
+    beamstop_config: dict = field(default_factory=dict)
 
     # FTH holography mask
     aperture_method: str | None = "FTH_circular"
@@ -210,6 +211,7 @@ class HologramPipelineRanges:
     For ``pattern_config`` and ``pattern_config_length``, individual dict
     values can themselves be :class:`Uniform` or :class:`Choice` samplers;
     keys not listed in the range dict fall back to the base config value.
+    ``beamstop_config`` follows the same pattern.
 
     Examples
     --------
@@ -229,6 +231,9 @@ class HologramPipelineRanges:
     detector_distance: float | Uniform | None = None
     detector_pixel_size: float | Uniform | None = None
     detector_noise_rms: float | Uniform | None = None
+
+    # Beamstop
+    beamstop_config: dict | None = None
 
     # Magnetic pattern
     pattern_type: str | Choice | None = None
@@ -359,6 +364,7 @@ class HologramPipeline:
             "detector_distance": _pick(rng.detector_distance, cfg.detector_distance),
             "detector_pixel_size": _pick(rng.detector_pixel_size, cfg.detector_pixel_size),
             "detector_noise_rms": _pick(rng.detector_noise_rms, cfg.detector_noise_rms),
+            "beamstop_config": _merge_dict(rng.beamstop_config, cfg.beamstop_config),
             "pattern_type": _pick(rng.pattern_type, cfg.pattern_type),
             "pattern_config": _merge_dict(rng.pattern_config, cfg.pattern_config),
             "pattern_config_length": _merge_dict(
@@ -392,12 +398,8 @@ class HologramPipeline:
         beamstop_config = BeamstopConfig(
             bs_method=cfg.beamstop_method,
             bs_detector_distance=cfg.beamstop_distance,
-            bs_center=np.array(detector_center),
-            bs_config=(
-                {"radius": cfg.beamstop_radius}
-                if cfg.beamstop_method == "circular"
-                else {}
-            ),
+            bs_center=tuple(detector_center),
+            bs_config=p["beamstop_config"],
         )
         detector_config = DetectorConfig(
             pixel_size=p["detector_pixel_size"],
@@ -594,8 +596,15 @@ class HologramPipeline:
             "illumination_function", data=np.bytes_(str(cfg.illumination_function))
         )
         grp.create_dataset("beamstop_method", data=np.bytes_(str(cfg.beamstop_method)))
-        grp.create_dataset("beamstop_radius_m", data=cfg.beamstop_radius)
         grp.create_dataset("beamstop_distance_m", data=cfg.beamstop_distance)
+        beamstop_cfg_grp = grp.create_group("beamstop_config")
+        for key, value in cfg.beamstop_config.items():
+            if isinstance(value, str):
+                value = np.bytes_(value)
+            try:
+                beamstop_cfg_grp.create_dataset(key, data=value)
+            except (TypeError, ValueError):
+                pass
         grp.create_dataset("illumination_fwhm_m", data=cfg.illumination_fwhm)
         grp.create_dataset(
             "illumination_focus_distance_m", data=cfg.illumination_focus_distance

@@ -140,9 +140,8 @@ class BeamstopConfig(_ConfigMixin):
     bs_center : tuple of int
         Beamstop centre position in pixels (row, col).
     bs_config : dict
-        Optional keyword arguments forwarded to the beamstop creation method.
-        Missing values use the detector defaults. If ``"radius"`` is missing,
-        no beamstop or wire is created.
+        Additional keyword arguments forwarded to the beamstop creation method
+        (e.g. ``{"radius": 0.5e-3}`` for a circular beamstop).
     """
 
     bs_method: Literal["circular", None] | None = "circular"
@@ -154,53 +153,6 @@ class BeamstopConfig(_ConfigMixin):
         if self.bs_detector_distance <= 0:
             raise ValueError(
                 f"bs_detector_distance must be positive, got {self.bs_detector_distance}"
-            )
-        radius = self.bs_config.get("radius")
-        if radius is not None and radius <= 0:
-            raise ValueError(f'bs_config["radius"] must be positive, got {radius}')
-        sigma = self.bs_config.get("sigma")
-        if sigma is not None and sigma < 0:
-            raise ValueError(f'bs_config["sigma"] must be non-negative, got {sigma}')
-        ellipticity = self.bs_config.get(
-            "ellipticity", self.bs_config.get("ellipticity_range", (1.0, 1.0))
-        )
-        if any(v <= 0 for v in ellipticity):
-            raise ValueError(
-                'bs_config["ellipticity"] values must be positive, '
-                f"got {ellipticity}"
-            )
-        if ellipticity[0] > ellipticity[1]:
-            raise ValueError(
-                'bs_config["ellipticity"] must be ordered as (min, max), '
-                f"got {ellipticity}"
-            )
-        roughness = self.bs_config.get("roughness", 0.0)
-        if roughness < 0:
-            raise ValueError(
-                f'bs_config["roughness"] must be non-negative, got {roughness}'
-            )
-        roughness_modes = self.bs_config.get(
-            "roughness_modes", self.bs_config.get("rougness_modes", (0, 0))
-        )
-        if roughness > 0 and roughness_modes[0] < 1:
-            raise ValueError(
-                'bs_config["roughness_modes"] must start at 1 or greater when '
-                f'bs_config["roughness"] is positive, got {roughness_modes}'
-            )
-        if roughness_modes[0] > roughness_modes[1]:
-            raise ValueError(
-                'bs_config["roughness_modes"] must be ordered as (min, max), '
-                f"got {roughness_modes}"
-            )
-        wire_width = self.bs_config.get("wire_width", 0.0)
-        if wire_width < 0:
-            raise ValueError(
-                f'bs_config["wire_width"] must be non-negative, got {wire_width}'
-            )
-        wire_bend = self.bs_config.get("wire_bend", 0.0)
-        if wire_bend < 0:
-            raise ValueError(
-                f'bs_config["wire_bend"] must be non-negative, got {wire_bend}'
             )
 
     def setup(self, detector_layout: detector.detector_layout) -> detector.beamstop:
@@ -221,18 +173,10 @@ class BeamstopConfig(_ConfigMixin):
             distance_detector_beamstop=self.bs_detector_distance,
         )
         if self.bs_method is None:
-            bs.create_empty_beamstop()
-            return bs
+            return bs.create_empty_beamstop()
         if self.bs_method == "circular":
-            beamstop_kwargs = dict(self.bs_config)
-            if "rougness_modes" in beamstop_kwargs:
-                beamstop_kwargs["roughness_modes"] = beamstop_kwargs.pop(
-                    "rougness_modes"
-                )
             bs.create_circle_beamstop(
-                center=self.bs_center,
-                use_real_space_coordinates=True,
-                **beamstop_kwargs,
+                center=self.bs_center, use_real_space_coordinates=True, **self.bs_config
             )
         return bs
 

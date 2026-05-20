@@ -1,7 +1,6 @@
 from __future__ import annotations
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from scattering_calculator.utils.masking import circle_mask
 import matplotlib.pyplot as plt
 from scipy import signal
 from scipy.ndimage import gaussian_filter
@@ -183,33 +182,121 @@ class beamstop:
     def create_circle_beamstop(
         self,
         center: tuple[float, float],
-        radius: float,
+        radius: float | None = None,
         use_real_space_coordinates: bool = False,
         sigma: float | None = None,
+        angle: float | None = None,
+        ellipticity: tuple[float, float] = (1.0, 1.0),
+        roughness: float = 0.0,
+        roughness_modes: tuple[int, int] = (0, 0),
+        wire_width: float = 0.0,
+        wire_bend: float = 0.0,
+        seed: int | None = None,
+        theta: float | None = None,
+        ellipticity_range: tuple[float, float] | None = None,
     ) -> None:
-        """Create a circular beamstop mask and store it in ``self.beamstop``.
+        """Create a beamstop mask and store it in ``self.beamstop``.
 
         Parameters
         ----------
-        center : tuple of int
+        center : tuple of float
             Mask centre coordinates (y, x) in pixels.
-        radius : float
-            Beamstop radius in metres.
+        radius : float or None
+            Beamstop radius in metres. If ``None``, create an empty beamstop.
         use_real_space_coordinates : bool, optional
             If ``True``, convert the effective radius from metres to pixels
             using the detector pixel size. Default is ``False``.
         sigma : float or None, optional
             Standard deviation for Gaussian edge smoothing. No smoothing when
             ``None``.
+        angle : float or None, optional
+            Beamstop and wire angle in radians. Random when ``None``.
+        ellipticity : tuple of float, optional
+            Random range for the ellipse axis ratio. ``(1, 1)`` creates a
+            perfect circle.
+        roughness : float, optional
+            Relative amplitude of the smooth random boundary roughness.
+        roughness_modes : tuple of int, optional
+            Inclusive range of angular Fourier modes used for the boundary
+            roughness.
+        wire_width : float, optional
+            Wire width. A value of ``0`` disables the wire.
+        wire_bend : float, optional
+            Maximum wire bend amplitude.
+        seed : int or None, optional
+            Random seed for reproducible beamstops.
+        theta : float or None, optional
+            Deprecated alias for ``angle``.
+        ellipticity_range : tuple of float or None, optional
+            Deprecated alias for ``ellipticity``.
         """
+        if radius is None:
+            self.create_empty_beamstop()
+            return
+
         radius_effective = self.calc_effective_beamstop_radius(radius)
+        wire_width_effective = self.calc_effective_beamstop_radius(wire_width)
+        wire_bend_effective = self.calc_effective_beamstop_radius(wire_bend)
 
         if use_real_space_coordinates:
             radius_effective = radius_effective / self.detector_pixel_size
+            wire_width_effective = wire_width_effective / self.detector_pixel_size
+            wire_bend_effective = wire_bend_effective / self.detector_pixel_size
 
-        self.beamstop = circle_mask(
-            self.detector_shape, center, radius_effective, sigma=sigma
-        )
+        rng = np.random.default_rng(seed)
+        if angle is None:
+            angle = theta
+        if angle is None:
+            angle = rng.uniform(0.0, np.pi)
+        if ellipticity_range is not None:
+            ellipticity = ellipticity_range
+        orientation = angle
+
+        y = np.arange(self.detector_shape[0], dtype=float)
+        x = np.arange(self.detector_shape[1], dtype=float)
+        X, Y = np.meshgrid(x, y, indexing="xy")
+        dy = Y - center[0]
+        dx = X - center[1]
+
+        axis_ratio = rng.uniform(*ellipticity)
+        radius_y = radius_effective * np.sqrt(axis_ratio)
+        radius_x = radius_effective / np.sqrt(axis_ratio)
+
+        xr = np.cos(orientation) * dx + np.sin(orientation) * dy
+        yr = -np.sin(orientation) * dx + np.cos(orientation) * dy
+        normalized_radius = np.sqrt((xr / radius_x) ** 2 + (yr / radius_y) ** 2)
+        polar_angle = np.arctan2(yr / radius_y, xr / radius_x)
+
+        boundary = np.ones(self.detector_shape, dtype=float)
+        if roughness > 0:
+            min_mode, max_mode = roughness_modes
+            for mode in range(max(1, min_mode), max_mode + 1):
+                amplitude = rng.normal(scale=roughness / mode)
+                phase = rng.uniform(0.0, 2.0 * np.pi)
+                boundary += amplitude * np.cos(mode * polar_angle + phase)
+            boundary = np.clip(
+                boundary, 1.0 - 2.0 * roughness, 1.0 + 2.0 * roughness
+            )
+
+        mask = (normalized_radius <= boundary).astype(float)
+
+        if wire_width_effective > 0:
+            along_wire = np.cos(orientation) * dx + np.sin(orientation) * dy
+            across_wire = -np.sin(orientation) * dx + np.cos(orientation) * dy
+            detector_diagonal = np.hypot(*self.detector_shape)
+            bend_phase = rng.uniform(0.0, 2.0 * np.pi)
+            bend_period = rng.uniform(0.8, 1.4) * detector_diagonal
+            bend = wire_bend_effective * (
+                np.sin(2.0 * np.pi * along_wire / bend_period + bend_phase)
+                - np.sin(bend_phase)
+            )
+            wire_mask = np.abs(across_wire - bend) <= (0.5 * wire_width_effective)
+            mask = np.maximum(mask, wire_mask.astype(float))
+
+        if sigma is not None and sigma != 0:
+            mask = gaussian_filter(mask, sigma)
+
+        self.beamstop = mask
 
     def create_empty_beamstop(self) -> None:
         """Create an empty beamstop mask (all zeros)."""
