@@ -84,11 +84,11 @@ beamstop_config = {
 recipe = "Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"
 
 # --- Magnetic domain pattern ---
-stripe_width = 20e-9  # m
-sigma = 1e-9  # m
+stripe_width = 150e-9  # m
+sigma = 10e-9  # m
 angle_stripes = np.pi / 4
-waviness_amplitude = 80e-9  # ms
-waviness_scale = 20e-9  # m
+waviness_amplitude = 280e-9  # ms
+waviness_scale = 280e-9  # m
 
 # --- FTH holography mask ---
 aperture_types = ["OH", "RH", "RH"]
@@ -330,7 +330,7 @@ ranges = HologramPipelineRanges(
 # ===================
 # RUN PIPELINE
 # ===================
-nr_simulations = 7  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 2  # increase to e.g. 1000 for a full training dataset
 
 pipeline = HologramPipeline(
     config=config,
