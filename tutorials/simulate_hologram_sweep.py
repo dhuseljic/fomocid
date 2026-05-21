@@ -3,6 +3,7 @@
 import os
 import numpy as np
 import h5py
+from scattering_calculator.utils import physics
 
 # Imports from our own codebase
 from fomocid import DATA_ROOT
@@ -78,7 +79,7 @@ aperture_sigmas = [1e-9, 2e-9, 2e-9]  # m
 illumination_function = "gaussian"
 illumination_center = (0.0, 0.0)  # m
 illumination_focus_distance = 1e-3  # m
-illumination_fwhm = 0.5e-6  # m
+illumination_fwhm = 10.5e-6  # m
 
 # %%
 # ===================
@@ -137,11 +138,114 @@ config = HologramPipelineConfig(
 # Choice((a, b, ...)) — pick uniformly from a discrete set
 # None                — use the fixed value from HologramPipelineConfig
 
+def detector_distance_range(params):
+    """Choose a detector-distance range from sampled energy and stripe width."""
+    # This function is called once per simulated sample after x-ray energy,
+    # detector pixel size, detector shape, and pattern_config_length have
+    # already been sampled. It returns either a fixed detector distance or a
+    # Uniform range that the pipeline samples immediately.
+    wavelength = physics.photon_energy_wavelength(params["energy"])
+    stripe_width = params["pattern_config_length"]["stripe_width"]
+    detector_width = params["detector_shape"][0] * params["detector_pixel_size"]
+
+    # Upper bound: keep the detector real-space resolution smaller than the
+    # sampled texture period. Very long distances are capped at 0.75 m.
+    max_resolution = stripe_width
+    maximum_detector_distance = detector_width / (
+        2 * np.tan(wavelength / (2 * max_resolution))
+    )
+    maximum_detector_distance = np.minimum(maximum_detector_distance, 75e-2)
+
+    # Lower bound: keep the field of view large enough to contain several
+    # texture periods. Very short distances are clipped at 0.03 m.
+    min_fov = 10 * stripe_width
+    min_resolution = min_fov / params["detector_shape"][0]
+    minimum_detector_distance = detector_width / (
+        2 * np.tan(wavelength / (2 * min_resolution))
+    )
+    minimum_detector_distance = np.maximum(minimum_detector_distance, 3e-2)
+
+    if maximum_detector_distance <= minimum_detector_distance:
+        return minimum_detector_distance
+    return Uniform(minimum_detector_distance, maximum_detector_distance)
+
+
+def random_aperture_config(params):
+    """Generate one random OH/RH holography mask from sampled geometry."""
+    # This function is also called once per simulated sample, after
+    # detector_distance_range has already chosen a detector distance. It returns
+    # all aperture lists together so their lengths and geometric constraints
+    # stay consistent.
+    wavelength = physics.photon_energy_wavelength(params["energy"])
+    stripe_width = params["pattern_config_length"]["stripe_width"]
+    detector_width = params["detector_shape"][0] * params["detector_pixel_size"]
+    detector_distance = params["detector_distance"]
+
+    # Convert the detector-limited real-space resolution into a total mask FOV.
+    real_space_resolution = wavelength / (
+        2 * np.arctan(detector_width / (2 * detector_distance))
+    )
+    fov_xy = params["detector_shape"][0] * real_space_resolution
+
+    # Start with the object hole at the mask origin.
+    aperture_types = ["OH"]
+    aperture_centers = [(0.0, 0.0)]
+
+    # Object hole radius: larger than the sampled texture period and 100 nm,
+    # but smaller than one quarter of the mask FOV and 5 um.
+    oh_radius_min = max(stripe_width, 100e-9)
+    oh_radius_max = min(fov_xy / 4, 5e-6)
+    if oh_radius_max <= oh_radius_min:
+        oh_radius = oh_radius_min
+    else:
+        oh_radius = Uniform(oh_radius_min, oh_radius_max).sample()
+
+    aperture_radii = [oh_radius]
+    aperture_sigmas = [Uniform(10e-9, 20e-9).sample()]
+
+    # Add 1 to 5 reference holes. Each RH has its own radius, edge sigma, and
+    # random position inside the FOV but outside 2 * OH_radius from the origin.
+    n_reference_holes = np.random.randint(1, 6)
+    center_half_width = fov_xy / 2
+    min_center_distance = 2 * oh_radius
+
+    for _ in range(n_reference_holes):
+        aperture_types.append("RH")
+
+        rh_radius = Uniform(10e-9, 200e-9).sample()
+        aperture_radii.append(rh_radius)
+
+        rh_sigma_max = max(1e-9, rh_radius / 4)
+        if rh_sigma_max == 1e-9:
+            aperture_sigmas.append(1e-9)
+        else:
+            aperture_sigmas.append(Uniform(1e-9, rh_sigma_max).sample())
+
+        for _attempt in range(1000):
+            center_y = np.random.uniform(-center_half_width, center_half_width)
+            center_x = np.random.uniform(-center_half_width, center_half_width)
+            if np.hypot(center_y, center_x) > min_center_distance:
+                break
+        else:
+            # Extremely unlikely fallback for very tight geometries.
+            center_radius = min(0.45 * fov_xy, 1.05 * min_center_distance)
+            center_angle = np.random.uniform(0.0, 2 * np.pi)
+            center_y = center_radius * np.sin(center_angle)
+            center_x = center_radius * np.cos(center_angle)
+
+        aperture_centers.append((center_y, center_x))
+
+    return {
+        "aperture_types": aperture_types,
+        "aperture_radii": aperture_radii,
+        "aperture_centers": aperture_centers,
+        "aperture_sigmas": aperture_sigmas,
+    }
+
+
 ranges = HologramPipelineRanges(
     # Sweep X-ray energy across the Co L-edge absorption region
     xray_energy=Uniform(775, 795),
-    # Vary detector distance to change real-space resolution
-    detector_distance=Choice((0.02, 0.04, 0.08)),
     # Vary magnetic stripe parameters independently
     pattern_config_length={
         "stripe_width": Uniform(10e-9, 50e-9),
@@ -153,6 +257,13 @@ ranges = HologramPipelineRanges(
         "wire_width": Uniform(0.0, 0.08e-3),
         "wire_bend": Uniform(0.0, 0.2e-3),
     },
+
+    # generating detector distances from reasonable ranges based on the stripe width and xray energy
+    # you can also choose a uniform distribution or a fixed value
+    detector_distance=detector_distance_range,
+    # generating holography masks from reasonable ranges based on the stripe width, xray energy and detector distance
+    # you can also choose a uniform distribution or a fixed value
+    aperture_config=random_aperture_config,
     # All other parameters use the fixed values from config above
 )
 

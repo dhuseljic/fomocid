@@ -476,7 +476,7 @@ class detector_hologram:
             Gnomonic-projected hologram.
         """
 
-        # Full reciprocal-space span of the shifted FFT grid. One FFT pixel is
+        # Full reciprocal-space span of the shifted FFT grid. One FFT pixel is 1/self.real_space_pixel_size
         # therefore Dq / N, so q maps to q / Dq * N + N / 2.
         Dq = 2.0 * np.pi / self.real_space_pixel_size
 

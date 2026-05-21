@@ -44,7 +44,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import h5py
 import numpy as np
@@ -65,7 +65,6 @@ from scattering_calculator.simulation_pipelines.simulation_configuration_range i
     Choice,
     Uniform,
     _s,
-    _sample_dict,
 )
 
 
@@ -228,12 +227,15 @@ class HologramPipelineRanges:
     xray_coherence_length: float | Uniform | None = None
 
     # Detector
-    detector_distance: float | Uniform | None = None
+    detector_distance: float | Uniform | Callable[[dict[str, Any]], Any] | None = None
     detector_pixel_size: float | Uniform | None = None
     detector_noise_rms: float | Uniform | None = None
 
     # Beamstop
     beamstop_config: dict | None = None
+
+    # FTH holography mask
+    aperture_config: dict | Callable[[dict[str, Any]], dict] | None = None
 
     # Magnetic pattern
     pattern_type: str | Choice | None = None
@@ -277,6 +279,11 @@ class HologramPipeline:
         │       ├── detector/
         │       ├── magnetic_pattern/
         │       └── aperture/
+        │           └── aperture_config/
+        │               ├── apertures_type    ← aperture labels, e.g. OH/RH
+        │               ├── apertures_radius  ← aperture radii in metres
+        │               ├── apertures_center  ← aperture centres in metres, (y, x)
+        │               └── apertures_sigma   ← aperture edge sigmas in metres
         ├── 00001/
         │   └── ...
 
@@ -348,29 +355,76 @@ class HologramPipeline:
         cfg = self.config
         rng = self.ranges
 
-        def _pick(range_val: Any, base_val: Any) -> Any:
-            return base_val if range_val is None else _s(range_val)
+        def _resolve(value: Any, params: dict[str, Any]) -> Any:
+            if callable(value):
+                value = value(params)
+            return _s(value)
 
-        def _merge_dict(range_dict: dict | None, base_dict: dict) -> dict:
+        def _pick(range_val: Any, base_val: Any, params: dict[str, Any]) -> Any:
+            return base_val if range_val is None else _resolve(range_val, params)
+
+        def _sample_dict_with_params(d: dict, params: dict[str, Any]) -> dict:
+            return {
+                k: (
+                    _sample_dict_with_params(v, params)
+                    if isinstance(v, dict)
+                    else _resolve(v, params)
+                )
+                for k, v in d.items()
+            }
+
+        def _merge_dict(
+            range_dict: dict | None, base_dict: dict, params: dict[str, Any]
+        ) -> dict:
             merged = dict(base_dict)
             if range_dict is not None:
-                merged.update(_sample_dict(range_dict))
+                if callable(range_dict):
+                    range_dict = _resolve(range_dict, params)
+                merged.update(_sample_dict_with_params(range_dict, params))
             return merged
 
-        return {
-            "energy": _pick(rng.xray_energy, cfg.xray_energy),
-            "photon_flux": _pick(rng.xray_photon_flux, cfg.xray_photon_flux),
-            "coherence_length": _pick(rng.xray_coherence_length, cfg.xray_coherence_length),
-            "detector_distance": _pick(rng.detector_distance, cfg.detector_distance),
-            "detector_pixel_size": _pick(rng.detector_pixel_size, cfg.detector_pixel_size),
-            "detector_noise_rms": _pick(rng.detector_noise_rms, cfg.detector_noise_rms),
-            "beamstop_config": _merge_dict(rng.beamstop_config, cfg.beamstop_config),
-            "pattern_type": _pick(rng.pattern_type, cfg.pattern_type),
-            "pattern_config": _merge_dict(rng.pattern_config, cfg.pattern_config),
-            "pattern_config_length": _merge_dict(
-                rng.pattern_config_length, cfg.pattern_config_length
-            ),
+        params: dict[str, Any] = {
+            "detector_shape": cfg.detector_shape,
+            "detector_center": cfg.detector_center,
+            "oversampling": cfg.oversampling,
         }
+        params["energy"] = _pick(rng.xray_energy, cfg.xray_energy, params)
+        params["photon_flux"] = _pick(
+            rng.xray_photon_flux, cfg.xray_photon_flux, params
+        )
+        params["coherence_length"] = _pick(
+            rng.xray_coherence_length, cfg.xray_coherence_length, params
+        )
+        params["detector_pixel_size"] = _pick(
+            rng.detector_pixel_size, cfg.detector_pixel_size, params
+        )
+        params["detector_noise_rms"] = _pick(
+            rng.detector_noise_rms, cfg.detector_noise_rms, params
+        )
+        params["pattern_type"] = _pick(rng.pattern_type, cfg.pattern_type, params)
+        params["pattern_config"] = _merge_dict(
+            rng.pattern_config, cfg.pattern_config, params
+        )
+        params["pattern_config_length"] = _merge_dict(
+            rng.pattern_config_length, cfg.pattern_config_length, params
+        )
+        params["detector_distance"] = _pick(
+            rng.detector_distance, cfg.detector_distance, params
+        )
+        params["beamstop_config"] = _merge_dict(
+            rng.beamstop_config, cfg.beamstop_config, params
+        )
+        params["aperture_config"] = _merge_dict(
+            rng.aperture_config,
+            {
+                "aperture_types": cfg.aperture_types,
+                "aperture_radii": cfg.aperture_radii,
+                "aperture_centers": cfg.aperture_centers,
+                "aperture_sigmas": cfg.aperture_sigmas,
+            },
+            params,
+        )
+        return params
 
     # ------------------------------------------------------------------
     # Core simulation — mirrors test.ipynb cell by cell
@@ -464,10 +518,10 @@ class HologramPipeline:
             real_space_pixel_size=sample_config.sample_structure.real_space_pixel_size,
             aperture_thicknesses=sample_config.sample_structure.layer_thicknesses,
             aperture_config=dict(
-                apertures_type=cfg.aperture_types,
-                apertures_radius=cfg.aperture_radii,
-                apertures_center=cfg.aperture_centers,
-                apertures_sigma=cfg.aperture_sigmas,
+                apertures_type=p["aperture_config"]["aperture_types"],
+                apertures_radius=p["aperture_config"]["aperture_radii"],
+                apertures_center=p["aperture_config"]["aperture_centers"],
+                apertures_sigma=p["aperture_config"]["aperture_sigmas"],
                 thickness_OH=float(
                     np.sum(
                         sample_config.sample_structure.layer_thicknesses[
@@ -532,7 +586,14 @@ class HologramPipeline:
         metadata.update(xray_config.get_metadata(prefix="xray/"))
 
         # ---- Write to HDF5 ----------------------------------------------
-        self._write_sample(h5, idx, hologram_config, detector_config, metadata)
+        self._write_sample(
+            h5,
+            idx,
+            hologram_config,
+            detector_config,
+            metadata,
+            aperture_config=p["aperture_config"],
+        )
 
     # ------------------------------------------------------------------
     # HDF5 I/O
@@ -545,6 +606,7 @@ class HologramPipeline:
         hologram_config: HologramConfig,
         detector_config: DetectorConfig,
         metadata: dict[str, Any],
+        aperture_config: dict[str, Any],
     ) -> None:
         """Write one simulation's holograms and metadata to an HDF5 group."""
         grp = h5.create_group(f"{idx:05d}")
@@ -572,7 +634,10 @@ class HologramPipeline:
 
         # Metadata — scalar datasets under metadata/ subgroup
         meta_grp = grp.create_group("metadata")
+        self._write_aperture_metadata(meta_grp, aperture_config)
         for key, value in metadata.items():
+            if key.startswith("aperture/aperture_config/apertures_"):
+                continue
             parts = key.split("/")
             sub = meta_grp
             for part in parts[:-1]:
@@ -583,6 +648,30 @@ class HologramPipeline:
                 sub.create_dataset(parts[-1], data=value)
             except (TypeError, ValueError):
                 pass  # skip non-serialisable values (arrays, complex objects)
+
+    def _write_aperture_metadata(
+        self, meta_grp: h5py.Group, aperture_config: dict[str, Any]
+    ) -> None:
+        """Store aperture lists as typed HDF5 datasets under metadata/aperture."""
+        aperture_grp = meta_grp.require_group("aperture").require_group(
+            "aperture_config"
+        )
+        aperture_grp.create_dataset(
+            "apertures_type",
+            data=np.asarray(aperture_config["aperture_types"], dtype="S"),
+        )
+        aperture_grp.create_dataset(
+            "apertures_radius",
+            data=np.asarray(aperture_config["aperture_radii"], dtype=np.float64),
+        )
+        aperture_grp.create_dataset(
+            "apertures_center",
+            data=np.asarray(aperture_config["aperture_centers"], dtype=np.float64),
+        )
+        aperture_grp.create_dataset(
+            "apertures_sigma",
+            data=np.asarray(aperture_config["aperture_sigmas"], dtype=np.float64),
+        )
 
     def _write_pipeline_config(self, h5: h5py.File) -> None:
         """Store top-level fixed pipeline parameters as datasets."""
