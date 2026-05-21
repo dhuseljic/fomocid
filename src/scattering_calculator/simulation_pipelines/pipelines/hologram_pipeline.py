@@ -445,9 +445,21 @@ class HologramPipeline:
             and "readout_noise_sigma" not in params["detector_params"]
         ):
             params["detector_params"]["noise_rms"] = params["detector_noise_rms"]
-        params["detector_params"].setdefault(
-            "quantum_efficiency", cfg.detector_quantum_efficiency
-        )
+        if (
+            cfg.detector_quantum_efficiency != 1.0
+            and (
+                rng.detector_params is None
+                or "quantum_efficiency" not in rng.detector_params
+            )
+        ):
+            params["detector_params"]["quantum_efficiency"] = (
+                cfg.detector_quantum_efficiency
+            )
+        elif rng.detector_params is None and "quantum_efficiency" not in cfg.detector_params:
+            params["detector_params"]["quantum_efficiency"] = (
+                cfg.detector_quantum_efficiency
+            )
+        params["detector_params"].setdefault("quantum_efficiency", 1.0)
         params["artifacts_config"] = _merge_dict(
             rng.artifacts_config, cfg.artifacts_config, params
         )
