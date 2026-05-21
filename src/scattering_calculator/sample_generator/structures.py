@@ -627,6 +627,82 @@ class Structure:
         return eps_eff
 
     def calculate_final_dielectric_tensor(self) -> None:
+        """Build the spatially resolved dielectric tensor for propagation.
+
+        The base tensor is the charge/isotropic contribution for each layer.
+        Magnetic XMCD and XMLD terms are only added where they can affect the
+        hologram: inside the aperture support, i.e. pixels belonging to an OH/RH
+        opening in at least one layer. Outside that support the material remains
+        diagonal, which lets the Jones propagator use its fast diagonal path for
+        the gold-covered regions where domains are not visible.
+
+        The 3-D ``mask`` still controls whether material or vacuum is present at
+        each layer/pixel. Vacuum pixels are set to an identity dielectric tensor
+        after the magnetic terms have been applied.
+
+        Returns
+        -------
+        ndarray of shape (Nz,Ny,Nx, 2, 2)
+            Final dielectric tensor stored in ``self.final_dielectric_tensor``.
+        """
+
+        mask = self.mask
+        m = self.magnetization
+        dt = self.dielectric_tensors
+        if not isinstance(dt, np.ndarray):
+            dt = np.asarray(dt)
+            self.dielectric_tensors = dt
+
+        eps0 = dt[:, 0]  # (Nz, 2, 2)
+        eps_mz = dt[:, 1]  # (Nz, 2, 2)
+        eps_xy = dt[:, 2]  # (Nz, 2, 2)
+
+        out = np.empty((*mask.shape, 2, 2), dtype=dt.dtype)
+        out[:] = eps0[:, None, None, :, :]
+
+        # Per-layer checks skip materials with no magnetic tensor contribution.
+        tol = 1e-14
+        has_mz = np.any(np.abs(eps_mz) > tol, axis=(1, 2))
+        has_xy = np.any(np.abs(eps_xy) > tol, axis=(1, 2))
+
+        # Open aperture support: magnetic contrast is only useful where the
+        # holography mask exposes the sample in at least one layer. If there is
+        # no aperture mask, fall back to applying magnetism everywhere.
+        aperture_support = np.any(np.abs(1.0 - mask) > tol, axis=0)
+        if not np.any(aperture_support):
+            aperture_support = np.ones(mask.shape[1:], dtype=bool)
+
+        for layer_idx in np.flatnonzero(has_mz):
+            active_pixels = aperture_support & (mask[layer_idx] > tol)
+            if not np.any(active_pixels):
+                continue
+            out[layer_idx, active_pixels] += (
+                m[layer_idx, ..., 2][active_pixels, None, None]
+                * eps_mz[layer_idx, None, :, :]
+            )
+
+        for layer_idx in np.flatnonzero(has_xy):
+            active_pixels = aperture_support & (mask[layer_idx] > tol)
+            if not np.any(active_pixels):
+                continue
+            mx = m[layer_idx, ..., 0][active_pixels]
+            my = m[layer_idx, ..., 1][active_pixels]
+            dxy = np.abs(mx) ** 2 - np.abs(my) ** 2
+            out[layer_idx, active_pixels] += (
+                dxy[:, None, None] * eps_xy[layer_idx, None, :, :]
+            )
+
+        out *= mask[..., None, None]
+
+        vac = 1.0 - mask
+        out[..., 0, 0] += vac
+        out[..., 1, 1] += vac
+
+        self.final_dielectric_tensor = out
+
+
+
+    def calculate_final_dielectric_tensor_22052026(self) -> None:
         """
         Return the spatial-dependent dielectric tensor including XMCD and XMLD components
         multiplies the correct elements of the dielectric tensors with the correct components of the magnetization,
@@ -947,7 +1023,7 @@ class Apertures3D:
     aperture_design : ndarray of shape ``shape``
         Current aperture mask with values in ``[0, 1]``. Initialised to ones.
     x, y, z : ndarray
-        3-D real-space coordinate grids in metres.
+        Sparse 3-D real-space coordinate grids in metres.
     extent_real : ndarray of shape (6,)
         ``[x_min, x_max, y_min, y_max, z_min, z_max]`` in metres.
     """
@@ -962,16 +1038,16 @@ class Apertures3D:
         self.extent_real = self.get_illumination_extent_real_space()
 
     def calc_real_space_coordinates(self) -> None:
-        """Compute real-space (x, y) coordinate grids for the aperture.
+        """Compute sparse real-space (x, y, z) coordinate grids.
 
-        Sets ``self.x`` and ``self.y`` as 2-D arrays of physical
-        coordinates in metres, centred on the optical axis.
+        The sparse grids keep the old ``self.x[0, 1, 0]`` style indexing and
+        extent calculations without allocating full ``(Ny, Nx, Nz)`` arrays.
         """
 
         x = (np.arange(self.shape[2]) - self.shape[2] / 2) * self.pixel_size
         y = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.pixel_size
         z = np.cumsum(self.layer_thicknesses)
-        X, Y, Z = np.meshgrid(x, y, z)
+        X, Y, Z = np.meshgrid(x, y, z, indexing="xy", sparse=True)
         self.x = X
         self.y = Y
         self.z = Z
@@ -1047,20 +1123,18 @@ class Apertures3D:
             pixel_sigma = sigma
             pixel_center = np.array(center)
 
-        # self.aperture_design = np.ones(self.shape)
-        # print(pixel_depth)
-        for i in range(0, pixel_depth):
-            self.aperture_design[i, :, :] *= 1 - self._aperture_hole_mask(
-                self.shape,
-                pixel_center,
-                pixel_radius,
-                pixel_sigma,
-                angle=angle,
-                ellipticity=ellipticity,
-                roughness=roughness,
-                roughness_modes=roughness_modes,
-                seed=seed,
-            )
+        hole_mask = self._aperture_hole_mask(
+            self.shape,
+            pixel_center,
+            pixel_radius,
+            pixel_sigma,
+            angle=angle,
+            ellipticity=ellipticity,
+            roughness=roughness,
+            roughness_modes=roughness_modes,
+            seed=seed,
+        )
+        self.aperture_design[:pixel_depth] *= 1 - hole_mask[None, :, :]
 
     @staticmethod
     def _aperture_hole_mask(
@@ -1076,11 +1150,8 @@ class Apertures3D:
     ) -> NDArray[np.float64]:
         """Create a possibly elliptical and rough aperture-hole mask."""
         _, ny, nx = shape
-        y = np.arange(ny, dtype=float)
-        x = np.arange(nx, dtype=float)
-        X, Y = np.meshgrid(x, y, indexing="xy")
-        dy = Y - center[0]
-        dx = X - center[1]
+        dy = np.arange(ny, dtype=float)[:, None] - center[0]
+        dx = np.arange(nx, dtype=float)[None, :] - center[1]
 
         ellipticity = float(ellipticity)
         if ellipticity <= 0:
@@ -1088,8 +1159,10 @@ class Apertures3D:
 
         radius_y = radius * np.sqrt(ellipticity)
         radius_x = radius / np.sqrt(ellipticity)
-        xr = np.cos(angle) * dx + np.sin(angle) * dy
-        yr = -np.sin(angle) * dx + np.cos(angle) * dy
+        cos_angle = np.cos(angle)
+        sin_angle = np.sin(angle)
+        xr = cos_angle * dx + sin_angle * dy
+        yr = -sin_angle * dx + cos_angle * dy
         normalized_radius = np.sqrt((xr / radius_x) ** 2 + (yr / radius_y) ** 2)
         polar_angle = np.arctan2(yr / radius_y, xr / radius_x)
 

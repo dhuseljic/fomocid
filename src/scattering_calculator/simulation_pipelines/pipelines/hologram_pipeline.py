@@ -532,9 +532,18 @@ class HologramPipeline:
 
     def _simulate_one(self, h5: h5py.File, idx: int) -> None:
         """Run one configuration and write holograms + metadata to HDF5."""
+        stage_times: list[tuple[str, float]] = []
+
+        def mark_stage(name: str, start: float) -> float:
+            now = time.time()
+            stage_times.append((name, now - start))
+            return now
+
+        t_stage = time.time()
         p = self._sample_params()
         cfg = self.config
         metadata: dict[str, Any] = {}
+        t_stage = mark_stage("sample params", t_stage)
 
         # ---- X-ray config ------------------------------------------------
         xray_config = XRayConfig(
@@ -544,6 +553,7 @@ class HologramPipeline:
             coherence_length=p["coherence_length"],
         )
         xray_config.setup()
+        t_stage = mark_stage("xray", t_stage)
 
         # ---- Detector + beamstop config ----------------------------------
         detector_center = cfg.detector_center or tuple(
@@ -572,6 +582,7 @@ class HologramPipeline:
         )
         metadata.update(beamstop_config.get_metadata(prefix="beamstop/"))
         metadata.update(detector_config.get_metadata(prefix="detector/"))
+        t_stage = mark_stage("detector/beamstop", t_stage)
 
         # ---- Sample config -----------------------------------------------
         sample_shape = np.array(
@@ -590,6 +601,7 @@ class HologramPipeline:
             sample_name=cfg.sample_name,
         )
         sample_config.setup()
+        t_stage = mark_stage("sample setup", t_stage)
 
         # ---- Magnetic pattern config -------------------------------------
         magnetic_pattern_config = MagneticPatternConfig(
@@ -609,6 +621,7 @@ class HologramPipeline:
         )
         sample_config.assign_magnetic_pattern(magnetization)
         metadata.update(magnetic_pattern_config.get_metadata(prefix="magnetic_pattern/"))
+        t_stage = mark_stage("magnetic pattern", t_stage)
 
         # ---- Front aperture config ---------------------------------------
         front_aperture_config = FrontApertureConfig(
@@ -646,8 +659,10 @@ class HologramPipeline:
             output_pixel_size=detector_config.detector_layout.real_space_resolution,
         )
         metadata.update(front_aperture_config.get_metadata(prefix="aperture/"))
+        t_stage = mark_stage("front aperture", t_stage)
 
         sample_config.sample_structure.calculate_final_dielectric_tensor()
+        t_stage = mark_stage("dielectric tensor", t_stage)
 
         # ---- Illumination config -----------------------------------------
         illumination_config = IlluminationConfig(
@@ -662,6 +677,7 @@ class HologramPipeline:
             },
         )
         illumination_config.setup()
+        t_stage = mark_stage("illumination", t_stage)
 
         # ---- Hologram simulation loop ------------------------------------
         hologram_config = HologramConfig(
@@ -679,10 +695,11 @@ class HologramPipeline:
                 propagator_method="Jones",
             )
             propagator_config.setup()
+            t_stage = mark_stage(f"{pol} Jones propagation", t_stage)
 
             detector_config.assign_propagated_wavefront(propagator_config)
             detector_config.detect_hologram()
-            detector_config.hologram_exp.gnomonic_projection()
+            t_stage = mark_stage(f"{pol} detector ideal", t_stage)
 
             hologram_config.add_exit_waves(
                 {pol: propagator_config.return_scalar_wavefield()}
@@ -693,6 +710,7 @@ class HologramPipeline:
             hologram_config.add_holograms(
                 {pol: detector_config.return_detected_hologram()}, source="detected"
             )
+            t_stage = mark_stage(f"{pol} detector noise", t_stage)
 
         metadata.update(propagator_config.get_metadata())
         metadata.update(xray_config.get_metadata(prefix="xray/"))
@@ -707,6 +725,13 @@ class HologramPipeline:
             aperture_config=p["aperture_config"],
             supportmask=supportmask,
         )
+        mark_stage("hdf5 write", t_stage)
+
+        if self.verbose:
+            breakdown = ", ".join(
+                f"{name}: {elapsed:.2f}s" for name, elapsed in stage_times
+            )
+            print(f"    timing: {breakdown}")
 
     # ------------------------------------------------------------------
     # HDF5 I/O

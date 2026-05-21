@@ -112,8 +112,91 @@ class wavefronts:
         if E.shape[:2] != eps_slice.shape[:2]:
             raise ValueError("E and eps_slice must have same (Ny, Nx)")
 
-        J_field = self.jones_from_eps_slice(eps_slice, wavelength, thickness)
-        E_out = self.apply_jones_field(E, J_field)
+        return self.apply_eps_slice(E, eps_slice, wavelength, thickness)
+
+    def apply_eps_slice(self, E, eps_slice, wavelength, thickness):
+        """Apply one dielectric slice directly to a Jones wavefield.
+
+        Most pixels in FTH simulations are diagonal after the aperture mask is
+        applied. This path avoids building a full ``(Ny, Nx, 2, 2)`` Jones
+        matrix field and only evaluates the 2x2 matrix function on pixels with
+        non-zero off-diagonal tensor terms.
+        """
+        phase = -1j * (2 * np.pi / wavelength) * thickness
+        tol = 1e-14
+
+        a = eps_slice[..., 0, 0]
+        b = eps_slice[..., 0, 1]
+        c = eps_slice[..., 1, 0]
+        d = eps_slice[..., 1, 1]
+
+        if not np.any(b) and not np.any(c):
+            a0 = a.reshape(-1)[0]
+            d0 = d.reshape(-1)[0]
+
+            E_out = np.empty_like(E, dtype=complex)
+            if np.all(a == a0) and np.all(d == d0):
+                E_out[..., 0] = np.exp(phase * np.sqrt(a0)) * E[..., 0]
+                E_out[..., 1] = np.exp(phase * np.sqrt(d0)) * E[..., 1]
+                return E_out
+
+            E_out[..., 0] = np.exp(phase * np.sqrt(a)) * E[..., 0]
+            E_out[..., 1] = np.exp(phase * np.sqrt(d)) * E[..., 1]
+            return E_out
+
+        E_out = np.empty_like(E, dtype=complex)
+        is_diag = (np.abs(b) < tol) & (np.abs(c) < tol)
+        if np.any(is_diag):
+            E_out[..., 0][is_diag] = (
+                np.exp(phase * np.sqrt(a[is_diag])) * E[..., 0][is_diag]
+            )
+            E_out[..., 1][is_diag] = (
+                np.exp(phase * np.sqrt(d[is_diag])) * E[..., 1][is_diag]
+            )
+
+        mixed = ~is_diag
+        if np.any(mixed):
+            aa = a[mixed]
+            bb = b[mixed]
+            cc = c[mixed]
+            dd = d[mixed]
+
+            tr = aa + dd
+            discr = (aa - dd) ** 2 + 4 * bb * cc
+            root = np.sqrt(discr)
+
+            lam1 = 0.5 * (tr + root)
+            lam2 = 0.5 * (tr - root)
+
+            f1 = np.exp(phase * np.sqrt(lam1))
+            f2 = np.exp(phase * np.sqrt(lam2))
+
+            denom = lam1 - lam2
+            regular = np.abs(denom) > tol
+
+            alpha = np.empty_like(lam1, dtype=complex)
+            beta = np.empty_like(lam1, dtype=complex)
+
+            beta[regular] = (f1[regular] - f2[regular]) / denom[regular]
+            alpha[regular] = (
+                lam1[regular] * f2[regular]
+                - lam2[regular] * f1[regular]
+            ) / denom[regular]
+
+            deg = ~regular
+            if np.any(deg):
+                lam = 0.5 * (lam1[deg] + lam2[deg])
+                sqrt_lam = np.sqrt(lam)
+                f = np.exp(phase * sqrt_lam)
+                fp = f * phase / (2 * sqrt_lam)
+
+                beta[deg] = fp
+                alpha[deg] = f - lam * fp
+
+            e0 = E[..., 0][mixed]
+            e1 = E[..., 1][mixed]
+            E_out[..., 0][mixed] = (alpha + beta * aa) * e0 + beta * bb * e1
+            E_out[..., 1][mixed] = beta * cc * e0 + (alpha + beta * dd) * e1
 
         return E_out
 
@@ -479,4 +562,3 @@ def E_I(E):
     '''
     I= (np.sum(np.abs(E)**2, axis=(2)))
     return I
-

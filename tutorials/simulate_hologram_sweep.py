@@ -59,7 +59,7 @@ artifacts_config = {
     "counts_per_photon": 100,
     "sigma_photon": 0.75,
     "photon_n_classes": 1,
-    "photon_n_variants": 30,
+    "photon_n_variants": 15,
     "photon_kernel_size": 9,
     "photon_irregularity": 2.0,
     "regenerate_photon_kernels": True,
@@ -159,7 +159,7 @@ config = HologramPipelineConfig(
         "waviness_scale": waviness_scale,
     },
     # Simulation grid: sample_shape = oversampling * detector_shape
-    oversampling=1,
+    oversampling=2,
 )
 
 # %%
