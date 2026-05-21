@@ -38,10 +38,11 @@ class detector_layout:
         self.calc_real_space_coordinates()
 
     def calc_real_space_coordinates(self) -> None:
-        """Compute real-space (x, y) coordinate grids for the detector plane.
+        """Compute sparse real-space (x, y) coordinate grids for the detector plane.
 
-        Sets ``self.detx`` and ``self.dety`` as 2-D arrays of physical
-        coordinates in metres, centred on the optical axis.
+        Sets ``self.detx`` and ``self.dety`` as sparse 2-D arrays of physical
+        coordinates in metres, centred on the optical axis. They broadcast to
+        the full detector shape when q-space coordinates are calculated.
         """
         x = (
             np.arange(self.detector_shape[1]) - self.detector_center[1]
@@ -50,7 +51,7 @@ class detector_layout:
             np.arange(self.detector_shape[0]) - self.detector_center[0]
         ) * self.pixel_size
 
-        X, Y = np.meshgrid(x, y)
+        X, Y = np.meshgrid(x, y, sparse=True)
         self.detx = X
         self.dety = Y
 
@@ -263,18 +264,17 @@ class beamstop:
             ellipticity = ellipticity_range
         orientation = angle
 
-        y = np.arange(self.detector_shape[0], dtype=float)
-        x = np.arange(self.detector_shape[1], dtype=float)
-        X, Y = np.meshgrid(x, y, indexing="xy")
-        dy = Y - center[0]
-        dx = X - center[1]
+        dy = np.arange(self.detector_shape[0], dtype=float)[:, None] - center[0]
+        dx = np.arange(self.detector_shape[1], dtype=float)[None, :] - center[1]
 
         axis_ratio = rng.uniform(*ellipticity)
         radius_y = radius_effective * np.sqrt(axis_ratio)
         radius_x = radius_effective / np.sqrt(axis_ratio)
 
-        xr = np.cos(orientation) * dx + np.sin(orientation) * dy
-        yr = -np.sin(orientation) * dx + np.cos(orientation) * dy
+        cos_orientation = np.cos(orientation)
+        sin_orientation = np.sin(orientation)
+        xr = cos_orientation * dx + sin_orientation * dy
+        yr = -sin_orientation * dx + cos_orientation * dy
         normalized_radius = np.sqrt((xr / radius_x) ** 2 + (yr / radius_y) ** 2)
         polar_angle = np.arctan2(yr / radius_y, xr / radius_x)
 
@@ -292,8 +292,8 @@ class beamstop:
         mask = (normalized_radius <= boundary).astype(float)
 
         if wire_width_effective > 0:
-            along_wire = np.cos(orientation) * dx + np.sin(orientation) * dy
-            across_wire = -np.sin(orientation) * dx + np.cos(orientation) * dy
+            along_wire = cos_orientation * dx + sin_orientation * dy
+            across_wire = -sin_orientation * dx + cos_orientation * dy
             detector_diagonal = np.hypot(*self.detector_shape)
             bend_phase = rng.uniform(0.0, 2.0 * np.pi)
             bend_period = rng.uniform(0.8, 1.4) * detector_diagonal
@@ -497,11 +497,8 @@ class detector_hologram:
 
         # 0. we start with holo, the FFT of the exit wave, hence the distribution of photons (or counts) at a certain point in the detector for a single image
         rng = np.random.default_rng()
-        holo = (
-            self.hologram_detector.copy()
-            * self.exposure_time
-            * self.quantum_efficiency
-        )
+        holo = np.array(self.hologram_detector, dtype=float, copy=True)
+        holo *= self.exposure_time * self.quantum_efficiency
         npx, npy = holo.shape
         self._set_coherence_sigmas(holo.shape)
 
@@ -601,7 +598,7 @@ class detector_hologram:
         # 12. just making sure the final product is positive
         holo[holo < 0] = 0
 
-        self.hologram_exp = holo.copy()
+        self.hologram_exp = holo
 
     def gnomonic_projection(self) -> NDArray[np.float64]:
         """Apply gnomonic projection to the hologram to correct for curvature of the Ewald sphere.

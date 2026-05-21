@@ -758,7 +758,10 @@ class HologramPipeline:
         for helicity, per_source in save_arrays.items():
             for source, arr in per_source.items():
                 arr = np.asarray(arr)
-                arr = arr.astype(np.complex64 if np.iscomplexobj(arr) else np.float32)
+                arr = arr.astype(
+                    np.complex64 if np.iscomplexobj(arr) else np.float32,
+                    copy=False,
+                )
                 grp.create_dataset(
                     f"{helicity}/{source}", data=arr, compression="gzip"
                 )
@@ -766,7 +769,7 @@ class HologramPipeline:
                     reconstruction = self._fth_reconstruct(arr)
                     grp.create_dataset(
                         f"{helicity}/ideal_reconstruction",
-                        data=reconstruction.astype(np.complex64),
+                        data=reconstruction.astype(np.complex64, copy=False),
                         compression="gzip",
                     )
 

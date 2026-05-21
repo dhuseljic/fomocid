@@ -60,8 +60,8 @@ def map_magnetization_to_3d(
     magnetization = np.transpose(magnetization, (1, 2, 0))
 
     if nr_repeats is not None:
-        magnetization = np.repeat(
-            magnetization[np.newaxis, ...], repeats=nr_repeats, axis=0
+        magnetization = np.broadcast_to(
+            magnetization[np.newaxis, ...], (nr_repeats, *magnetization.shape)
         )
 
     return magnetization

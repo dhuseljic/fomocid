@@ -59,7 +59,7 @@ artifacts_config = {
     "counts_per_photon": 100,
     "sigma_photon": 0.75,
     "photon_n_classes": 1,
-    "photon_n_variants": 15,
+    "photon_n_variants": 30,
     "photon_kernel_size": 9,
     "photon_irregularity": 2.0,
     "regenerate_photon_kernels": True,
@@ -87,8 +87,8 @@ recipe = "Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"
 stripe_width = 300e-9  # m
 sigma = 30e-9  # m
 angle_stripes = np.pi / 4
-waviness_amplitude = 800e-9  # ms
-waviness_scale = 300e-9  # m
+waviness_amplitude = 0e-9  # ms
+waviness_scale = 0e-9  # m
 
 # --- FTH holography mask ---
 aperture_types = ["OH", "RH", "RH"]
@@ -333,7 +333,7 @@ ranges = HologramPipelineRanges(
 # ===================
 # RUN PIPELINE
 # ===================
-nr_simulations = 3  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 1  # increase to e.g. 1000 for a full training dataset
 
 pipeline = HologramPipeline(
     config=config,
