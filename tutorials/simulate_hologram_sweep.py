@@ -46,7 +46,7 @@ detector_center = (650, 650)  # px
 detector_params = {
     "readout_noise_average": 50,
     "noise_rms": 3,
-    "detector_threshold": 64e3,
+    "detector_threshold": 64.3e3,
     "counts_per_photon": 100,
     "quantum_efficiency": 1.0,
 }
@@ -69,7 +69,7 @@ artifacts_config = {
 beamstop_method = "circular"
 beamstop_distance = 0.001  # m
 beamstop_config = {
-    "radius": 0.5e-3,
+    "radius": 0.2e-3,
     "angle": 0,
     "sigma": 1,
     "ellipticity": (0.8, 1.2),
@@ -84,8 +84,8 @@ beamstop_config = {
 recipe = "Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"
 
 # --- Magnetic domain pattern ---
-stripe_width = 150e-9  # m
-sigma = 10e-9  # m
+stripe_width = 300e-9  # m
+sigma = 30e-9  # m
 angle_stripes = np.pi / 4
 waviness_amplitude = 280e-9  # ms
 waviness_scale = 280e-9  # m
@@ -245,8 +245,10 @@ def random_aperture_config(params):
     # Add 1 to 5 reference holes. Each RH has its own radius, edge sigma, and
     # random position inside the FOV but outside 2 * OH_radius from the origin.
     n_reference_holes = np.random.randint(1, 6)
-    center_half_width = fov_xy / 2 - oh_radius
-    min_center_distance = 2 * oh_radius
+    min_center_distance = 3 * oh_radius
+    center_half_width = np.abs(fov_xy / 2 - oh_radius)
+    # also, we do not want this to be too large, RHs are never further away than 
+    center_half_width = np.minimum(center_half_width,6*oh_radius)
 
     for _ in range(n_reference_holes):
         aperture_types.append("RH")
@@ -305,7 +307,7 @@ ranges = HologramPipelineRanges(
         "waviness_amplitude": Uniform(0e-9, 30e-9),
     },
     beamstop_config={
-        "radius": Uniform(0.5e-3, 2.5e-3),
+        "radius": Uniform(0.1e-3, 0.5e-3),
         "angle": Uniform(0.0, np.pi),
         "wire_width": Uniform(0.0, 0.08e-3),
         "wire_bend": Uniform(0.0, 0.75e-3),
@@ -330,7 +332,7 @@ ranges = HologramPipelineRanges(
 # ===================
 # RUN PIPELINE
 # ===================
-nr_simulations = 2  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 3  # increase to e.g. 1000 for a full training dataset
 
 pipeline = HologramPipeline(
     config=config,
