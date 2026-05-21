@@ -122,7 +122,8 @@ class detector_layout:
         resolution : float
             Real-space resolution in metres.
         """
-        q_max = np.sqrt(np.max(self.detqx**2 + self.detqy**2))
+        q_max = np.max(self.detqx)-np.min(self.detqx)
+        #np.sqrt(np.max(self.detqx**2 + self.detqy**2))
         resolution = 2 * np.pi / q_max
         self.real_space_resolution = resolution
         return resolution

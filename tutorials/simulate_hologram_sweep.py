@@ -87,7 +87,7 @@ recipe = "Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"
 stripe_width = 20e-9  # m
 sigma = 1e-9  # m
 angle_stripes = np.pi / 4
-waviness_amplitude = 40e-9  # ms
+waviness_amplitude = 80e-9  # ms
 waviness_scale = 20e-9  # m
 
 # --- FTH holography mask ---
@@ -217,8 +217,8 @@ def random_aperture_config(params):
 
     # Object hole radius: larger than the sampled texture period and 100 nm,
     # but smaller than one quarter of the mask FOV and 5 um.
-    oh_radius_min = max(stripe_width, 100e-9)
-    oh_radius_max = min(fov_xy / 4, 5e-6)
+    oh_radius_min = max(stripe_width, 400e-9)
+    oh_radius_max = min(fov_xy / 4, 6e-6)
     if oh_radius_max <= oh_radius_min:
         oh_radius = oh_radius_min
     else:
@@ -236,7 +236,7 @@ def random_aperture_config(params):
     for _ in range(n_reference_holes):
         aperture_types.append("RH")
 
-        rh_radius = Uniform(10e-9, 200e-9).sample()
+        rh_radius = Uniform(10e-9, 150e-9).sample()
         aperture_radii.append(rh_radius)
 
         rh_sigma_max = max(1e-9, rh_radius / 4)
@@ -305,7 +305,7 @@ ranges = HologramPipelineRanges(
 # ===================
 # RUN PIPELINE
 # ===================
-nr_simulations = 6  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 1  # increase to e.g. 1000 for a full training dataset
 
 pipeline = HologramPipeline(
     config=config,

@@ -127,8 +127,8 @@ class XRayConfig(_ConfigMixin):
         return self.beam_params
 
     def get_metadata(self, prefix: str = "") -> dict[str, int | float | str | bool]:
-        """Return config fields plus derived beam parameters as scalar metadata."""
-        meta = super().get_metadata(prefix=prefix)
+        """Return derived beam parameters as scalar metadata."""
+        meta: dict[str, int | float | str | bool] = {}
         if hasattr(self, "beam_params"):
             bp = self.beam_params
             bp_prefix = f"{prefix}beam_params/"
@@ -734,6 +734,45 @@ class FrontApertureConfig(_ConfigMixin):
     def return_aperture(self) -> np.ndarray:
         """Return the 3-D aperture design array."""
         return self.aperture.aperture_design
+
+    def create_supportmask(
+        self,
+        output_shape: tuple[int, int] | None = None,
+        output_pixel_size: float | None = None,
+    ) -> np.ndarray:
+        """Return a binary 2-D support mask covering all OH/RH aperture holes.
+
+        Parameters
+        ----------
+        output_shape : tuple of int or None
+            Shape of the returned mask. ``None`` uses the aperture/sample shape.
+        output_pixel_size : float or None
+            Pixel size of the returned mask in metres. ``None`` uses the aperture
+            pixel size.
+        """
+        shape = tuple(output_shape or self.aperture_shape[-2:])
+        pixel_size = output_pixel_size or self.real_space_pixel_size
+        if pixel_size <= 0:
+            raise ValueError(f"output_pixel_size must be positive, got {pixel_size}")
+        supportmask = np.zeros(shape, dtype=np.uint8)
+        if self.aperture_method is None:
+            return supportmask
+
+        radii = self.aperture_config.get("apertures_radius", [])
+        centers = self.aperture_config.get("apertures_center", [])
+        yy, xx = np.indices(shape)
+        center_y0 = shape[0] / 2
+        center_x0 = shape[1] / 2
+
+        for radius, center in zip(radii, centers):
+            center_y = center_y0 + center[0] / pixel_size
+            center_x = center_x0 + center[1] / pixel_size
+            radius_px = radius / pixel_size
+            inside_hole = (
+                (yy - center_y) ** 2 + (xx - center_x) ** 2
+            ) <= radius_px**2
+            supportmask[inside_hole] = 1
+        return supportmask
 
     def visualize_aperture(self) -> None:
         """Display the depth-averaged aperture mask in pixel and real-space units."""

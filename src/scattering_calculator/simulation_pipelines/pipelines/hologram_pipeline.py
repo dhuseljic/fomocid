@@ -597,6 +597,10 @@ class HologramPipeline:
         )
         front_aperture_config.setup()
         sample_config.assign_aperture_mask(front_aperture_config.return_aperture())
+        supportmask = front_aperture_config.create_supportmask(
+            output_shape=detector_config.detector_layout.detector_shape,
+            output_pixel_size=detector_config.detector_layout.real_space_resolution,
+        )
         metadata.update(front_aperture_config.get_metadata(prefix="aperture/"))
 
         sample_config.sample_structure.calculate_final_dielectric_tensor()
@@ -657,6 +661,7 @@ class HologramPipeline:
             detector_config,
             metadata,
             aperture_config=p["aperture_config"],
+            supportmask=supportmask,
         )
 
     # ------------------------------------------------------------------
@@ -671,6 +676,7 @@ class HologramPipeline:
         detector_config: DetectorConfig,
         metadata: dict[str, Any],
         aperture_config: dict[str, Any],
+        supportmask: np.ndarray,
     ) -> None:
         """Write one simulation's holograms and metadata to an HDF5 group."""
         grp = h5.create_group(f"{idx:05d}")
@@ -687,6 +693,13 @@ class HologramPipeline:
                 grp.create_dataset(
                     f"{helicity}/{source}", data=arr, compression="gzip"
                 )
+                if source == "ideal":
+                    reconstruction = self._fth_reconstruct(arr)
+                    grp.create_dataset(
+                        f"{helicity}/ideal_reconstruction",
+                        data=reconstruction.astype(np.complex64),
+                        compression="gzip",
+                    )
 
         # Beamstop mask
         if hasattr(detector_config.detector_layout, "beamstop"):
@@ -695,6 +708,12 @@ class HologramPipeline:
                 data=np.asarray(detector_config.detector_layout.beamstop),
                 compression="gzip",
             )
+
+        grp.create_dataset(
+            "supportmask",
+            data=np.asarray(supportmask, dtype=np.uint8),
+            compression="gzip",
+        )
 
         # Metadata — scalar datasets under metadata/ subgroup
         meta_grp = grp.create_group("metadata")
@@ -735,6 +754,14 @@ class HologramPipeline:
         aperture_grp.create_dataset(
             "apertures_sigma",
             data=np.asarray(aperture_config["aperture_sigmas"], dtype=np.float64),
+        )
+
+    @staticmethod
+    def _fth_reconstruct(hologram: np.ndarray) -> np.ndarray:
+        """FTH reconstruction over the last two axes of a hologram array."""
+        return np.fft.fftshift(
+            np.fft.fft2(np.fft.fftshift(hologram, axes=(-2, -1)), axes=(-2, -1)),
+            axes=(-2, -1),
         )
 
     def _write_pipeline_config(self, h5: h5py.File) -> None:
