@@ -117,6 +117,17 @@ class HologramPipelineConfig:
         Aperture centres ``(y, x)`` in metres relative to the sample centre.
     aperture_sigmas : list of float
         Edge-softening sigma in metres for each aperture.
+    aperture_angles : list of float
+        Ellipse orientation in radians for each aperture.
+    aperture_ellipticities : list of float
+        Ellipse y/x axis ratio for each aperture. ``1`` keeps a circular hole.
+    aperture_roughnesses : list of float
+        Random boundary roughness amplitude for each aperture.
+    aperture_roughness_modes : list of (int, int)
+        Inclusive Fourier-mode range used for each rough aperture boundary.
+    aperture_seeds : list of int
+        Random seeds used for rough aperture boundaries. Negative values mean
+        no fixed seed.
     illumination_function : {"gaussian"} or None
         Spatial beam profile. ``None`` → plane wave.
     illumination_center : (float, float)
@@ -207,6 +218,19 @@ class HologramPipelineConfig:
     aperture_sigmas: list[float] = field(
         default_factory=lambda: [1e-9, 2e-9, 2e-9]
     )  # m
+    aperture_angles: list[float] = field(
+        default_factory=lambda: [0.0, 0.0, 0.0]
+    )  # rad
+    aperture_ellipticities: list[float] = field(
+        default_factory=lambda: [1.0, 1.0, 1.0]
+    )
+    aperture_roughnesses: list[float] = field(
+        default_factory=lambda: [0.0, 0.0, 0.0]
+    )
+    aperture_roughness_modes: list[tuple[int, int]] = field(
+        default_factory=lambda: [(0, 0), (0, 0), (0, 0)]
+    )
+    aperture_seeds: list[int] = field(default_factory=lambda: [-1, -1, -1])
 
     # Illumination
     illumination_function: str | None = "gaussian"
@@ -315,7 +339,12 @@ class HologramPipeline:
         │               ├── apertures_type    ← aperture labels, e.g. OH/RH
         │               ├── apertures_radius  ← aperture radii in metres
         │               ├── apertures_center  ← aperture centres in metres, (y, x)
-        │               └── apertures_sigma   ← aperture edge sigmas in metres
+        │               ├── apertures_sigma   ← aperture edge sigmas in metres
+        │               ├── apertures_angle   ← ellipse angles in radians
+        │               ├── apertures_ellipticity
+        │               ├── apertures_roughness
+        │               ├── apertures_roughness_modes
+        │               └── apertures_seed
         ├── 00001/
         │   └── ...
 
@@ -486,6 +515,11 @@ class HologramPipeline:
                 "aperture_radii": cfg.aperture_radii,
                 "aperture_centers": cfg.aperture_centers,
                 "aperture_sigmas": cfg.aperture_sigmas,
+                "aperture_angles": cfg.aperture_angles,
+                "aperture_ellipticities": cfg.aperture_ellipticities,
+                "aperture_roughnesses": cfg.aperture_roughnesses,
+                "aperture_roughness_modes": cfg.aperture_roughness_modes,
+                "aperture_seeds": cfg.aperture_seeds,
             },
             params,
         )
@@ -586,6 +620,15 @@ class HologramPipeline:
                 apertures_radius=p["aperture_config"]["aperture_radii"],
                 apertures_center=p["aperture_config"]["aperture_centers"],
                 apertures_sigma=p["aperture_config"]["aperture_sigmas"],
+                apertures_angle=p["aperture_config"]["aperture_angles"],
+                apertures_ellipticity=p["aperture_config"][
+                    "aperture_ellipticities"
+                ],
+                apertures_roughness=p["aperture_config"]["aperture_roughnesses"],
+                apertures_roughness_modes=p["aperture_config"][
+                    "aperture_roughness_modes"
+                ],
+                apertures_seed=p["aperture_config"]["aperture_seeds"],
                 thickness_OH=float(
                     np.sum(
                         sample_config.sample_structure.layer_thicknesses[
@@ -754,6 +797,30 @@ class HologramPipeline:
         aperture_grp.create_dataset(
             "apertures_sigma",
             data=np.asarray(aperture_config["aperture_sigmas"], dtype=np.float64),
+        )
+        aperture_grp.create_dataset(
+            "apertures_angle",
+            data=np.asarray(aperture_config["aperture_angles"], dtype=np.float64),
+        )
+        aperture_grp.create_dataset(
+            "apertures_ellipticity",
+            data=np.asarray(
+                aperture_config["aperture_ellipticities"], dtype=np.float64
+            ),
+        )
+        aperture_grp.create_dataset(
+            "apertures_roughness",
+            data=np.asarray(aperture_config["aperture_roughnesses"], dtype=np.float64),
+        )
+        aperture_grp.create_dataset(
+            "apertures_roughness_modes",
+            data=np.asarray(
+                aperture_config["aperture_roughness_modes"], dtype=np.int64
+            ),
+        )
+        aperture_grp.create_dataset(
+            "apertures_seed",
+            data=np.asarray(aperture_config["aperture_seeds"], dtype=np.int64),
         )
 
     @staticmethod

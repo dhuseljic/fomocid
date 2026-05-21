@@ -52,7 +52,7 @@ detector_params = {
 }
 measurement_config = {
     "number_frames": 1,
-    "max_counts_per_image": None,
+    "max_counts_per_image": 64.3e3,
     "exposure_time": 1e-2,
 }
 artifacts_config = {
@@ -95,6 +95,11 @@ aperture_types = ["OH", "RH", "RH"]
 aperture_radii = [60e-9, 6e-9, 4e-9]  # m
 aperture_centers = [(0, 0), (0.2e-6, -0.15e-6), (0.15e-6, 0.15e-6)]  # m (y, x)
 aperture_sigmas = [1e-9, 2e-9, 2e-9]  # m
+aperture_angles = [0.0, 0.0, 0.0]  # rad
+aperture_ellipticities = [1.0, 1.0, 1.0]  # y/x axis ratio
+aperture_roughnesses = [0.0, 0.04, 0.04]
+aperture_roughness_modes = [(0, 0), (3, 9), (3, 9)]
+aperture_seeds = [-1, -1, -1]
 
 # --- Illumination ---
 illumination_function = "gaussian"
@@ -132,6 +137,11 @@ config = HologramPipelineConfig(
     aperture_radii=aperture_radii,
     aperture_centers=aperture_centers,
     aperture_sigmas=aperture_sigmas,
+    aperture_angles=aperture_angles,
+    aperture_ellipticities=aperture_ellipticities,
+    aperture_roughnesses=aperture_roughnesses,
+    aperture_roughness_modes=aperture_roughness_modes,
+    aperture_seeds=aperture_seeds,
     # Illumination
     illumination_function=illumination_function,
     illumination_center=illumination_center,
@@ -214,6 +224,11 @@ def random_aperture_config(params):
     # Start with the object hole at the mask origin.
     aperture_types = ["OH"]
     aperture_centers = [(0.0, 0.0)]
+    aperture_angles = [0.0]
+    aperture_ellipticities = [1.0]
+    aperture_roughnesses = [0.0]
+    aperture_roughness_modes = [(0, 0)]
+    aperture_seeds = [-1]
 
     # Object hole radius: larger than the sampled texture period and 100 nm,
     # but smaller than one quarter of the mask FOV and 5 um.
@@ -238,6 +253,11 @@ def random_aperture_config(params):
 
         rh_radius = Uniform(10e-9, 150e-9).sample()
         aperture_radii.append(rh_radius)
+        aperture_angles.append(Uniform(0.0, np.pi).sample())
+        aperture_ellipticities.append(Uniform(0.65, 1.55).sample())
+        aperture_roughnesses.append(Uniform(0.01, 0.08).sample())
+        aperture_roughness_modes.append((3, 9))
+        aperture_seeds.append(int(np.random.randint(0, 2**31 - 1)))
 
         rh_sigma_max = max(1e-9, rh_radius / 4)
         if rh_sigma_max == 1e-9:
@@ -264,6 +284,11 @@ def random_aperture_config(params):
         "aperture_radii": aperture_radii,
         "aperture_centers": aperture_centers,
         "aperture_sigmas": aperture_sigmas,
+        "aperture_angles": aperture_angles,
+        "aperture_ellipticities": aperture_ellipticities,
+        "aperture_roughnesses": aperture_roughnesses,
+        "aperture_roughness_modes": aperture_roughness_modes,
+        "aperture_seeds": aperture_seeds,
     }
 
 ###############################################################################################################

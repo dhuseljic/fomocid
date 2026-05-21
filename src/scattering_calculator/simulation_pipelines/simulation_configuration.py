@@ -663,6 +663,11 @@ class FrontApertureConfig(_ConfigMixin):
         - ``apertures_radius`` : list of float — radii in metres.
         - ``apertures_center`` : list of tuple — (y, x) centres in metres.
         - ``apertures_sigma`` : list of float — edge-smoothing sigma in metres.
+        - ``apertures_angle`` : list of float — ellipse orientation in radians.
+        - ``apertures_ellipticity`` : list of float — y/x axis ratio.
+        - ``apertures_roughness`` : list of float — boundary roughness amplitude.
+        - ``apertures_roughness_modes`` : list of tuple — inclusive Fourier-mode range.
+        - ``apertures_seed`` : list of int — random seeds for rough boundaries.
         - ``thickness_OH`` : float — depth of the object hole in metres.
 
     Attributes
@@ -714,8 +719,35 @@ class FrontApertureConfig(_ConfigMixin):
         radi = self.aperture_config.get("apertures_radius", None)
         centers = self.aperture_config.get("apertures_center", None)
         sigmas = self.aperture_config.get("apertures_sigma", None)
+        angles = self._aperture_values("apertures_angle", len(types), 0.0)
+        ellipticities = self._aperture_values("apertures_ellipticity", len(types), 1.0)
+        roughnesses = self._aperture_values("apertures_roughness", len(types), 0.0)
+        roughness_modes = self._aperture_values(
+            "apertures_roughness_modes", len(types), (0, 0)
+        )
+        seeds = self._aperture_values("apertures_seed", len(types), None)
 
-        for type, radius, center, sigma in zip(types, radi, centers, sigmas):
+        for (
+            type,
+            radius,
+            center,
+            sigma,
+            angle,
+            ellipticity,
+            roughness,
+            modes,
+            seed,
+        ) in zip(
+            types,
+            radi,
+            centers,
+            sigmas,
+            angles,
+            ellipticities,
+            roughnesses,
+            roughness_modes,
+            seeds,
+        ):
             if type == "OH":
                 depth = self.aperture_config.get("thickness_OH", None)
             elif type == "RH":
@@ -723,13 +755,32 @@ class FrontApertureConfig(_ConfigMixin):
             else:
                 raise ValueError(f"Aperture type not defined, got {type}")
 
+            seed = None if seed is None or int(seed) < 0 else int(seed)
+
             self.aperture.create_circle_aperture(
                 center=center,
                 depth=depth,
                 radius=radius,
                 sigma=sigma,
+                angle=angle,
+                ellipticity=ellipticity,
+                roughness=roughness,
+                roughness_modes=tuple(modes),
+                seed=seed,
                 use_real_space_coordinates=True,
             )
+
+    def _aperture_values(self, key: str, n: int, default):
+        """Return a per-aperture list, using ``default`` when absent."""
+        values = self.aperture_config.get(key, None)
+        if values is None:
+            return [default] * n
+        if len(values) != n:
+            raise ValueError(
+                f"{key} must have {n} entries, matching apertures_type; "
+                f"got {len(values)}"
+            )
+        return values
 
     def return_aperture(self) -> np.ndarray:
         """Return the 3-D aperture design array."""
@@ -760,18 +811,42 @@ class FrontApertureConfig(_ConfigMixin):
 
         radii = self.aperture_config.get("apertures_radius", [])
         centers = self.aperture_config.get("apertures_center", [])
-        yy, xx = np.indices(shape)
+        n = len(radii)
+        angles = self._aperture_values("apertures_angle", n, 0.0)
+        ellipticities = self._aperture_values("apertures_ellipticity", n, 1.0)
+        roughnesses = self._aperture_values("apertures_roughness", n, 0.0)
+        roughness_modes = self._aperture_values(
+            "apertures_roughness_modes", n, (0, 0)
+        )
+        seeds = self._aperture_values("apertures_seed", n, None)
         center_y0 = shape[0] / 2
         center_x0 = shape[1] / 2
 
-        for radius, center in zip(radii, centers):
+        for radius, center, angle, ellipticity, roughness, modes, seed in zip(
+            radii,
+            centers,
+            angles,
+            ellipticities,
+            roughnesses,
+            roughness_modes,
+            seeds,
+        ):
             center_y = center_y0 + center[0] / pixel_size
             center_x = center_x0 + center[1] / pixel_size
             radius_px = radius / pixel_size
-            inside_hole = (
-                (yy - center_y) ** 2 + (xx - center_x) ** 2
-            ) <= radius_px**2
-            supportmask[inside_hole] = 1
+            seed = None if seed is None or int(seed) < 0 else int(seed)
+            inside_hole = structures.Apertures3D._aperture_hole_mask(
+                (1, *shape),
+                (center_y, center_x),
+                radius_px,
+                sigma=None,
+                angle=angle,
+                ellipticity=ellipticity,
+                roughness=roughness,
+                roughness_modes=tuple(modes),
+                seed=seed,
+            )
+            supportmask[inside_hole > 0] = 1
         return supportmask
 
     def visualize_aperture(self) -> None:

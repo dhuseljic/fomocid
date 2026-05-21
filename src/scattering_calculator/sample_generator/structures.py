@@ -3,6 +3,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from scipy.ndimage import gaussian_filter
 from scattering_calculator.utils.masking import circle_mask
 from scattering_calculator.utils.masking import circle_mask3D
 
@@ -1003,6 +1004,11 @@ class Apertures3D:
         depth: float,
         use_real_space_coordinates: bool = False,
         sigma: float | None = None,
+        angle: float = 0.0,
+        ellipticity: float = 1.0,
+        roughness: float = 0.0,
+        roughness_modes: tuple[int, int] = (0, 0),
+        seed: int | None = None,
     ) -> None:
         """Create a circular aperture mask and store it in ``self.aperture_design``.
 
@@ -1029,7 +1035,11 @@ class Apertures3D:
             pixel_depth = np.argmin(
                 np.abs(np.append(0, np.cumsum(self.layer_thicknesses)) - depth)
             )
-            pixel_sigma = sigma / np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
+            pixel_sigma = (
+                None
+                if sigma is None
+                else sigma / np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
+            )
             pixel_center = np.array(center) / self.pixel_size + self.shape[1] // 2
         else:
             pixel_radius = radius
@@ -1040,9 +1050,65 @@ class Apertures3D:
         # self.aperture_design = np.ones(self.shape)
         # print(pixel_depth)
         for i in range(0, pixel_depth):
-            self.aperture_design[i, :, :] *= 1 - circle_mask3D(
-                self.shape, pixel_center, pixel_radius, pixel_sigma
+            self.aperture_design[i, :, :] *= 1 - self._aperture_hole_mask(
+                self.shape,
+                pixel_center,
+                pixel_radius,
+                pixel_sigma,
+                angle=angle,
+                ellipticity=ellipticity,
+                roughness=roughness,
+                roughness_modes=roughness_modes,
+                seed=seed,
             )
+
+    @staticmethod
+    def _aperture_hole_mask(
+        shape,
+        center,
+        radius,
+        sigma=None,
+        angle: float = 0.0,
+        ellipticity: float = 1.0,
+        roughness: float = 0.0,
+        roughness_modes: tuple[int, int] = (0, 0),
+        seed: int | None = None,
+    ) -> NDArray[np.float64]:
+        """Create a possibly elliptical and rough aperture-hole mask."""
+        _, ny, nx = shape
+        y = np.arange(ny, dtype=float)
+        x = np.arange(nx, dtype=float)
+        X, Y = np.meshgrid(x, y, indexing="xy")
+        dy = Y - center[0]
+        dx = X - center[1]
+
+        ellipticity = float(ellipticity)
+        if ellipticity <= 0:
+            raise ValueError(f"ellipticity must be positive, got {ellipticity}")
+
+        radius_y = radius * np.sqrt(ellipticity)
+        radius_x = radius / np.sqrt(ellipticity)
+        xr = np.cos(angle) * dx + np.sin(angle) * dy
+        yr = -np.sin(angle) * dx + np.cos(angle) * dy
+        normalized_radius = np.sqrt((xr / radius_x) ** 2 + (yr / radius_y) ** 2)
+        polar_angle = np.arctan2(yr / radius_y, xr / radius_x)
+
+        boundary = np.ones((ny, nx), dtype=float)
+        if roughness > 0:
+            rng = np.random.default_rng(seed)
+            min_mode, max_mode = roughness_modes
+            for mode in range(max(1, int(min_mode)), int(max_mode) + 1):
+                amplitude = rng.normal(scale=roughness / mode)
+                phase = rng.uniform(0.0, 2.0 * np.pi)
+                boundary += amplitude * np.cos(mode * polar_angle + phase)
+            boundary = np.clip(
+                boundary, 1.0 - 2.0 * roughness, 1.0 + 2.0 * roughness
+            )
+
+        mask = (normalized_radius <= boundary).astype(float)
+        if sigma is not None and sigma != 0:
+            mask = gaussian_filter(mask, sigma)
+        return mask
 
     def create_empty_aperture(self) -> None:
         """Create an empty aperture mask (all zeros) and store it in ``self.aperture_design``."""
