@@ -232,8 +232,8 @@ def random_aperture_config(params):
 
     # Object hole radius: larger than the sampled texture period and 100 nm,
     # but smaller than one quarter of the mask FOV and 5 um.
-    oh_radius_min = max(stripe_width, 400e-9)
-    oh_radius_max = min(fov_xy / 8, 6e-6)
+    oh_radius_min = max(stripe_width, 250e-9)
+    oh_radius_max = min(fov_xy / 8, 3e-6)
     if oh_radius_max <= oh_radius_min:
         oh_radius = oh_radius_min
     else:
@@ -251,7 +251,7 @@ def random_aperture_config(params):
     for _ in range(n_reference_holes):
         aperture_types.append("RH")
 
-        rh_radius = Uniform(10e-9, 150e-9).sample()
+        rh_radius = Uniform(5e-9, 90e-9).sample()
         aperture_radii.append(rh_radius)
         aperture_angles.append(Uniform(0.0, np.pi).sample())
         aperture_ellipticities.append(Uniform(0.65, 1.55).sample())
