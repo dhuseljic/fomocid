@@ -302,8 +302,9 @@ class DetectorConfig(_ConfigMixin):
     )
     measurement_config: dict = field(
         default_factory=lambda: {
+            "exposure_time": 1.0,
             "number_frames": 1,
-            "max_counts_per_image": 60e3,
+            "max_counts_per_image": None,
         }
     )
     beamstop_config: BeamstopConfig | None = None
@@ -362,6 +363,14 @@ class DetectorConfig(_ConfigMixin):
         """Assign a simulated hologram to the detector layout for later retrieval."""
         self.propagator = samplepropagationconfig
         self.wavefront = self.propagator.return_wavefront()
+        exit_wavefield = self.propagator.return_scalar_wavefield()
+        exit_intensity = np.sum(np.abs(exit_wavefield) ** 2)
+        hologram_intensity = np.sum(self.wavefront.hologram)
+        if hologram_intensity <= 0:
+            raise ValueError("Cannot scale detector hologram with zero total intensity.")
+        self.wavefront.hologram *= exit_intensity / hologram_intensity
+        self.exit_wavefield_intensity = exit_intensity
+        self.hologram_intensity = np.sum(self.wavefront.hologram)
 
     def detect_hologram(self) -> np.ndarray:
         """Simulate the detection of the hologram on the detector, including noise and artifacts."""
@@ -767,6 +776,16 @@ class IlluminationConfig(_ConfigMixin):
         elif self.illumination_function in ("plane_wave", None):
             self.illumination.plane_wave(self.shape)
 
+    def _incident_photons_per_second(self) -> float:
+        return self.XRayConfig.photon_flux
+
+    def _scale_illumination_to_photon_flux(self) -> None:
+        target_intensity = self._incident_photons_per_second()
+        current_intensity = np.sum(np.abs(self.illumination.illumination) ** 2)
+        if current_intensity <= 0:
+            raise ValueError("Cannot scale illumination with zero total intensity.")
+        self.illumination.illumination *= np.sqrt(target_intensity / current_intensity)
+
     def setup(self) -> None:
         """Compute the spatial wavefield and initialise Jones vectors.
 
@@ -779,6 +798,7 @@ class IlluminationConfig(_ConfigMixin):
             self.beam_params, self.shape, self.real_space_pixel_size
         )
         self._apply_illumination_function()
+        self._scale_illumination_to_photon_flux()
         self.illumination.get_illumination_jones()
 
     def update_polarization(self, pol: str) -> None:
@@ -806,6 +826,7 @@ class IlluminationConfig(_ConfigMixin):
         """
         self.illumination_config = illumination_config
         self._apply_illumination_function()
+        self._scale_illumination_to_photon_flux()
         self.illumination.get_illumination_jones()
 
     def update_energy(self, energy: float) -> None:
@@ -825,6 +846,7 @@ class IlluminationConfig(_ConfigMixin):
         self.beam_params = self.XRayConfig.setup()
         self.illumination.beam_parameters = self.beam_params
         self._apply_illumination_function()
+        self._scale_illumination_to_photon_flux()
         self.illumination.get_illumination_jones()
 
     def update(self, new_xray_config: XRayConfig) -> None:

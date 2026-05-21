@@ -178,8 +178,9 @@ class HologramPipelineConfig:
     )
     measurement_config: dict = field(
         default_factory=lambda: {
+            "exposure_time": 1.0,
             "number_frames": 1,
-            "max_counts_per_image": 60e3,
+            "max_counts_per_image": None,
         }
     )
 
@@ -753,3 +754,17 @@ class HologramPipeline:
         grp.create_dataset(
             "detector_quantum_efficiency", data=cfg.detector_quantum_efficiency
         )
+        self._write_config_dict(grp, "detector_params", cfg.detector_params)
+        self._write_config_dict(grp, "measurement_config", cfg.measurement_config)
+        self._write_config_dict(grp, "artifacts_config", cfg.artifacts_config)
+
+    def _write_config_dict(self, parent: h5py.Group, name: str, config: dict) -> None:
+        """Write scalar/list config values to a subgroup."""
+        grp = parent.require_group(name)
+        for key, value in config.items():
+            if isinstance(value, str):
+                value = np.bytes_(value)
+            try:
+                grp.create_dataset(key, data=value)
+            except (TypeError, ValueError):
+                pass

@@ -52,7 +52,8 @@ detector_params = {
 }
 measurement_config = {
     "number_frames": 1,
-    "max_counts_per_image": 60e3,
+    "max_counts_per_image": None,
+    "exposure_time": 1e-2,
 }
 artifacts_config = {
     "counts_per_photon": 100,

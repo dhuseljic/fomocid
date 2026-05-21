@@ -315,8 +315,9 @@ class beamstop:
 
 class detector_hologram:
     DEFAULT_MEASUREMENT_CONFIG = {
+        "exposure_time": 1.0,
         "number_frames": 1,
-        "max_counts_per_image": 60e3,
+        "max_counts_per_image": None,
     }
     DEFAULT_DETECTOR_PARAMS = {
         "readout_noise_average": 50,
@@ -380,6 +381,7 @@ class detector_hologram:
             self.DEFAULT_MEASUREMENT_CONFIG,
             measurement_config,
             allowed_keys={
+                "exposure_time",
                 "number_frames",
                 "max_counts_per_image",
             },
@@ -483,7 +485,7 @@ class detector_hologram:
 
         # 0. we start with holo, the FFT of the exit wave, hence the distribution of photons (or counts) at a certain point in the detector for a single image
         rng = np.random.default_rng()
-        holo = self.hologram_detector
+        holo = self.hologram_detector.copy() * self.exposure_time
         npx, npy = holo.shape
         self._set_coherence_sigmas(holo.shape)
 
@@ -497,11 +499,12 @@ class detector_hologram:
                 kernel /= kernel.sum()
                 holo = signal.fftconvolve(holo, kernel, mode="same")
 
-        # 2. adjust the maximum count to self.max_counts_per_image for a single frame.
-        # holo is not the count number
-        holo *= (self.max_counts_per_image) / np.amax(
-            (1.0 - self.beamstop.beamstop) * holo
-        )
+        # 2. optionally rescale to a requested maximum detector count per image.
+        # If None, preserve the physical scale set by photon flux and exposure time.
+        if self.max_counts_per_image is not None:
+            max_unblocked = np.amax((1.0 - self.beamstop.beamstop) * holo)
+            if max_unblocked > 0:
+                holo *= self.max_counts_per_image / max_unblocked
 
         # 3. multiply by frame number to get counts of the entire set
         holo *= self.number_frames
@@ -559,7 +562,7 @@ class detector_hologram:
             )
 
         # 7. convert photons back to detector counts
-        holo = photon_counts * self.counts_per_photon
+        holo = photon_counts.astype(float) * self.counts_per_photon
 
         # 8. apply beamstop mask to shadow
         holo *= 1.0 - self.beamstop.beamstop
