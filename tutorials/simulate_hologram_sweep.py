@@ -149,7 +149,7 @@ config = HologramPipelineConfig(
         "waviness_scale": waviness_scale,
     },
     # Simulation grid: sample_shape = oversampling * detector_shape
-    oversampling=2,
+    oversampling=1,
 )
 
 # %%
@@ -218,7 +218,7 @@ def random_aperture_config(params):
     # Object hole radius: larger than the sampled texture period and 100 nm,
     # but smaller than one quarter of the mask FOV and 5 um.
     oh_radius_min = max(stripe_width, 400e-9)
-    oh_radius_max = min(fov_xy / 4, 6e-6)
+    oh_radius_max = min(fov_xy / 8, 6e-6)
     if oh_radius_max <= oh_radius_min:
         oh_radius = oh_radius_min
     else:
@@ -230,7 +230,7 @@ def random_aperture_config(params):
     # Add 1 to 5 reference holes. Each RH has its own radius, edge sigma, and
     # random position inside the FOV but outside 2 * OH_radius from the origin.
     n_reference_holes = np.random.randint(1, 6)
-    center_half_width = fov_xy / 2
+    center_half_width = fov_xy / 2 - oh_radius
     min_center_distance = 2 * oh_radius
 
     for _ in range(n_reference_holes):
@@ -305,7 +305,7 @@ ranges = HologramPipelineRanges(
 # ===================
 # RUN PIPELINE
 # ===================
-nr_simulations = 1  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 7  # increase to e.g. 1000 for a full training dataset
 
 pipeline = HologramPipeline(
     config=config,
