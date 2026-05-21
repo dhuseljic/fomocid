@@ -157,7 +157,7 @@ class beam_parameters:
         photon_energy: float,
         pol: str,
         photon_flux: float,
-        coherence_length: float,
+        coherence_length: tuple[float, float],
     ) -> None:
         self.energy: float = photon_energy  # in eV
         self.wavelength: float = physics.photon_energy_wavelength(photon_energy)
@@ -166,7 +166,7 @@ class beam_parameters:
         )
         self.pol = pol
         self.photon_flux: float = photon_flux  # in photons/s, set externally
-        self.coherence_length: float = coherence_length  # in m, set externally
+        self.coherence_length: tuple[float, float] = coherence_length  # in m, (y, x)
 
     def calc_wavevector(self):
         self.wavevector = 2 * np.pi / self.wavelength

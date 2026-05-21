@@ -68,6 +68,12 @@ class SetupSimulationExperiment:
                 self.beam_params,
                 self.sample.real_space_pixel_size,
                 self.beamstop,
+                artifacts_config=getattr(self.detector_config, "artifacts_config", None),
+                measurement_config=getattr(
+                    self.detector_config, "measurement_config", None
+                ),
+                detector_params=getattr(self.detector_config, "detector_params", None),
+                coherence_length=self.beam_params.coherence_length,
             )
             hologram_exp.gnomonic_projection()
             hologram_exp.add_noise()
@@ -75,9 +81,20 @@ class SetupSimulationExperiment:
 
     def _setup_beam_params(self):
         self.beam_params = light_beam.beam_parameters(
-            self.xray_config.x_ray_energy,
-            self.xray_config.pol,
+            getattr(
+                self.xray_config,
+                "x_ray_energy",
+                getattr(self.xray_config, "energy", None),
+            ),
+            getattr(self.xray_config, "pol", "CR"),
+            getattr(
+                self.xray_config,
+                "x_ray_photon_flux",
+                getattr(self.xray_config, "photon_flux", 1e12),
+            ),
+            getattr(self.xray_config, "coherence_length", (10e-6, 10e-6)),
         )
+        self.beam_params.calc_wavevector()
 
     def _setup_detector(self):
         self.exp_detector = detector.detector_layout(

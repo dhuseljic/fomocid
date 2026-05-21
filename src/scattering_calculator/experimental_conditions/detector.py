@@ -314,6 +314,26 @@ class beamstop:
 
 
 class detector_hologram:
+    DEFAULT_MEASUREMENT_CONFIG = {
+        "number_frames": 1,
+        "max_counts_per_image": 60e3,
+    }
+    DEFAULT_DETECTOR_PARAMS = {
+        "readout_noise_average": 50,
+        "readout_noise_sigma": 3,
+        "detector_threshold": 64e3,
+        "counts_per_photon": 100,
+    }
+    DEFAULT_ARTIFACTS_CONFIG = {
+        "counts_per_photon": 100,
+        "sigma_photon": 0.75,
+        "photon_n_classes": 1,
+        "photon_n_variants": 30,
+        "photon_kernel_size": 9,
+        "photon_irregularity": 2.0,
+        "regenerate_photon_kernels": True,
+    }
+
     def __init__(
         self,
         detector_layout,
@@ -321,35 +341,130 @@ class detector_hologram:
         beam_parameters,
         real_space_pixel_size,
         beamstop,
+        artifacts_config=None,
+        measurement_config=None,
+        detector_params=None,
+        coherence_length=None,
     ):
         self.detector_layout = detector_layout
         self.hologram = hologram
         self.beam_parameters = beam_parameters
         self.real_space_pixel_size = real_space_pixel_size
         self.beamstop = beamstop
+        self.coherence_length = coherence_length
 
-        # acquisition details
-        self.number_frames = 1
-        self.max_counts_per_image = 60e3
-
-        # detector readout
-        self.readout_noise_average = 50
-        self.readout_noise_sigma = 3
-        self.detector_threshold = 64e3
-
-        # photon-detector interaction details
-        self.counts_per_photon = 100
-        self.sigma_photon = 0.75
-        self.photon_n_classes = 1
-        self.photon_n_variants = 30
-        self.photon_tile_size = self.hologram.shape[0]
-        self.photon_kernel_size = 9
-        self.photon_irregularity = 2.0
-        self.regenerate_photon_kernels = True
-
-        # beam properties
+        self._apply_measurement_config(measurement_config)
+        self._apply_artifacts_config(artifacts_config)
+        self._apply_detector_params(detector_params)
         self.sigma_y = 0.0
         self.sigma_x = 0.0
+
+    def _apply_config(self, defaults, config, allowed_keys, aliases=None):
+        aliases = aliases or {}
+        merged = dict(defaults)
+        if config is not None:
+            for key, value in config.items():
+                attr = aliases.get(key, key)
+                if attr not in allowed_keys:
+                    raise ValueError(
+                        f"Unknown detector_hologram parameter '{key}'. "
+                        f"Allowed keys are: {sorted(allowed_keys | set(aliases))}"
+                    )
+                merged[attr] = value
+        for key, value in merged.items():
+            attr = aliases.get(key, key)
+            setattr(self, attr, value)
+
+    def _apply_measurement_config(self, measurement_config):
+        self._apply_config(
+            self.DEFAULT_MEASUREMENT_CONFIG,
+            measurement_config,
+            allowed_keys={
+                "number_frames",
+                "max_counts_per_image",
+            },
+        )
+
+    def _apply_artifacts_config(self, artifacts_config):
+        self._apply_config(
+            {
+                **self.DEFAULT_ARTIFACTS_CONFIG,
+                "photon_tile_size": self.hologram.shape[0],
+            },
+            artifacts_config,
+            allowed_keys={
+                "counts_per_photon",
+                "sigma_photon",
+                "photon_n_classes",
+                "photon_n_variants",
+                "photon_tile_size",
+                "photon_kernel_size",
+                "photon_irregularity",
+                "regenerate_photon_kernels",
+                "photon_sigma_range",
+                "photon_ellipticity_range",
+                "photon_class_seed",
+                "photon_kernel_seed",
+            },
+        )
+
+    def _apply_detector_params(self, detector_params):
+        self._apply_config(
+            self.DEFAULT_DETECTOR_PARAMS,
+            detector_params,
+            allowed_keys={
+                "readout_noise_average",
+                "readout_noise_sigma",
+                "detector_threshold",
+                "counts_per_photon",
+                "quantum_efficiency",
+            },
+            aliases={
+                "noise_rms": "readout_noise_sigma",
+            },
+        )
+
+    def _coherence_length_yx(self):
+        coherence_length = self.coherence_length
+        if coherence_length is None:
+            coherence_length = getattr(self.beam_parameters, "coherence_length", None)
+        if coherence_length is None:
+            return None
+        if np.isscalar(coherence_length):
+            return float(coherence_length), float(coherence_length)
+        if len(coherence_length) != 2:
+            raise ValueError(
+                "coherence_length must be a scalar or a 2-tuple "
+                "(coherence_length_y, coherence_length_x)."
+            )
+        return float(coherence_length[0]), float(coherence_length[1])
+
+    def _set_coherence_sigmas(self, hologram_shape):
+        coherence_length = self._coherence_length_yx()
+        if coherence_length is None:
+            self.sigma_y = 0.0
+            self.sigma_x = 0.0
+            return
+
+        coherence_length_y, coherence_length_x = coherence_length
+        if coherence_length_y <= 0 or coherence_length_x <= 0:
+            raise ValueError(
+                "coherence_length values must be positive, got "
+                f"{coherence_length}."
+            )
+
+        real_space_resolution = getattr(
+            self.detector_layout, "real_space_resolution", None
+        )
+        if real_space_resolution is None:
+            real_space_resolution = self.detector_layout.calc_resolution_from_detector()
+
+        self.sigma_y = (
+            hologram_shape[0] * real_space_resolution / coherence_length_y
+        )
+        self.sigma_x = (
+            hologram_shape[0] * real_space_resolution / coherence_length_x
+        )
 
     def add_noise(self):
         """
@@ -370,6 +485,7 @@ class detector_hologram:
         rng = np.random.default_rng()
         holo = self.hologram_detector
         npx, npy = holo.shape
+        self._set_coherence_sigmas(holo.shape)
 
         # 1. convolution with a gaussian to simulate vibrations and partial transversal coherence
         if (self.sigma_x > 0) or (self.sigma_y > 0):

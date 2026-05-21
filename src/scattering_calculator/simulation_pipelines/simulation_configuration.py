@@ -72,8 +72,8 @@ class XRayConfig(_ConfigMixin):
         Photon flux in photons per pulse.
     polarization : {"CR", "CL", "x", "y"}
         Polarization state of the beam.
-    coherence_length : float
-        Transverse coherence length in metres.
+    coherence_length : tuple of float
+        Transverse coherence length in metres as ``(y, x)``.
 
     Attributes
     ----------
@@ -86,14 +86,24 @@ class XRayConfig(_ConfigMixin):
     energy: float  # eV
     photon_flux: float  # photons/s
     pol: Literal["CR", "CL", "x", "y"] = "CR"
-    coherence_length: float = 10e-6  # m
+    coherence_length: tuple[float, float] = (10e-6, 10e-6)  # m, (y, x)
 
     def __post_init__(self) -> None:
         if self.energy <= 0:
             raise ValueError(f"energy must be positive, got {self.energy}")
         if self.photon_flux <= 0:
             raise ValueError(f"photon_flux must be positive, got {self.photon_flux}")
-        if self.coherence_length <= 0:
+        if np.isscalar(self.coherence_length):
+            self.coherence_length = (
+                float(self.coherence_length),
+                float(self.coherence_length),
+            )
+        if len(self.coherence_length) != 2:
+            raise ValueError(
+                "coherence_length must be a scalar or a 2-tuple "
+                "(coherence_length_y, coherence_length_x)."
+            )
+        if any(length <= 0 for length in self.coherence_length):
             raise ValueError(
                 f"coherence_length must be positive, got {self.coherence_length}"
             )
@@ -270,11 +280,32 @@ class DetectorConfig(_ConfigMixin):
     sample_to_detector_distance: float = 0.1  # m
     detector_center: tuple[int, int] = (0, 0)  # px
     detector_params: dict = field(
-        default_factory=lambda: {"quantum_efficiency": 1.0, "noise_rms": 0.0}
+        default_factory=lambda: {
+            "readout_noise_average": 50,
+            "noise_rms": 3,
+            "detector_threshold": 64e3,
+            "counts_per_photon": 100,
+            "quantum_efficiency": 1.0,
+        }
     )
     artifacts_method: str | None = None
-    artifacts_config: dict = field(default_factory=dict)
-    measurement_config: dict = field(default_factory=lambda: {"number_frames": 1})
+    artifacts_config: dict = field(
+        default_factory=lambda: {
+            "counts_per_photon": 100,
+            "sigma_photon": 0.75,
+            "photon_n_classes": 1,
+            "photon_n_variants": 30,
+            "photon_kernel_size": 9,
+            "photon_irregularity": 2.0,
+            "regenerate_photon_kernels": True,
+        }
+    )
+    measurement_config: dict = field(
+        default_factory=lambda: {
+            "number_frames": 1,
+            "max_counts_per_image": 60e3,
+        }
+    )
     beamstop_config: BeamstopConfig | None = None
 
     def __post_init__(self) -> None:
@@ -342,6 +373,12 @@ class DetectorConfig(_ConfigMixin):
             self.propagator.IlluminationConfig.beam_params,
             self.propagator.SampleConfig.real_space_pixel_size,
             self.beamstop,
+            artifacts_config=self.artifacts_config,
+            measurement_config=self.measurement_config,
+            detector_params=self.detector_params,
+            coherence_length=(
+                self.propagator.IlluminationConfig.beam_params.coherence_length
+            ),
         )
         self.hologram_exp.gnomonic_projection()
 

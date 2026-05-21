@@ -93,7 +93,10 @@ class XRayConfigRange:
     energy: float | Uniform
     photon_flux: float | Uniform
     pol: str | Choice = "circular"
-    coherence_length: float | Uniform = 10e-6  # m
+    coherence_length: tuple[float, float] | tuple[Uniform, Uniform] | Uniform = (
+        10e-6,
+        10e-6,
+    )  # m, (y, x)
 
     def sample(self) -> XRayConfig:
         """Sample one :class:`XRayConfig` from the defined ranges."""
@@ -101,7 +104,11 @@ class XRayConfigRange:
             energy=_s(self.energy),
             photon_flux=_s(self.photon_flux),
             pol=_s(self.pol),
-            coherence_length=_s(self.coherence_length),
+            coherence_length=(
+                tuple(_s(v) for v in self.coherence_length)
+                if isinstance(self.coherence_length, tuple)
+                else _s(self.coherence_length)
+            ),
         )
 
 

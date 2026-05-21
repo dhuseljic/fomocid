@@ -86,8 +86,8 @@ class HologramPipelineConfig:
         Photon energy in eV.
     xray_photon_flux : float
         Photon flux in photons per pulse.
-    xray_coherence_length : float
-        Transverse coherence length in metres.
+    xray_coherence_length : tuple of float
+        Transverse coherence length in metres as ``(y, x)``.
     detector_shape : tuple of int
         Detector size ``(rows, cols)`` in pixels.
     detector_pixel_size : float
@@ -147,15 +147,41 @@ class HologramPipelineConfig:
     # X-ray source
     xray_energy: float = 787.9  # eV
     xray_photon_flux: float = 1e12  # photons/pulse
-    xray_coherence_length: float = 100e-6  # m
+    xray_coherence_length: tuple[float, float] = (100e-6, 100e-6)  # m, (y, x)
 
     # Detector
     detector_shape: tuple[int, int] = (1300, 1300)  # px
     detector_pixel_size: float = 20e-6  # m/px
     detector_distance: float = 0.02  # m
     detector_center: tuple[int, int] | None = None  # None → shape // 2
-    detector_noise_rms: float = 0.0
+    detector_noise_rms: float = 3.0
     detector_quantum_efficiency: float = 1.0
+    detector_params: dict = field(
+        default_factory=lambda: {
+            "readout_noise_average": 50,
+            "noise_rms": 3,
+            "detector_threshold": 64e3,
+            "counts_per_photon": 100,
+            "quantum_efficiency": 1.0,
+        }
+    )
+    artifacts_config: dict = field(
+        default_factory=lambda: {
+            "counts_per_photon": 100,
+            "sigma_photon": 0.75,
+            "photon_n_classes": 1,
+            "photon_n_variants": 30,
+            "photon_kernel_size": 9,
+            "photon_irregularity": 2.0,
+            "regenerate_photon_kernels": True,
+        }
+    )
+    measurement_config: dict = field(
+        default_factory=lambda: {
+            "number_frames": 1,
+            "max_counts_per_image": 60e3,
+        }
+    )
 
     # Beamstop
     beamstop_method: str | None = "circular"
@@ -224,12 +250,17 @@ class HologramPipelineRanges:
     # X-ray
     xray_energy: float | Uniform | None = None
     xray_photon_flux: float | Uniform | None = None
-    xray_coherence_length: float | Uniform | None = None
+    xray_coherence_length: (
+        tuple[float, float] | tuple[Uniform, Uniform] | Uniform | None
+    ) = None
 
     # Detector
     detector_distance: float | Uniform | Callable[[dict[str, Any]], Any] | None = None
     detector_pixel_size: float | Uniform | None = None
     detector_noise_rms: float | Uniform | None = None
+    detector_params: dict | None = None
+    artifacts_config: dict | None = None
+    measurement_config: dict | None = None
 
     # Beamstop
     beamstop_config: dict | None = None
@@ -358,6 +389,8 @@ class HologramPipeline:
         def _resolve(value: Any, params: dict[str, Any]) -> Any:
             if callable(value):
                 value = value(params)
+            if isinstance(value, tuple):
+                return tuple(_resolve(v, params) for v in value)
             return _s(value)
 
         def _pick(range_val: Any, base_val: Any, params: dict[str, Any]) -> Any:
@@ -400,6 +433,25 @@ class HologramPipeline:
         )
         params["detector_noise_rms"] = _pick(
             rng.detector_noise_rms, cfg.detector_noise_rms, params
+        )
+        params["detector_params"] = _merge_dict(
+            rng.detector_params, cfg.detector_params, params
+        )
+        if rng.detector_noise_rms is not None:
+            params["detector_params"]["noise_rms"] = params["detector_noise_rms"]
+        elif (
+            "noise_rms" not in params["detector_params"]
+            and "readout_noise_sigma" not in params["detector_params"]
+        ):
+            params["detector_params"]["noise_rms"] = params["detector_noise_rms"]
+        params["detector_params"].setdefault(
+            "quantum_efficiency", cfg.detector_quantum_efficiency
+        )
+        params["artifacts_config"] = _merge_dict(
+            rng.artifacts_config, cfg.artifacts_config, params
+        )
+        params["measurement_config"] = _merge_dict(
+            rng.measurement_config, cfg.measurement_config, params
         )
         params["pattern_type"] = _pick(rng.pattern_type, cfg.pattern_type, params)
         params["pattern_config"] = _merge_dict(
@@ -460,10 +512,9 @@ class HologramPipeline:
             shape=cfg.detector_shape,
             sample_to_detector_distance=p["detector_distance"],
             detector_center=detector_center,
-            detector_params={
-                "quantum_efficiency": cfg.detector_quantum_efficiency,
-                "noise_rms": p["detector_noise_rms"],
-            },
+            detector_params=p["detector_params"],
+            artifacts_config=p["artifacts_config"],
+            measurement_config=p["measurement_config"],
             beamstop_config=beamstop_config,
         )
         detector_config.setup()

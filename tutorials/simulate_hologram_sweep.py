@@ -36,13 +36,33 @@ os.makedirs(output_folder, exist_ok=True)
 # --- X-ray source ---
 x_ray_energy = 787.9  # eV  (Co L-edge)
 x_ray_photon_flux = 1e12  # photons/pulse
-coherence_length = 100e-6  # m
+coherence_length = (100e-6, 100e-6)  # m, (y, x)
 
 # --- Detector ---
 detector_pixel_size = 20e-6  # m/px
 detector_pixel_shape = (1300, 1300)
 detector_distance = 0.02  # m
 detector_center = (650, 650)  # px
+detector_params = {
+    "readout_noise_average": 50,
+    "noise_rms": 3,
+    "detector_threshold": 64e3,
+    "counts_per_photon": 100,
+    "quantum_efficiency": 1.0,
+}
+measurement_config = {
+    "number_frames": 1,
+    "max_counts_per_image": 60e3,
+}
+artifacts_config = {
+    "counts_per_photon": 100,
+    "sigma_photon": 0.75,
+    "photon_n_classes": 1,
+    "photon_n_variants": 30,
+    "photon_kernel_size": 9,
+    "photon_irregularity": 2.0,
+    "regenerate_photon_kernels": True,
+}
 
 # --- Beamstop ---
 beamstop_method = "circular"
@@ -66,7 +86,7 @@ recipe = "Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"
 stripe_width = 20e-9  # m
 sigma = 1e-9  # m
 angle_stripes = np.pi / 4
-waviness_amplitude = 20e-9  # m
+waviness_amplitude = 40e-9  # ms
 waviness_scale = 20e-9  # m
 
 # --- FTH holography mask ---
@@ -79,7 +99,7 @@ aperture_sigmas = [1e-9, 2e-9, 2e-9]  # m
 illumination_function = "gaussian"
 illumination_center = (0.0, 0.0)  # m
 illumination_focus_distance = 1e-3  # m
-illumination_fwhm = 10.5e-6  # m
+illumination_fwhm = 10.5e-6  # ms
 
 # %%
 # ===================
@@ -98,6 +118,9 @@ config = HologramPipelineConfig(
     detector_pixel_size=detector_pixel_size,
     detector_distance=detector_distance,
     detector_center=detector_center,
+    detector_params=detector_params,
+    measurement_config=measurement_config,
+    artifacts_config=artifacts_config,
     # Beamstop
     beamstop_method=beamstop_method,
     beamstop_distance=beamstop_distance,
@@ -242,6 +265,10 @@ def random_aperture_config(params):
         "aperture_sigmas": aperture_sigmas,
     }
 
+###############################################################################################################
+###############################################################################################################
+###############################################################################################################
+###############################################################################################################
 
 ranges = HologramPipelineRanges(
     # Sweep X-ray energy across the Co L-edge absorption region
@@ -255,7 +282,7 @@ ranges = HologramPipelineRanges(
         "radius": Uniform(0.5e-3, 2.5e-3),
         "angle": Uniform(0.0, np.pi),
         "wire_width": Uniform(0.0, 0.08e-3),
-        "wire_bend": Uniform(0.0, 0.2e-3),
+        "wire_bend": Uniform(0.0, 0.75e-3),
     },
 
     # generating detector distances from reasonable ranges based on the stripe width and xray energy
@@ -267,11 +294,17 @@ ranges = HologramPipelineRanges(
     # All other parameters use the fixed values from config above
 )
 
+
+###############################################################################################################
+###############################################################################################################
+###############################################################################################################
+###############################################################################################################
+
 # %%
 # ===================
 # RUN PIPELINE
 # ===================
-nr_simulations = 2  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 6  # increase to e.g. 1000 for a full training dataset
 
 pipeline = HologramPipeline(
     config=config,
