@@ -180,6 +180,12 @@ class beamstop:
         )
         return effective_radius
 
+    def _project_length_to_detector_pixels(self, length: float | None) -> float | None:
+        """Project a beamstop-plane length in metres to detector pixels."""
+        if length is None:
+            return None
+        return self.calc_effective_beamstop_radius(length) / self.detector_pixel_size
+
     def create_circle_beamstop(
         self,
         center: tuple[float, float],
@@ -208,8 +214,10 @@ class beamstop:
             If ``True``, convert the effective radius from metres to pixels
             using the detector pixel size. Default is ``False``.
         sigma : float or None, optional
-            Standard deviation for Gaussian edge smoothing. No smoothing when
-            ``None``.
+            Standard deviation for Gaussian edge smoothing. When
+            ``use_real_space_coordinates`` is ``True``, this is interpreted in
+            metres at the beamstop plane, like ``radius`` and ``wire_width``.
+            No smoothing when ``None``.
         angle : float or None, optional
             Beamstop and wire angle in radians. Random when ``None``.
         ellipticity : tuple of float, optional
@@ -238,11 +246,13 @@ class beamstop:
         radius_effective = self.calc_effective_beamstop_radius(radius)
         wire_width_effective = self.calc_effective_beamstop_radius(wire_width)
         wire_bend_effective = self.calc_effective_beamstop_radius(wire_bend)
+        sigma_effective = sigma
 
         if use_real_space_coordinates:
             radius_effective = radius_effective / self.detector_pixel_size
             wire_width_effective = wire_width_effective / self.detector_pixel_size
             wire_bend_effective = wire_bend_effective / self.detector_pixel_size
+            sigma_effective = self._project_length_to_detector_pixels(sigma)
 
         rng = np.random.default_rng(seed)
         if angle is None:
@@ -294,8 +304,8 @@ class beamstop:
             wire_mask = np.abs(across_wire - bend) <= (0.5 * wire_width_effective)
             mask = np.maximum(mask, wire_mask.astype(float))
 
-        if sigma is not None and sigma != 0:
-            mask = gaussian_filter(mask, sigma)
+        if sigma_effective is not None and sigma_effective != 0:
+            mask = gaussian_filter(mask, sigma_effective)
 
         self.beamstop = mask
 

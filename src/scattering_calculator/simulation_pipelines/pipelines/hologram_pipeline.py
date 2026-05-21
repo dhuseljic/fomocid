@@ -106,7 +106,8 @@ class HologramPipelineConfig:
         Sample-to-beamstop distance in metres.
     beamstop_config : dict
         Optional keyword arguments forwarded to the beamstop generator. If
-        ``"radius"`` is missing, no beamstop or wire is created.
+        ``"radius"`` is missing, no beamstop or wire is created. Beamstop
+        lengths, including ``"sigma"``, are in metres.
     aperture_method : {"FTH_circular"} or None
         Holography mask layout. ``None`` → fully transparent.
     aperture_types : list of {"OH", "RH"}

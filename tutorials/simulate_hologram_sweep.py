@@ -71,7 +71,7 @@ beamstop_distance = 0.001  # m
 beamstop_config = {
     "radius": 0.2e-3,
     "angle": 0,
-    "sigma": 1,
+    "sigma": 20e-6,
     "ellipticity": (0.8, 1.2),
     "roughness": 0.05,
     "roughness_modes": (3, 9),
@@ -309,7 +309,8 @@ ranges = HologramPipelineRanges(
     beamstop_config={
         "radius": Uniform(0.1e-3, 0.5e-3),
         "angle": Uniform(0.0, np.pi),
-        "wire_width": Uniform(0.0, 0.08e-3),
+        "sigma": Uniform(10e-6, 30e-6),
+        "wire_width": Uniform(0.05e-3, 0.1e-3),
         "wire_bend": Uniform(0.0, 0.75e-3),
     },
 

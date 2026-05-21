@@ -152,7 +152,8 @@ class BeamstopConfig(_ConfigMixin):
     bs_config : dict
         Optional keyword arguments forwarded to the beamstop creation method.
         Missing values use the detector defaults. If ``"radius"`` is missing,
-        no beamstop or wire is created.
+        no beamstop or wire is created. Lengths, including ``"sigma"``, are in
+        metres when the beamstop is created through this config.
     """
 
     bs_method: Literal["circular", None] | None = "circular"
