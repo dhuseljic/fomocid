@@ -23,7 +23,7 @@ from scattering_calculator.simulation_pipelines.pipelines import (
 # ===================
 output_folder = DATA_ROOT / "Data" / "hologram_sweep"
 output_path = output_folder / "simulation_sweep.h5"
-pipeline_random_seed = 0  # set to None for non-reproducible random sweeps
+pipeline_random_seed = None  # set to None for non-reproducible random sweeps
 dielectric_tensor_use_roi = True
 
 os.makedirs(output_folder, exist_ok=True)
@@ -185,7 +185,7 @@ def random_pattern_config(params):
     return {
         "angle_stripes": Uniform(0.0, np.pi).sample(),
         "stripe_width": stripe_width,
-        "sigma": Uniform(0.05 * stripe_width, 0.12 * stripe_width).sample(),
+        "sigma": Uniform(np.minimum(3e-9,0.01*stripe_width), np.maximum(3e-9,0.12 * stripe_width)).sample(),
         "waviness_amplitude": waviness_amplitude,
         "waviness_scale": waviness_scale,
     }
