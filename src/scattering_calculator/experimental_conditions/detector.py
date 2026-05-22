@@ -336,6 +336,7 @@ class detector_hologram:
         "detector_threshold": 64e3,
         "counts_per_photon": 100,
         "quantum_efficiency": 1.0,
+        "noise_seed": None,
     }
     DEFAULT_ARTIFACTS_CONFIG = {
         "counts_per_photon": 100,
@@ -432,6 +433,7 @@ class detector_hologram:
                 "detector_threshold",
                 "counts_per_photon",
                 "quantum_efficiency",
+                "noise_seed",
             },
             aliases={
                 "noise_rms": "readout_noise_sigma",
@@ -496,7 +498,7 @@ class detector_hologram:
         """
 
         # 0. we start with holo, the FFT of the exit wave, hence the distribution of photons (or counts) at a certain point in the detector for a single image
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(getattr(self, "noise_seed", None))
         holo = np.array(self.hologram_detector, dtype=float, copy=True)
         holo *= self.exposure_time * self.quantum_efficiency
         npx, npy = holo.shape

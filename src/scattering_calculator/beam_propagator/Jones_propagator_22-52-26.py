@@ -19,18 +19,8 @@ def reconstruct(holo):
     return np.fft.fftshift(np.fft.fft2(np.fft.fftshift(holo)))
 
 class wavefronts:
-    def __init__(
-        self,
-        beam_parameters,
-        eps_stack,
-        layer_thicknesses,
-        real_space_pixel_size,
-        E_in,
-        aperture_support_regions=None,
-        propagate=False,
-    ):
+    def __init__(self, beam_parameters,eps_stack,layer_thicknesses,real_space_pixel_size,E_in, propagate=False):
         self.E_in=E_in
-        self.aperture_support_regions = aperture_support_regions
         self.exit_wave = self.propagate_jones_multislice(
             E_in=self.E_in,
             eps_stack=eps_stack,
@@ -82,13 +72,7 @@ class wavefronts:
             eps_slice = eps_stack[iz]
             dz = thicknesses[iz]
             # Local Jones interaction
-            E_in = self.propagate_jones_single_slice(
-                E_in,
-                eps_slice,
-                wavelength,
-                dz,
-                aperture_support_regions=self.aperture_support_regions,
-            )
+            E_in = self.propagate_jones_single_slice(E_in, eps_slice, wavelength, dz)
 
             # Free-space propagation between slices
             if propagate:
@@ -102,14 +86,7 @@ class wavefronts:
     # Single-slice propagation through dielectric tensor image
     # ============================================================
 
-    def propagate_jones_single_slice(
-        self,
-        E,
-        eps_slice,
-        wavelength,
-        thickness,
-        aperture_support_regions=None,
-    ):
+    def propagate_jones_single_slice(self,E, eps_slice, wavelength, thickness):
         """
         Propagate a coherent Jones wavefield through one dielectric slice.
 
@@ -135,22 +112,9 @@ class wavefronts:
         if E.shape[:2] != eps_slice.shape[:2]:
             raise ValueError("E and eps_slice must have same (Ny, Nx)")
 
-        return self.apply_eps_slice(
-            E,
-            eps_slice,
-            wavelength,
-            thickness,
-            aperture_support_regions=aperture_support_regions,
-        )
+        return self.apply_eps_slice(E, eps_slice, wavelength, thickness)
 
-    def apply_eps_slice(
-        self,
-        E,
-        eps_slice,
-        wavelength,
-        thickness,
-        aperture_support_regions=None,
-    ):
+    def apply_eps_slice(self, E, eps_slice, wavelength, thickness):
         """Apply one dielectric slice directly to a Jones wavefield.
 
         Most pixels in FTH simulations are diagonal after the aperture mask is
@@ -165,25 +129,6 @@ class wavefronts:
         b = eps_slice[..., 0, 1]
         c = eps_slice[..., 1, 0]
         d = eps_slice[..., 1, 1]
-
-        if aperture_support_regions:
-            a0 = a.reshape(-1)[0]
-            d0 = d.reshape(-1)[0]
-            E_out = np.empty_like(E, dtype=complex)
-            E_out[..., 0] = np.exp(phase * np.sqrt(a0)) * E[..., 0]
-            E_out[..., 1] = np.exp(phase * np.sqrt(d0)) * E[..., 1]
-
-            for region in aperture_support_regions:
-                region_key = (*region, slice(None))
-                eps_region = eps_slice[region]
-                E_out[region_key] = self.apply_eps_slice(
-                    E[region_key],
-                    eps_region,
-                    wavelength,
-                    thickness,
-                    aperture_support_regions=None,
-                )
-            return E_out
 
         if not np.any(b) and not np.any(c):
             a0 = a.reshape(-1)[0]

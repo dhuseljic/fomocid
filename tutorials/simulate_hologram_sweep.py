@@ -23,6 +23,8 @@ from scattering_calculator.simulation_pipelines.pipelines import (
 # ===================
 output_folder = DATA_ROOT / "Data" / "hologram_sweep"
 output_path = output_folder / "simulation_sweep.h5"
+pipeline_random_seed = 0  # set to None for non-reproducible random sweeps
+dielectric_tensor_use_roi = True
 
 os.makedirs(output_folder, exist_ok=True)
 
@@ -156,8 +158,11 @@ config = HologramPipelineConfig(
         "waviness_amplitude": waviness_amplitude,
         "waviness_scale": waviness_scale,
     },
+    magnetic_pattern_use_roi=True,
+    dielectric_tensor_use_roi=dielectric_tensor_use_roi,
     # Simulation grid: sample_shape = oversampling * detector_shape
     oversampling=2,
+    random_seed=pipeline_random_seed,
 )
 
 # %%
@@ -345,7 +350,7 @@ ranges = HologramPipelineRanges(
 # ===================
 # RUN PIPELINE
 # ===================
-nr_simulations = 10  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 5  # increase to e.g. 1000 for a full training dataset
 
 pipeline = HologramPipeline(
     config=config,

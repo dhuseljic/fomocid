@@ -149,10 +149,28 @@ class HologramPipelineConfig:
     pattern_config_length : dict
         Deprecated compatibility dict for physical-length pattern parameters in
         metres. Prefer putting these values directly in ``pattern_config``.
+    use_roi : bool
+        Master switch for ROI accelerations. If ``True``, use local aperture
+        regions for magnetic-pattern generation, aperture-mask generation,
+        dielectric tensor construction, and Jones propagation. If ``False``,
+        compute those steps on the full sample plane. Default ``True``.
+    magnetic_pattern_use_roi : bool
+        If ``True``, generate wavy stripe patterns only in a padded ROI around
+        the object hole and paste that ROI into a uniform full-field pattern.
+        If ``False``, generate the magnetic pattern over the entire sample
+        plane. Default ``True``.
+    dielectric_tensor_use_roi : bool
+        If ``True``, compute magnetic/vacuum dielectric-tensor corrections in
+        local aperture bounding boxes. If ``False``, use the full aperture
+        support mask, matching the pre-ROI tensor path for timing comparisons.
+        Default ``True``.
     oversampling : int
         Oversampling factor relative to the Nyquist limit from the detector.
         ``real_space_pixel_size = detector_resolution / oversampling``.
         Default 2.
+    random_seed : int or None
+        Seed for reproducible sweep sampling and per-sample stochastic effects.
+        ``None`` keeps stochastic behavior non-deterministic. Default ``None``.
     """
 
     recipe: str
@@ -245,9 +263,13 @@ class HologramPipelineConfig:
     pattern_type: str = "wavy_stripe_pattern"
     pattern_config: dict = field(default_factory=dict)
     pattern_config_length: dict = field(default_factory=dict)
+    use_roi: bool = True
+    magnetic_pattern_use_roi: bool = True
+    dielectric_tensor_use_roi: bool = True
 
     # Simulation grid
     oversampling: int = 2
+    random_seed: int | None = None
 
 
 @dataclass
@@ -392,19 +414,27 @@ class HologramPipeline:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         width = len(str(self.n_samples))
         t_start = time.time()
-        with h5py.File(self.output_path, "w") as h5:
-            self._write_pipeline_config(h5)
-            for i in range(self.n_samples):
-                if self.verbose:
-                    print(
-                        f"  [{i + 1:>{width}}/{self.n_samples}] Simulating...",
-                        end=" ",
-                        flush=True,
-                    )
-                t0 = time.time()
-                self._simulate_one(h5, i)
-                if self.verbose:
-                    print(f"done ({time.time() - t0:.1f} s)")
+        previous_random_state = None
+        if self.config.random_seed is not None:
+            previous_random_state = np.random.get_state()
+            np.random.seed(self.config.random_seed)
+        try:
+            with h5py.File(self.output_path, "w") as h5:
+                self._write_pipeline_config(h5)
+                for i in range(self.n_samples):
+                    if self.verbose:
+                        print(
+                            f"  [{i + 1:>{width}}/{self.n_samples}] Simulating...",
+                            end=" ",
+                            flush=True,
+                        )
+                    t0 = time.time()
+                    self._simulate_one(h5, i)
+                    if self.verbose:
+                        print(f"done ({time.time() - t0:.1f} s)")
+        finally:
+            if previous_random_state is not None:
+                np.random.set_state(previous_random_state)
         if self.verbose:
             elapsed = time.time() - t_start
             print(
@@ -509,6 +539,13 @@ class HologramPipeline:
         )
         for key, value in params["pattern_config_length"].items():
             params["pattern_config"].setdefault(key, value)
+        if cfg.random_seed is not None:
+            def _set_seed_if_missing(config_dict: dict, key: str) -> None:
+                if config_dict.get(key) is None:
+                    config_dict[key] = int(np.random.randint(0, 2**31 - 1))
+
+            params["sample_seed"] = int(np.random.randint(0, 2**31 - 1))
+            _set_seed_if_missing(params["pattern_config"], "seed")
         params["detector_distance"] = _pick(
             rng.detector_distance, cfg.detector_distance, params
         )
@@ -530,7 +567,84 @@ class HologramPipeline:
             },
             params,
         )
+        if cfg.random_seed is not None:
+            _set_seed_if_missing(params["beamstop_config"], "seed")
+            _set_seed_if_missing(params["artifacts_config"], "photon_class_seed")
+            _set_seed_if_missing(params["artifacts_config"], "photon_kernel_seed")
+            _set_seed_if_missing(params["detector_params"], "noise_seed")
         return params
+
+    @staticmethod
+    def _magnetic_pattern_roi(
+        sample_shape: tuple[int, int] | np.ndarray,
+        pixel_size: float,
+        aperture_config: dict[str, Any],
+        pattern_type: str,
+        *,
+        enabled: bool = True,
+    ) -> tuple[tuple[int, int], tuple[slice, slice] | None, tuple[float, float] | None]:
+        """Return the shape and insertion slices for an OH-local pattern.
+
+        Wavy stripe generation is expensive on the full oversampled sample
+        plane, while the magnetic texture is only visible through the OH. For
+        stripe patterns, generate a padded bounding box around the OH and paste
+        it into a full field initialised to +1. Other pattern generators keep
+        their historical full-field behaviour.
+        """
+        full_shape = tuple(int(v) for v in sample_shape)
+        if not enabled or pattern_type != "wavy_stripe_pattern" or pixel_size <= 0:
+            return full_shape, None, None
+
+        types = aperture_config.get("aperture_types", [])
+        radii = aperture_config.get("aperture_radii", [])
+        centers = aperture_config.get("aperture_centers", [])
+        ellipticities = aperture_config.get("aperture_ellipticities", [1.0] * len(radii))
+        sigmas = aperture_config.get("aperture_sigmas", [0.0] * len(radii))
+        roughnesses = aperture_config.get("aperture_roughnesses", [0.0] * len(radii))
+
+        boxes: list[tuple[int, int, int, int]] = []
+        center_y0 = full_shape[0] / 2
+        center_x0 = full_shape[1] / 2
+
+        for aperture_type, radius, center, ellipticity, sigma, roughness in zip(
+            types, radii, centers, ellipticities, sigmas, roughnesses
+        ):
+            if aperture_type != "OH":
+                continue
+            radius_px = float(radius) / pixel_size
+            sigma_px = 0.0 if sigma is None else float(sigma) / pixel_size
+            ellipticity = float(ellipticity)
+            radius_y = radius_px * np.sqrt(ellipticity)
+            radius_x = radius_px / np.sqrt(ellipticity)
+            roughness_scale = 1.0 + max(0.0, 2.0 * float(roughness))
+            half_y = radius_y * roughness_scale + 4.0 * sigma_px
+            half_x = radius_x * roughness_scale + 4.0 * sigma_px
+            margin = max(50.0, 0.25 * max(half_y, half_x))
+            center_y = center_y0 + float(center[0]) / pixel_size
+            center_x = center_x0 + float(center[1]) / pixel_size
+            y0 = max(0, int(np.floor(center_y - half_y - margin)))
+            y1 = min(full_shape[0], int(np.ceil(center_y + half_y + margin)))
+            x0 = max(0, int(np.floor(center_x - half_x - margin)))
+            x1 = min(full_shape[1], int(np.ceil(center_x + half_x + margin)))
+            boxes.append((y0, y1, x0, x1))
+
+        if not boxes:
+            return full_shape, None, None
+
+        y0 = min(box[0] for box in boxes)
+        y1 = max(box[1] for box in boxes)
+        x0 = min(box[2] for box in boxes)
+        x1 = max(box[3] for box in boxes)
+        roi_shape = (y1 - y0, x1 - x0)
+        if roi_shape[0] <= 0 or roi_shape[1] <= 0:
+            return full_shape, None, None
+
+        slices = (slice(y0, y1), slice(x0, x1))
+        coordinate_offset = (
+            (y0 + y1) / 2 - full_shape[0] / 2,
+            (x0 + x1) / 2 - full_shape[1] / 2,
+        )
+        return roi_shape, slices, coordinate_offset
 
     # ------------------------------------------------------------------
     # Core simulation — mirrors test.ipynb cell by cell
@@ -609,32 +723,13 @@ class HologramPipeline:
         sample_config.setup()
         t_stage = mark_stage("sample setup", t_stage)
 
-        # ---- Magnetic pattern config -------------------------------------
-        magnetic_pattern_config = MagneticPatternConfig(
-            pattern_type_method=p["pattern_type"],
-            shape=sample_shape[1:],
-            real_space_pixel_size=real_space_pixel_size,
-            pattern_config_length=p["pattern_config_length"],
-            pattern_config=p["pattern_config"],
-        )
-        magnetic_pattern_config.create_pattern()
-        magnetic_pattern = magnetic_pattern_config.magnetic_pattern
-        magnetization = pattern_generator.map_magnetization_to_3d(
-            np.zeros_like(magnetic_pattern),
-            np.sqrt(1 - np.abs(magnetic_pattern) ** 2),
-            magnetic_pattern,
-            nr_repeats=sample_shape[0],
-        )
-        sample_config.assign_magnetic_pattern(magnetization)
-        metadata.update(magnetic_pattern_config.get_metadata(prefix="magnetic_pattern/"))
-        t_stage = mark_stage("magnetic pattern", t_stage)
-
         # ---- Front aperture config ---------------------------------------
         front_aperture_config = FrontApertureConfig(
             aperture_method=cfg.aperture_method,
             aperture_shape=sample_shape,
             real_space_pixel_size=sample_config.sample_structure.real_space_pixel_size,
             aperture_thicknesses=sample_config.sample_structure.layer_thicknesses,
+            use_roi=cfg.use_roi,
             aperture_config=dict(
                 apertures_type=p["aperture_config"]["aperture_types"],
                 apertures_radius=p["aperture_config"]["aperture_radii"],
@@ -658,6 +753,57 @@ class HologramPipeline:
                 ),
             ),
         )
+
+        # ---- Magnetic pattern config -------------------------------------
+        pattern_shape, pattern_slices, coordinate_offset = self._magnetic_pattern_roi(
+            sample_shape[1:],
+            real_space_pixel_size,
+            p["aperture_config"],
+            p["pattern_type"],
+            enabled=cfg.use_roi and cfg.magnetic_pattern_use_roi,
+        )
+        _, output_pattern_slices, _ = self._magnetic_pattern_roi(
+            sample_shape[1:],
+            real_space_pixel_size,
+            p["aperture_config"],
+            p["pattern_type"],
+            enabled=True,
+        )
+        pattern_config = dict(p["pattern_config"])
+        if coordinate_offset is not None:
+            pattern_config["coordinate_offset"] = coordinate_offset
+        magnetic_pattern_config = MagneticPatternConfig(
+            pattern_type_method=p["pattern_type"],
+            shape=pattern_shape,
+            real_space_pixel_size=real_space_pixel_size,
+            pattern_config_length=p["pattern_config_length"],
+            pattern_config=pattern_config,
+        )
+        magnetic_pattern_config.create_pattern()
+        magnetic_pattern = np.ones(sample_shape[1:], dtype=np.float64)
+        if pattern_slices is None:
+            magnetic_pattern = magnetic_pattern_config.magnetic_pattern
+        else:
+            magnetic_pattern[pattern_slices] = magnetic_pattern_config.magnetic_pattern
+        magnetization = pattern_generator.map_magnetization_to_3d(
+            np.zeros_like(magnetic_pattern),
+            np.sqrt(1 - np.abs(magnetic_pattern) ** 2),
+            magnetic_pattern,
+            nr_repeats=sample_shape[0],
+        )
+        sample_config.assign_magnetic_pattern(magnetization)
+        metadata.update(magnetic_pattern_config.get_metadata(prefix="magnetic_pattern/"))
+        if pattern_slices is not None:
+            metadata["magnetic_pattern/roi_y_start_px"] = pattern_slices[0].start
+            metadata["magnetic_pattern/roi_y_stop_px"] = pattern_slices[0].stop
+            metadata["magnetic_pattern/roi_x_start_px"] = pattern_slices[1].start
+            metadata["magnetic_pattern/roi_x_stop_px"] = pattern_slices[1].stop
+        metadata["use_roi"] = bool(cfg.use_roi)
+        metadata["magnetic_pattern/use_roi"] = bool(
+            cfg.use_roi and cfg.magnetic_pattern_use_roi
+        )
+        t_stage = mark_stage("magnetic pattern", t_stage)
+
         front_aperture_config.setup()
         sample_config.assign_aperture_mask(front_aperture_config.return_aperture())
         supportmask = front_aperture_config.create_supportmask(
@@ -670,10 +816,29 @@ class HologramPipeline:
             aperture_types=("OH",),
         )
         magnetic_pattern_oh = magnetic_pattern * oh_mask
+        if output_pattern_slices is not None:
+            magnetic_pattern_oh = magnetic_pattern_oh[output_pattern_slices]
+            metadata["magnetic_pattern/saved_roi_y_start_px"] = (
+                output_pattern_slices[0].start
+            )
+            metadata["magnetic_pattern/saved_roi_y_stop_px"] = (
+                output_pattern_slices[0].stop
+            )
+            metadata["magnetic_pattern/saved_roi_x_start_px"] = (
+                output_pattern_slices[1].start
+            )
+            metadata["magnetic_pattern/saved_roi_x_stop_px"] = (
+                output_pattern_slices[1].stop
+            )
         metadata.update(front_aperture_config.get_metadata(prefix="aperture/"))
         t_stage = mark_stage("front aperture", t_stage)
 
-        sample_config.sample_structure.calculate_final_dielectric_tensor()
+        sample_config.sample_structure.calculate_final_dielectric_tensor(
+            use_aperture_roi=cfg.use_roi and cfg.dielectric_tensor_use_roi
+        )
+        metadata["dielectric_tensor/use_roi"] = bool(
+            cfg.use_roi and cfg.dielectric_tensor_use_roi
+        )
         t_stage = mark_stage("dielectric tensor", t_stage)
 
         # ---- Illumination config -----------------------------------------
@@ -698,7 +863,12 @@ class HologramPipeline:
             detector_layout=detector_config.detector_layout,
         )
 
-        for pol in self._POLARIZATIONS:
+        base_noise_seed = detector_config.detector_params.get("noise_seed")
+        for pol_idx, pol in enumerate(self._POLARIZATIONS):
+            if base_noise_seed is not None:
+                detector_config.detector_params["noise_seed"] = (
+                    int(base_noise_seed) + pol_idx
+                )
             illumination_config.update_polarization(pol)
 
             propagator_config = SamplePropagatorConfig(

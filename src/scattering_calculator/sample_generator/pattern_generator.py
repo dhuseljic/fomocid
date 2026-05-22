@@ -487,6 +487,7 @@ def create_wavy_stripe_pattern(
     waviness_amplitude: float = 0.0,
     waviness_scale: float = 10.0,
     seed: int | None = None,
+    coordinate_offset: tuple[float, float] | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Create an ordered stripe-domain pattern with optional smooth waviness.
 
@@ -518,6 +519,11 @@ def create_wavy_stripe_pattern(
         gentler undulations. Default is ``10.0``.
     seed : int or None, optional
         Random seed for reproducible waviness. Default is ``None``.
+    coordinate_offset : tuple of float or None, optional
+        Offset ``(y, x)`` in pixels added to the centered coordinate grid.
+        This is useful when generating a cropped region of a larger stripe
+        pattern while keeping the stripe phase aligned to the full sample.
+        Default is ``None``.
 
     Returns
     -------
@@ -530,8 +536,9 @@ def create_wavy_stripe_pattern(
     rows, cols = sz_array
     rng = np.random.default_rng(seed)
 
-    y = np.arange(rows) - rows / 2
-    x = np.arange(cols) - cols / 2
+    offset_y, offset_x = coordinate_offset or (0.0, 0.0)
+    y = np.arange(rows) - rows / 2 + offset_y
+    x = np.arange(cols) - cols / 2 + offset_x
     yy, xx = np.meshgrid(y, x, indexing="ij")
 
     # Coordinate normal to the stripe direction

@@ -699,6 +699,7 @@ class FrontApertureConfig(_ConfigMixin):
     real_space_pixel_size: float = 10e-9  # m/px
     aperture_thicknesses: list[float] = field(default_factory=lambda: [0.01])  # m
     aperture_config: dict = field(default_factory=dict)
+    use_roi: bool = True
 
     def __post_init__(self) -> None:
         if any(thickness <= 0 for thickness in self.aperture_thicknesses):
@@ -786,6 +787,7 @@ class FrontApertureConfig(_ConfigMixin):
                 roughness_modes=tuple(modes),
                 seed=seed,
                 use_real_space_coordinates=True,
+                use_roi=self.use_roi,
             )
 
     def _aperture_values(self, key: str, n: int, default):
@@ -865,9 +867,30 @@ class FrontApertureConfig(_ConfigMixin):
             center_x = center_x0 + center[1] / pixel_size
             radius_px = radius / pixel_size
             seed = None if seed is None or int(seed) < 0 else int(seed)
+            if self.use_roi:
+                y_slice, x_slice = structures.Apertures3D._aperture_bbox(
+                    (1, *shape),
+                    (center_y, center_x),
+                    radius_px,
+                    sigma=None,
+                    angle=angle,
+                    ellipticity=ellipticity,
+                    roughness=roughness,
+                )
+                local_shape = (
+                    1,
+                    y_slice.stop - y_slice.start,
+                    x_slice.stop - x_slice.start,
+                )
+                local_center = (center_y - y_slice.start, center_x - x_slice.start)
+            else:
+                y_slice = slice(0, shape[0])
+                x_slice = slice(0, shape[1])
+                local_shape = (1, *shape)
+                local_center = (center_y, center_x)
             inside_hole = structures.Apertures3D._aperture_hole_mask(
-                (1, *shape),
-                (center_y, center_x),
+                local_shape,
+                local_center,
                 radius_px,
                 sigma=None,
                 angle=angle,
@@ -876,7 +899,8 @@ class FrontApertureConfig(_ConfigMixin):
                 roughness_modes=tuple(modes),
                 seed=seed,
             )
-            supportmask[inside_hole > 0] = 1
+            supportmask_roi = supportmask[y_slice, x_slice]
+            supportmask_roi[inside_hole > 0] = 1
         return supportmask
 
     def visualize_aperture(self) -> None:
@@ -1103,6 +1127,11 @@ class SamplePropagatorConfig(_ConfigMixin):
             layer_thicknesses=self.SampleConfig.sample_structure.layer_thicknesses,
             real_space_pixel_size=self.SampleConfig.real_space_pixel_size,
             E_in=self.IlluminationConfig.illumination.illumination_jones,
+            aperture_support_regions=getattr(
+                self.SampleConfig.sample_structure,
+                "aperture_support_regions",
+                None,
+            ),
             propagate=False,
         )
         return wavefront

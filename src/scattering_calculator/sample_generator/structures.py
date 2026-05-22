@@ -3,7 +3,7 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, label, find_objects
 from scattering_calculator.utils.masking import circle_mask
 from scattering_calculator.utils.masking import circle_mask3D
 
@@ -626,7 +626,7 @@ class Structure:
 
         return eps_eff
 
-    def calculate_final_dielectric_tensor(self) -> None:
+    def calculate_final_dielectric_tensor(self, use_aperture_roi: bool = True) -> None:
         """Build the spatially resolved dielectric tensor for propagation.
 
         The base tensor is the charge/isotropic contribution for each layer.
@@ -639,6 +639,14 @@ class Structure:
         The 3-D ``mask`` still controls whether material or vacuum is present at
         each layer/pixel. Vacuum pixels are set to an identity dielectric tensor
         after the magnetic terms have been applied.
+
+        Parameters
+        ----------
+        use_aperture_roi : bool
+            If ``True``, split the aperture support into local bounding boxes and
+            apply magnetic/vacuum corrections only in those regions. If
+            ``False``, use the full 2-D aperture-support mask, matching the
+            pre-ROI optimization path for timing comparisons.
 
         Returns
         -------
@@ -657,46 +665,67 @@ class Structure:
         eps_mz = dt[:, 1]  # (Nz, 2, 2)
         eps_xy = dt[:, 2]  # (Nz, 2, 2)
 
-        out = np.empty((*mask.shape, 2, 2), dtype=dt.dtype)
-        out[:] = eps0[:, None, None, :, :]
+        out = np.zeros((*mask.shape, 2, 2), dtype=dt.dtype)
+        out[..., 0, 0] = eps0[:, None, None, 0, 0]
+        out[..., 1, 1] = eps0[:, None, None, 1, 1]
 
         # Per-layer checks skip materials with no magnetic tensor contribution.
         tol = 1e-14
         has_mz = np.any(np.abs(eps_mz) > tol, axis=(1, 2))
         has_xy = np.any(np.abs(eps_xy) > tol, axis=(1, 2))
 
-        # Open aperture support: magnetic contrast is only useful where the
-        # holography mask exposes the sample in at least one layer. If there is
-        # no aperture mask, fall back to applying magnetism everywhere.
+        # Open aperture support: magnetic contrast and vacuum corrections only
+        # vary where the holography mask exposes holes. The ROI path splits that
+        # support into local bounding boxes; the full-support path keeps the
+        # earlier vectorised 2-D support mask for apples-to-apples benchmarks.
         aperture_support = np.any(np.abs(1.0 - mask) > tol, axis=0)
-        if not np.any(aperture_support):
+        has_aperture_support = np.any(aperture_support)
+        if not has_aperture_support:
             aperture_support = np.ones(mask.shape[1:], dtype=bool)
+            support_objects = [(slice(0, mask.shape[1]), slice(0, mask.shape[2]))]
+        elif use_aperture_roi:
+            labels, _ = label(aperture_support)
+            support_objects = [obj for obj in find_objects(labels) if obj is not None]
+        else:
+            support_objects = [(slice(0, mask.shape[1]), slice(0, mask.shape[2]))]
+        self.aperture_support_regions = (
+            support_objects if use_aperture_roi and has_aperture_support else None
+        )
+
+        def _region_active(layer_idx: int, region: tuple[slice, slice]) -> np.ndarray:
+            return aperture_support[region] & (mask[(layer_idx, *region)] > tol)
 
         for layer_idx in np.flatnonzero(has_mz):
-            active_pixels = aperture_support & (mask[layer_idx] > tol)
-            if not np.any(active_pixels):
-                continue
-            out[layer_idx, active_pixels] += (
-                m[layer_idx, ..., 2][active_pixels, None, None]
-                * eps_mz[layer_idx, None, :, :]
-            )
+            for region in support_objects:
+                active_pixels = _region_active(layer_idx, region)
+                if not np.any(active_pixels):
+                    continue
+                layer_region = (layer_idx, *region)
+                out[layer_region][active_pixels] += (
+                    m[layer_region + (2,)][active_pixels, None, None]
+                    * eps_mz[layer_idx, None, :, :]
+                )
 
         for layer_idx in np.flatnonzero(has_xy):
-            active_pixels = aperture_support & (mask[layer_idx] > tol)
-            if not np.any(active_pixels):
-                continue
-            mx = m[layer_idx, ..., 0][active_pixels]
-            my = m[layer_idx, ..., 1][active_pixels]
-            dxy = np.abs(mx) ** 2 - np.abs(my) ** 2
-            out[layer_idx, active_pixels] += (
-                dxy[:, None, None] * eps_xy[layer_idx, None, :, :]
-            )
+            for region in support_objects:
+                active_pixels = _region_active(layer_idx, region)
+                if not np.any(active_pixels):
+                    continue
+                layer_region = (layer_idx, *region)
+                mx = m[layer_region + (0,)][active_pixels]
+                my = m[layer_region + (1,)][active_pixels]
+                dxy = np.abs(mx) ** 2 - np.abs(my) ** 2
+                out[layer_region][active_pixels] += (
+                    dxy[:, None, None] * eps_xy[layer_idx, None, :, :]
+                )
 
-        out *= mask[..., None, None]
-
-        vac = 1.0 - mask
-        out[..., 0, 0] += vac
-        out[..., 1, 1] += vac
+        for region in support_objects:
+            region_mask = mask[(slice(None), *region)]
+            out_region = out[(slice(None), *region)]
+            out_region *= region_mask[..., None, None]
+            vac = 1.0 - region_mask
+            out_region[..., 0, 0] += vac
+            out_region[..., 1, 1] += vac
 
         self.final_dielectric_tensor = out
 
@@ -1085,6 +1114,7 @@ class Apertures3D:
         roughness: float = 0.0,
         roughness_modes: tuple[int, int] = (0, 0),
         seed: int | None = None,
+        use_roi: bool = True,
     ) -> None:
         """Create a circular aperture mask and store it in ``self.aperture_design``.
 
@@ -1123,9 +1153,34 @@ class Apertures3D:
             pixel_sigma = sigma
             pixel_center = np.array(center)
 
+        if use_roi:
+            y_slice, x_slice = self._aperture_bbox(
+                self.shape,
+                pixel_center,
+                pixel_radius,
+                sigma=pixel_sigma,
+                angle=angle,
+                ellipticity=ellipticity,
+                roughness=roughness,
+            )
+            local_shape = (
+                self.shape[0],
+                y_slice.stop - y_slice.start,
+                x_slice.stop - x_slice.start,
+            )
+            local_center = (
+                pixel_center[0] - y_slice.start,
+                pixel_center[1] - x_slice.start,
+            )
+        else:
+            y_slice = slice(0, self.shape[1])
+            x_slice = slice(0, self.shape[2])
+            local_shape = self.shape
+            local_center = pixel_center
+
         hole_mask = self._aperture_hole_mask(
-            self.shape,
-            pixel_center,
+            local_shape,
+            local_center,
             pixel_radius,
             pixel_sigma,
             angle=angle,
@@ -1134,7 +1189,42 @@ class Apertures3D:
             roughness_modes=roughness_modes,
             seed=seed,
         )
-        self.aperture_design[:pixel_depth] *= 1 - hole_mask[None, :, :]
+        self.aperture_design[:pixel_depth, y_slice, x_slice] *= 1 - hole_mask[
+            None, :, :
+        ]
+
+    @staticmethod
+    def _aperture_bbox(
+        shape,
+        center,
+        radius,
+        sigma=None,
+        angle: float = 0.0,
+        ellipticity: float = 1.0,
+        roughness: float = 0.0,
+    ) -> tuple[slice, slice]:
+        """Return a tight y/x bounding box for an aperture hole."""
+        _, ny, nx = shape
+        ellipticity = float(ellipticity)
+        if ellipticity <= 0:
+            raise ValueError(f"ellipticity must be positive, got {ellipticity}")
+
+        radius_y = radius * np.sqrt(ellipticity)
+        radius_x = radius / np.sqrt(ellipticity)
+        cos_angle = np.cos(angle)
+        sin_angle = np.sin(angle)
+        half_x = np.sqrt((radius_x * cos_angle) ** 2 + (radius_y * sin_angle) ** 2)
+        half_y = np.sqrt((radius_x * sin_angle) ** 2 + (radius_y * cos_angle) ** 2)
+        roughness_scale = 1.0 + max(0.0, 2.0 * float(roughness))
+        sigma_pad = 0.0 if sigma is None else 4.0 * abs(float(sigma))
+        half_x = half_x * roughness_scale + sigma_pad + 2.0
+        half_y = half_y * roughness_scale + sigma_pad + 2.0
+
+        y0 = max(0, int(np.floor(center[0] - half_y)))
+        y1 = min(ny, int(np.ceil(center[0] + half_y)) + 1)
+        x0 = max(0, int(np.floor(center[1] - half_x)))
+        x1 = min(nx, int(np.ceil(center[1] + half_x)) + 1)
+        return slice(y0, y1), slice(x0, x1)
 
     @staticmethod
     def _aperture_hole_mask(
@@ -1164,10 +1254,10 @@ class Apertures3D:
         xr = cos_angle * dx + sin_angle * dy
         yr = -sin_angle * dx + cos_angle * dy
         normalized_radius = np.sqrt((xr / radius_x) ** 2 + (yr / radius_y) ** 2)
-        polar_angle = np.arctan2(yr / radius_y, xr / radius_x)
 
-        boundary = np.ones((ny, nx), dtype=float)
         if roughness > 0:
+            polar_angle = np.arctan2(yr / radius_y, xr / radius_x)
+            boundary = np.ones((ny, nx), dtype=float)
             rng = np.random.default_rng(seed)
             min_mode, max_mode = roughness_modes
             for mode in range(max(1, int(min_mode)), int(max_mode) + 1):
@@ -1177,8 +1267,10 @@ class Apertures3D:
             boundary = np.clip(
                 boundary, 1.0 - 2.0 * roughness, 1.0 + 2.0 * roughness
             )
+            mask = (normalized_radius <= boundary).astype(float)
+        else:
+            mask = (normalized_radius <= 1.0).astype(float)
 
-        mask = (normalized_radius <= boundary).astype(float)
         if sigma is not None and sigma != 0:
             mask = gaussian_filter(mask, sigma)
         return mask
