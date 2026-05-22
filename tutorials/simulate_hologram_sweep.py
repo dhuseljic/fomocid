@@ -151,8 +151,6 @@ config = HologramPipelineConfig(
     pattern_type="wavy_stripe_pattern",
     pattern_config={
         "angle_stripes": angle_stripes,
-    },
-    pattern_config_length={
         "stripe_width": stripe_width,
         "sigma": sigma,
         "waviness_amplitude": waviness_amplitude,
@@ -172,14 +170,30 @@ config = HologramPipelineConfig(
 # Choice((a, b, ...)) — pick uniformly from a discrete set
 # None                — use the fixed value from HologramPipelineConfig
 
+def random_pattern_config(params):
+    """Generate gently bent wavy-stripe parameters in physical units."""
+    stripe_width = Uniform(10e-9, 500e-9).sample()
+    waviness_amplitude = Uniform(0.0, 2.0 * stripe_width).sample()
+    min_waviness_scale = max(4.0 * stripe_width, 50e-9)
+    max_waviness_scale = 5.0 * stripe_width
+    waviness_scale = Uniform(min_waviness_scale, max_waviness_scale).sample()
+    return {
+        "angle_stripes": Uniform(0.0, np.pi).sample(),
+        "stripe_width": stripe_width,
+        "sigma": Uniform(0.05 * stripe_width, 0.12 * stripe_width).sample(),
+        "waviness_amplitude": waviness_amplitude,
+        "waviness_scale": waviness_scale,
+    }
+
+
 def detector_distance_range(params):
     """Choose a detector-distance range from sampled energy and stripe width."""
     # This function is called once per simulated sample after x-ray energy,
-    # detector pixel size, detector shape, and pattern_config_length have
+    # detector pixel size, detector shape, and pattern_config have
     # already been sampled. It returns either a fixed detector distance or a
     # Uniform range that the pipeline samples immediately.
     wavelength = physics.photon_energy_wavelength(params["energy"])
-    stripe_width = params["pattern_config_length"]["stripe_width"]
+    stripe_width = params["pattern_config"]["stripe_width"]
     detector_width = params["detector_shape"][0] * params["detector_pixel_size"]
 
     # Upper bound: keep the detector real-space resolution smaller than the
@@ -211,7 +225,7 @@ def random_aperture_config(params):
     # all aperture lists together so their lengths and geometric constraints
     # stay consistent.
     wavelength = physics.photon_energy_wavelength(params["energy"])
-    stripe_width = params["pattern_config_length"]["stripe_width"]
+    stripe_width = params["pattern_config"]["stripe_width"]
     detector_width = params["detector_shape"][0] * params["detector_pixel_size"]
     detector_distance = params["detector_distance"]
 
@@ -301,11 +315,9 @@ def random_aperture_config(params):
 ranges = HologramPipelineRanges(
     # Sweep X-ray energy across the Co L-edge absorption region
     xray_energy=Uniform(775, 795),
-    # Vary magnetic stripe parameters independently
-    pattern_config_length={
-        "stripe_width": Uniform(10e-9, 50e-9),
-        "waviness_amplitude": Uniform(0e-9, 30e-9),
-    },
+    # Generate interdependent magnetic stripe parameters first.
+    pattern_config=random_pattern_config,
+    # Generate beamstop parameters from reasonable ranges
     beamstop_config={
         "radius": Uniform(0.1e-3, 0.5e-3),
         "angle": Uniform(0.0, np.pi),
@@ -333,7 +345,7 @@ ranges = HologramPipelineRanges(
 # ===================
 # RUN PIPELINE
 # ===================
-nr_simulations = 1  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 10  # increase to e.g. 1000 for a full training dataset
 
 pipeline = HologramPipeline(
     config=config,
@@ -360,21 +372,21 @@ pipeline.run()
 import matplotlib.pyplot as plt
 
 with h5py.File(output_path, "r") as h5:
-    print(f"File contains {nr_simulations} simulations.")
-    print(f"Top-level keys: {list(h5.keys())}\n")
-
-    # Show structure of the first simulation
     grp = h5["00000"]
-    print("Datasets in '00000/':")
-    grp.visit(lambda name: print(f"  {name}"))
+    if False:
+        print(f"File contains {nr_simulations} simulations.")
+        print(f"Top-level keys: {list(h5.keys())}\n")
 
-    print("\nMetadata for '00000/':")
+        print("Datasets in '00000/':")
+        grp.visit(lambda name: print(f"  {name}"))
 
-    def _print_meta(name, obj):
-        if hasattr(obj, "shape") and obj.shape == ():
-            print(f"  {name} = {obj[()]}")
+        print("\nMetadata for '00000/':")
 
-    grp["metadata"].visititems(_print_meta)
+        def _print_meta(name, obj):
+            if hasattr(obj, "shape") and obj.shape == ():
+                print(f"  {name} = {obj[()]}")
+
+        grp["metadata"].visititems(_print_meta)
 
     # Load all arrays for the first simulation (exit wave kept complex)
     # Datasets have shape (N_frames, Ny, Nx); select one frame for display.
@@ -387,7 +399,8 @@ with h5py.File(output_path, "r") as h5:
     cl_ideal    = grp["CL/ideal"][frame]
     cl_detected = grp["CL/detected"][frame]
 
-print(f"Hologram shape: {cr_ideal.shape}")
+if False:
+    print(f"Hologram shape: {cr_ideal.shape}")
 
 # ------------------------------------------------------------------
 # Helper: colour limits matching HologramConfig.visualize_averages()

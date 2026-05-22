@@ -17,8 +17,8 @@ import numpy as np
 
 config = HologramPipelineConfig(
     recipe="Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)",
-    pattern_config={"angle_stripes": np.pi / 4},
-    pattern_config_length={
+    pattern_config={
+        "angle_stripes": np.pi / 4,
         "stripe_width": 20e-9,
         "sigma": 1e-9,
         "waviness_amplitude": 20e-9,
@@ -29,7 +29,7 @@ config = HologramPipelineConfig(
 ranges = HologramPipelineRanges(
     xray_energy=Uniform(770, 790),
     detector_distance=Choice((0.02, 0.04)),
-    pattern_config_length={
+    pattern_config={
         "stripe_width": Uniform(10e-9, 50e-9),
         "waviness_amplitude": Uniform(5e-9, 30e-9),
     },
@@ -140,13 +140,15 @@ class HologramPipelineConfig:
     pattern_type : {"wavy_stripe_pattern", "skyrmion_pattern"}
         Which magnetic domain pattern generator to use.
     pattern_config : dict
-        Dimensionless pattern parameters forwarded to the generator
-        (e.g. ``{"angle_stripes": np.pi/4, "seed": 0}``).
+        Pattern parameters forwarded to the generator. Physical-length entries
+        are specified in metres and converted to pixels by
+        :class:`MagneticPatternConfig` for the selected pattern type
+        (e.g. ``{"angle_stripes": np.pi/4, "stripe_width": 20e-9,
+        "sigma": 1e-9, "waviness_amplitude": 20e-9,
+        "waviness_scale": 20e-9}``).
     pattern_config_length : dict
-        Physical-length pattern parameters in metres, converted to pixel units
-        before calling the generator
-        (e.g. ``{"stripe_width": 20e-9, "sigma": 1e-9,
-        "waviness_amplitude": 20e-9, "waviness_scale": 20e-9}``).
+        Deprecated compatibility dict for physical-length pattern parameters in
+        metres. Prefer putting these values directly in ``pattern_config``.
     oversampling : int
         Oversampling factor relative to the Nyquist limit from the detector.
         ``real_space_pixel_size = detector_resolution / oversampling``.
@@ -259,9 +261,11 @@ class HologramPipelineRanges:
     * :class:`Uniform` ``(low, high)`` — sample uniformly each run.
     * :class:`Choice` ``((a, b, ...))`` — sample from a discrete set each run.
 
-    For ``pattern_config`` and ``pattern_config_length``, individual dict
-    values can themselves be :class:`Uniform` or :class:`Choice` samplers;
-    keys not listed in the range dict fall back to the base config value.
+    For ``pattern_config``, individual dict values can themselves be
+    :class:`Uniform` or :class:`Choice` samplers; keys not listed in the range
+    dict fall back to the base config value. The range dict may also be a
+    callable that returns a fully sampled dict for interdependent parameters.
+    ``pattern_config_length`` is still accepted for older callers.
     ``beamstop_config`` follows the same pattern.
 
     Examples
@@ -269,7 +273,7 @@ class HologramPipelineRanges:
     >>> ranges = HologramPipelineRanges(
     ...     xray_energy=Uniform(770, 790),
     ...     detector_distance=Choice((0.02, 0.04, 0.08)),
-    ...     pattern_config_length={"stripe_width": Uniform(10e-9, 50e-9)},
+    ...     pattern_config={"stripe_width": Uniform(10e-9, 50e-9)},
     ... )
     """
 
@@ -296,7 +300,7 @@ class HologramPipelineRanges:
 
     # Magnetic pattern
     pattern_type: str | Choice | None = None
-    pattern_config: dict | None = None
+    pattern_config: dict | Callable[[dict[str, Any]], dict] | None = None
     pattern_config_length: dict | None = None
 
 
@@ -503,6 +507,8 @@ class HologramPipeline:
         params["pattern_config_length"] = _merge_dict(
             rng.pattern_config_length, cfg.pattern_config_length, params
         )
+        for key, value in params["pattern_config_length"].items():
+            params["pattern_config"].setdefault(key, value)
         params["detector_distance"] = _pick(
             rng.detector_distance, cfg.detector_distance, params
         )
@@ -658,6 +664,12 @@ class HologramPipeline:
             output_shape=detector_config.detector_layout.detector_shape,
             output_pixel_size=detector_config.detector_layout.real_space_resolution,
         )
+        oh_mask = front_aperture_config.create_supportmask(
+            output_shape=sample_shape[1:],
+            output_pixel_size=sample_config.sample_structure.real_space_pixel_size,
+            aperture_types=("OH",),
+        )
+        magnetic_pattern_oh = magnetic_pattern * oh_mask
         metadata.update(front_aperture_config.get_metadata(prefix="aperture/"))
         t_stage = mark_stage("front aperture", t_stage)
 
@@ -724,6 +736,7 @@ class HologramPipeline:
             metadata,
             aperture_config=p["aperture_config"],
             supportmask=supportmask,
+            magnetic_pattern_oh=magnetic_pattern_oh,
         )
         mark_stage("hdf5 write", t_stage)
 
@@ -746,9 +759,10 @@ class HologramPipeline:
         metadata: dict[str, Any],
         aperture_config: dict[str, Any],
         supportmask: np.ndarray,
+        magnetic_pattern_oh: np.ndarray,
     ) -> None:
         """Write one simulation's holograms and metadata to an HDF5 group."""
-        grp = h5.create_group(f"{idx:05d}")
+        grp = h5.create_group(f"{idx:05d}", track_order=True)
 
         # Hologram arrays — same structure as test.ipynb save_data dict
         save_arrays = hologram_config.to_dict(
@@ -765,13 +779,6 @@ class HologramPipeline:
                 grp.create_dataset(
                     f"{helicity}/{source}", data=arr, compression="gzip"
                 )
-                if source == "ideal":
-                    reconstruction = self._fth_reconstruct(arr)
-                    grp.create_dataset(
-                        f"{helicity}/ideal_reconstruction",
-                        data=reconstruction.astype(np.complex64, copy=False),
-                        compression="gzip",
-                    )
 
         # Beamstop mask
         if hasattr(detector_config.detector_layout, "beamstop"):
@@ -784,6 +791,11 @@ class HologramPipeline:
         grp.create_dataset(
             "supportmask",
             data=np.asarray(supportmask, dtype=np.uint8),
+            compression="gzip",
+        )
+        grp.create_dataset(
+            "magnetic_pattern_oh",
+            data=np.asarray(magnetic_pattern_oh, dtype=np.float32),
             compression="gzip",
         )
 

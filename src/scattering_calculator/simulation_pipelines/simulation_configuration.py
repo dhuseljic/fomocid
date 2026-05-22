@@ -548,15 +548,17 @@ class MagneticPatternConfig(_ConfigMixin):
     shape : tuple of int or None
         2-D array shape ``(Ny, Nx)`` in pixels.
     real_space_pixel_size : float or None
-        Physical pixel size in metres. Used to convert ``pattern_config_length``
-        values to pixel units before calling the generator.
+        Physical pixel size in metres. Used to convert physical-length entries
+        in ``pattern_config`` to pixel units before calling the generator.
     pattern_config : dict
-        Dimensionless or non-length parameters forwarded directly to the
-        generator (e.g. ``number_skyr``, ``angle_stripes``, ``seed``).
+        Pattern parameters forwarded to the generator. Physical-length entries
+        are specified in metres and converted to pixels automatically for the
+        selected pattern type. For wavy stripes this includes ``stripe_width``,
+        ``sigma``, ``waviness_amplitude``, and ``waviness_scale``.
     pattern_config_length : dict
-        Physical-length parameters in metres (e.g. ``skyr_radius``,
-        ``stripe_width``). Each value is divided by ``real_space_pixel_size``
-        before being forwarded to the generator.
+        Deprecated compatibility dict for physical-length parameters in metres.
+        Values are merged into ``pattern_config`` unless the same key is already
+        present there.
 
     Attributes
     ----------
@@ -591,9 +593,10 @@ class MagneticPatternConfig(_ConfigMixin):
     def create_pattern(self) -> tuple[np.ndarray, np.ndarray]:
         """Generate the magnetic pattern and store it on the instance.
 
-        Physical-length values in ``pattern_config_length`` are converted to
-        pixel units by dividing by ``real_space_pixel_size`` before the
-        generator is called.
+        Physical-length values in ``pattern_config`` are converted to pixel
+        units by dividing by ``real_space_pixel_size`` before the generator is
+        called. ``pattern_config_length`` is still accepted as a lower-priority
+        legacy source.
 
         Returns
         -------
@@ -601,15 +604,29 @@ class MagneticPatternConfig(_ConfigMixin):
         pattern_coordinates : ndarray
         """
         pattern_function = self.setup()
-        converted_lengths = {
-            k: v / self.real_space_pixel_size
-            for k, v in self.pattern_config_length.items()
+        config = dict(self.pattern_config_length)
+        config.update(self.pattern_config)
+        length_keys_by_method = {
+            "wavy_stripe_pattern": {
+                "stripe_width",
+                "sigma",
+                "waviness_amplitude",
+                "waviness_scale",
+            },
+            "skyrmion_pattern": {
+                "skyr_radius",
+                "screening_radius",
+            },
+        }
+        length_keys = length_keys_by_method.get(self.pattern_type_method, set())
+        generator_config = {
+            k: (v / self.real_space_pixel_size if k in length_keys else v)
+            for k, v in config.items()
         }
         self.magnetic_pattern, self.pattern_coordinates = pattern_function(
             sz_array=self.shape,
             real_space_pixel_size=self.real_space_pixel_size,
-            **converted_lengths,
-            **self.pattern_config,
+            **generator_config,
         )
         return self.magnetic_pattern, self.pattern_coordinates
 
@@ -791,6 +808,7 @@ class FrontApertureConfig(_ConfigMixin):
         self,
         output_shape: tuple[int, int] | None = None,
         output_pixel_size: float | None = None,
+        aperture_types: tuple[str, ...] | None = None,
     ) -> np.ndarray:
         """Return a binary 2-D support mask covering all OH/RH aperture holes.
 
@@ -801,8 +819,15 @@ class FrontApertureConfig(_ConfigMixin):
         output_pixel_size : float or None
             Pixel size of the returned mask in metres. ``None`` uses the aperture
             pixel size.
+        aperture_types : tuple of str or None
+            Optional aperture type filter, e.g. ``("OH",)`` for an object-hole
+            mask only. ``None`` includes every aperture.
         """
-        shape = tuple(output_shape or self.aperture_shape[-2:])
+        shape = (
+            tuple(output_shape)
+            if output_shape is not None
+            else tuple(self.aperture_shape[-2:])
+        )
         pixel_size = output_pixel_size or self.real_space_pixel_size
         if pixel_size <= 0:
             raise ValueError(f"output_pixel_size must be positive, got {pixel_size}")
@@ -810,6 +835,7 @@ class FrontApertureConfig(_ConfigMixin):
         if self.aperture_method is None:
             return supportmask
 
+        types = self.aperture_config.get("apertures_type", [])
         radii = self.aperture_config.get("apertures_radius", [])
         centers = self.aperture_config.get("apertures_center", [])
         n = len(radii)
@@ -823,7 +849,8 @@ class FrontApertureConfig(_ConfigMixin):
         center_y0 = shape[0] / 2
         center_x0 = shape[1] / 2
 
-        for radius, center, angle, ellipticity, roughness, modes, seed in zip(
+        for type, radius, center, angle, ellipticity, roughness, modes, seed in zip(
+            types,
             radii,
             centers,
             angles,
@@ -832,6 +859,8 @@ class FrontApertureConfig(_ConfigMixin):
             roughness_modes,
             seeds,
         ):
+            if aperture_types is not None and type not in aperture_types:
+                continue
             center_y = center_y0 + center[0] / pixel_size
             center_x = center_x0 + center[1] / pixel_size
             radius_px = radius / pixel_size
