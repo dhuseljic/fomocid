@@ -137,7 +137,7 @@ class HologramPipelineConfig:
         Propagation distance from the Gaussian waist to the sample plane, in metres.
     illumination_fwhm : float
         Gaussian beam FWHM at the waist in metres.
-    pattern_type : {"wavy_stripe_pattern", "skyrmion_pattern"}
+    pattern_type : {"wavy_stripe_pattern", "binary_labyrinth_pattern", "skyrmion_pattern"}
         Which magnetic domain pattern generator to use.
     pattern_config : dict
         Pattern parameters forwarded to the generator. Physical-length entries
@@ -592,7 +592,8 @@ class HologramPipeline:
         their historical full-field behaviour.
         """
         full_shape = tuple(int(v) for v in sample_shape)
-        if not enabled or pattern_type != "wavy_stripe_pattern" or pixel_size <= 0:
+        roi_pattern_types = {"wavy_stripe_pattern", "binary_labyrinth_pattern"}
+        if not enabled or pattern_type not in roi_pattern_types or pixel_size <= 0:
             return full_shape, None, None
 
         types = aperture_config.get("aperture_types", [])
@@ -767,7 +768,7 @@ class HologramPipeline:
             real_space_pixel_size,
             p["aperture_config"],
             p["pattern_type"],
-            enabled=True,
+            enabled=cfg.use_roi,
         )
         pattern_config = dict(p["pattern_config"])
         if coordinate_offset is not None:

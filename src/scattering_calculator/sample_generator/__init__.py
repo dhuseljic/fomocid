@@ -9,6 +9,7 @@ from .gray_scott_generator import (
 )
 from .pattern_generator import (
     create_lattice,
+    create_binary_labyrinth_pattern,
     create_skyrmion_pattern,
     create_stripe_pattern,
     create_wavy_stripe_pattern,
@@ -39,6 +40,7 @@ __all__ = [
     "RecipeParser",
     "Structure",
     "create_lattice",
+    "create_binary_labyrinth_pattern",
     "create_skyrmion_pattern",
     "create_stripe_pattern",
     "create_wavy_stripe_pattern",

@@ -4,8 +4,11 @@ import numpy as np
 from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, zoom
 from scipy.spatial import KDTree
+from scattering_calculator.sample_generator.gray_scott_generator_binary import (
+    generate as generate_binary,
+)
 from scattering_calculator.utils.masking import circle_mask
 
 
@@ -587,6 +590,122 @@ def create_wavy_stripe_pattern(
         plt.ylabel(ylabel)
 
     return pattern, stripe_centers
+
+
+def _estimate_binary_period_fft(pattern: NDArray[np.float64]) -> float:
+    """Estimate the dominant binary-domain period in pixels from the FFT peak."""
+    field = np.asarray(pattern, dtype=float)
+    field = field - np.mean(field)
+    power = np.abs(np.fft.fftshift(np.fft.fft2(field))) ** 2
+    rows, cols = field.shape
+    cy = rows // 2
+    cx = cols // 2
+
+    yy = np.arange(rows)[:, None] - cy
+    xx = np.arange(cols)[None, :] - cx
+    radius = np.sqrt(yy**2 + xx**2)
+    valid = radius >= 1
+    if not np.any(valid):
+        return float(min(rows, cols))
+
+    peak_index = np.argmax(power[valid])
+    peak_radius = radius[valid][peak_index]
+    if peak_radius <= 0:
+        return float(min(rows, cols))
+    return float(min(rows, cols) / peak_radius)
+
+
+def _tile_center_crop(pattern: NDArray[np.float64], shape: tuple[int, int]) -> NDArray[np.float64]:
+    """Tile *pattern* if needed and return a centered crop with ``shape``."""
+    rows, cols = shape
+    reps_y = int(np.ceil(rows / pattern.shape[0])) + 1
+    reps_x = int(np.ceil(cols / pattern.shape[1])) + 1
+    tiled = np.tile(pattern, (reps_y, reps_x))
+    y0 = max(0, (tiled.shape[0] - rows) // 2)
+    x0 = max(0, (tiled.shape[1] - cols) // 2)
+    return tiled[y0 : y0 + rows, x0 : x0 + cols]
+
+
+def create_binary_labyrinth_pattern(
+    sz_array: list[int] | tuple[int, int],
+    stripe_width: float,
+    sigma: float | None = None,
+    plot: bool = False,
+    real_space_pixel_size: float = 1,
+    batch: int = 1,
+    H: int = 100,
+    W: int = 100,
+    n_steps: int = 50,
+    region: str | None = "custom",
+    use_gpu: bool = False,
+    seed: int | None = None,
+    k0: float = 1.0,
+    eps: float = 0.0,
+    noise_amp: float = 0.0,
+    **generator_overrides,
+) -> tuple[NDArray[np.float64], dict]:
+    """Create binary labyrinth domains rescaled to a requested stripe width.
+
+    The fast binary generator first creates a continuous labyrinth field. Its
+    dominant period is estimated from the FFT, then the continuous field is
+    linearly rescaled so the period matches ``stripe_width`` in pixels. The
+    rescaled field is tiled/cropped to ``sz_array``, binarised, and finally
+    blurred with ``sigma`` using the same convention as wavy stripes.
+    """
+    generator_overrides.pop("coordinate_offset", None)
+    rows, cols = tuple(sz_array)
+    _, binary, continuous, meta = generate_binary(
+        batch=batch,
+        H=H,
+        W=W,
+        n_steps=n_steps,
+        region=region,
+        use_gpu=use_gpu,
+        seed=seed,
+        k0=k0,
+        eps=eps,
+        noise_amp=noise_amp,
+        **generator_overrides,
+    )
+    base = np.asarray(continuous[0], dtype=float)
+
+    measured_width = _estimate_binary_period_fft(base)
+    if stripe_width <= 0:
+        raise ValueError(f"stripe_width must be positive, got {stripe_width}")
+    scale = stripe_width / measured_width if measured_width > 0 else 1.0
+    scale = max(scale, 1e-3)
+    scaled = zoom(base, scale, order=1)
+    if scaled.size == 0:
+        scaled = base
+    pattern = _tile_center_crop(scaled, (rows, cols))
+    pattern = np.where(pattern >= 0, 1.0, -1.0)
+
+    if sigma is not None:
+        pattern = gaussian_filter(pattern, sigma)
+        max_val = np.max(np.abs(pattern))
+        if max_val > 0:
+            pattern = pattern / max_val
+
+    meta = dict(meta)
+    meta.update(
+        {
+            "measured_stripe_width_px": measured_width,
+            "target_stripe_width_px": stripe_width,
+            "rescale_factor": scale,
+            "k0": k0,
+            "eps": eps,
+            "noise_amp": noise_amp,
+            "region": str(region),
+            "seed": -1 if seed is None else seed,
+        }
+    )
+
+    if plot:
+        plt.figure(figsize=(5, 5))
+        plt.imshow(pattern, cmap="gray", vmin=-1, vmax=1)
+        plt.title("Binary labyrinth pattern")
+
+    return pattern, meta
 
 
 def create_stripe_pattern(

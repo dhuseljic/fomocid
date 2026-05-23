@@ -24,6 +24,7 @@ from scattering_calculator.simulation_pipelines.pipelines import (
 output_folder = DATA_ROOT / "Data" / "hologram_sweep"
 output_path = output_folder / "simulation_sweep.h5"
 pipeline_random_seed = None  # set to None for non-reproducible random sweeps
+use_roi = True
 dielectric_tensor_use_roi = True
 
 os.makedirs(output_folder, exist_ok=True)
@@ -86,11 +87,39 @@ beamstop_config = {
 recipe = "Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"
 
 # --- Magnetic domain pattern ---
+pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern" or "binary_labyrinth_pattern"
 stripe_width = 300e-9  # m
 sigma = 30e-9  # m
 angle_stripes = np.pi / 4
 waviness_amplitude = 0e-9  # ms
 waviness_scale = 0e-9  # m
+labyrinth_config = {
+    "batch": 1,
+    "H": 100,
+    "W": 100,
+    "n_steps": 50,
+    "region": "custom",
+    "use_gpu": False,
+    "k0": 1.0,
+    "eps": 0.0,
+    "noise_amp": 0.0,
+}
+pattern_config = {
+    "stripe_width": stripe_width,
+    "sigma": sigma,
+}
+if pattern_type == "wavy_stripe_pattern":
+    pattern_config.update(
+        {
+            "angle_stripes": angle_stripes,
+            "waviness_amplitude": waviness_amplitude,
+            "waviness_scale": waviness_scale,
+        }
+    )
+elif pattern_type == "binary_labyrinth_pattern":
+    pattern_config.update(labyrinth_config)
+else:
+    raise ValueError(f"Unknown pattern_type: {pattern_type}")
 
 # --- FTH holography mask ---
 aperture_types = ["OH", "RH", "RH"]
@@ -150,14 +179,9 @@ config = HologramPipelineConfig(
     illumination_focus_distance=illumination_focus_distance,
     illumination_fwhm=illumination_fwhm,
     # Magnetic domain pattern
-    pattern_type="wavy_stripe_pattern",
-    pattern_config={
-        "angle_stripes": angle_stripes,
-        "stripe_width": stripe_width,
-        "sigma": sigma,
-        "waviness_amplitude": waviness_amplitude,
-        "waviness_scale": waviness_scale,
-    },
+    pattern_type=pattern_type,
+    pattern_config=pattern_config,
+    use_roi=use_roi,
     magnetic_pattern_use_roi=True,
     dielectric_tensor_use_roi=dielectric_tensor_use_roi,
     # Simulation grid: sample_shape = oversampling * detector_shape
@@ -176,19 +200,28 @@ config = HologramPipelineConfig(
 # None                — use the fixed value from HologramPipelineConfig
 
 def random_pattern_config(params):
-    """Generate gently bent wavy-stripe parameters in physical units."""
+    """Generate interdependent magnetic-pattern parameters in physical units."""
     stripe_width = Uniform(10e-9, 500e-9).sample()
+    config = {
+        "stripe_width": stripe_width,
+        "sigma": Uniform(np.minimum(3e-9,0.01*stripe_width), np.maximum(3e-9,0.12 * stripe_width)).sample(),
+    }
+    if params["pattern_type"] == "binary_labyrinth_pattern":
+        config.update(labyrinth_config)
+        return config
+
     waviness_amplitude = Uniform(0.0, 2.0 * stripe_width).sample()
     min_waviness_scale = max(4.0 * stripe_width, 50e-9)
     max_waviness_scale = 5.0 * stripe_width
     waviness_scale = Uniform(min_waviness_scale, max_waviness_scale).sample()
-    return {
-        "angle_stripes": Uniform(0.0, np.pi).sample(),
-        "stripe_width": stripe_width,
-        "sigma": Uniform(np.minimum(3e-9,0.01*stripe_width), np.maximum(3e-9,0.12 * stripe_width)).sample(),
-        "waviness_amplitude": waviness_amplitude,
-        "waviness_scale": waviness_scale,
-    }
+    config.update(
+        {
+            "angle_stripes": Uniform(0.0, np.pi).sample(),
+            "waviness_amplitude": waviness_amplitude,
+            "waviness_scale": waviness_scale,
+        }
+    )
+    return config
 
 
 def detector_distance_range(params):
@@ -350,7 +383,7 @@ ranges = HologramPipelineRanges(
 # ===================
 # RUN PIPELINE
 # ===================
-nr_simulations = 10  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 5  # increase to e.g. 1000 for a full training dataset
 
 pipeline = HologramPipeline(
     config=config,
