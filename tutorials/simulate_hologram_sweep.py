@@ -21,7 +21,7 @@ from scattering_calculator.simulation_pipelines.pipelines import (
 #################################################################
 #### HOW MANY SIMULATIONS TO RUN? ####
 #################################################################
-nr_simulations = 10  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 20  # increase to e.g. 1000 for a full training dataset
 
 
 

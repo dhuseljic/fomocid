@@ -26,7 +26,7 @@ output_path = output_folder / "simulation_sweep.h5"
 The number of simulated configurations is controlled at the bottom:
 
 ```python
-nr_simulations = 10
+nr_simulations = 20
 ```
 
 Set `pipeline_random_seed` to an integer for reproducible sweeps, or to `None`
