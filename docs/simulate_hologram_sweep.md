@@ -123,8 +123,11 @@ The random skyrmion generator uses:
 - `roughness_modes`: Fourier modes used for the rough boundary.
 
 Each skyrmion gets its own random diameter, ellipticity, rotation angle, and
-rough boundary. Candidate centers are uniformly random and accepted only if they
-do not overlap previously accepted skyrmions.
+rough boundary. Candidate centers are sampled randomly inside the OH placement
+region, using the OH radius plus one average skyrmion diameter as the placement
+radius. A center candidate is tried first so low-density skyrmion samples still
+contain at least one skyrmion inside the OH field of view. Candidates are
+accepted only if they do not overlap previously accepted skyrmions.
 
 ### Illumination Ranges
 
