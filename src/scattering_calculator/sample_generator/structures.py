@@ -1116,12 +1116,15 @@ class Apertures3D:
         seed: int | None = None,
         use_roi: bool = True,
         top_radius_factor: float = 2.0,
+        taper_depth: float | None = None,
     ) -> None:
         """Create a tapered circular aperture mask.
 
         The supplied ``radius`` is the base radius at the bottom of the drilled
         depth. ``top_radius_factor`` controls the top opening radius; the
-        radius changes linearly with physical depth through the layer stack.
+        radius changes linearly down to ``radius`` over ``taper_depth``. Layers
+        deeper than ``taper_depth`` keep the base radius, giving a cylindrical
+        lower aperture.
 
         Parameters
         ----------
@@ -1142,6 +1145,10 @@ class Apertures3D:
             Ratio between the aperture radius at the top surface and the base
             radius at ``depth``. ``1`` gives the old cylindrical aperture;
             ``2`` gives a cone whose top opening is twice the base radius.
+        taper_depth : float or None, optional
+            Physical depth over which the aperture tapers from the top radius
+            to the base radius. If ``None``, the taper spans the full drilled
+            depth, matching the original conical behaviour.
         """
         top_radius_factor = float(top_radius_factor)
         if top_radius_factor <= 0:
@@ -1161,11 +1168,13 @@ class Apertures3D:
                 else sigma / np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
             )
             pixel_center = np.array(center) / self.pixel_size + self.shape[1] // 2
+            pixel_taper_depth = None if taper_depth is None else float(taper_depth)
         else:
             pixel_radius = radius
             pixel_depth = depth
             pixel_sigma = sigma
             pixel_center = np.array(center)
+            pixel_taper_depth = None if taper_depth is None else float(taper_depth)
         pixel_depth = int(np.clip(pixel_depth, 0, self.shape[0]))
         if pixel_depth <= 0:
             return
@@ -1199,11 +1208,29 @@ class Apertures3D:
         layer_edges = np.concatenate(([0.0], np.cumsum(self.layer_thicknesses)))
         if use_real_space_coordinates:
             drilled_depth = float(layer_edges[pixel_depth])
+            layer_top_depths = layer_edges[:pixel_depth]
             layer_bottom_depths = layer_edges[1 : pixel_depth + 1]
-            depth_fraction = np.clip(layer_bottom_depths / drilled_depth, 0.0, 1.0)
+            taper_limit = drilled_depth if pixel_taper_depth is None else min(
+                max(pixel_taper_depth, 0.0), drilled_depth
+            )
+            if taper_limit > 0:
+                depth_fraction = np.clip(layer_top_depths / taper_limit, 0.0, 1.0)
+                depth_fraction[layer_bottom_depths >= taper_limit] = 1.0
+            else:
+                depth_fraction = np.ones_like(layer_bottom_depths)
         else:
+            layer_top_indices = np.arange(0, pixel_depth, dtype=float)
             layer_bottom_indices = np.arange(1, pixel_depth + 1, dtype=float)
-            depth_fraction = np.clip(layer_bottom_indices / pixel_depth, 0.0, 1.0)
+            taper_limit = (
+                float(pixel_depth)
+                if pixel_taper_depth is None
+                else min(max(pixel_taper_depth, 0.0), float(pixel_depth))
+            )
+            if taper_limit > 0:
+                depth_fraction = np.clip(layer_top_indices / taper_limit, 0.0, 1.0)
+                depth_fraction[layer_bottom_indices >= taper_limit] = 1.0
+            else:
+                depth_fraction = np.ones_like(layer_bottom_indices)
         layer_radii = pixel_radius * (
             top_radius_factor + (1.0 - top_radius_factor) * depth_fraction
         )

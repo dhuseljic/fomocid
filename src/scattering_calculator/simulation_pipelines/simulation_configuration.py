@@ -706,6 +706,10 @@ class FrontApertureConfig(_ConfigMixin):
         - ``apertures_seed`` : list of int — random seeds for rough boundaries.
         - ``apertures_top_radius_factor`` : list of float — top/base radius
           ratio for conical holes. Default ``2``.
+        - ``aperture_taper_depth`` : float, optional — depth over which holes
+          taper from the wider top opening to the base radius. Defaults to
+          ``thickness_OH`` so the top metal stack is conical and deeper layers
+          stay cylindrical.
         - ``thickness_OH`` : float — depth of the object hole in metres.
 
     Attributes
@@ -800,6 +804,10 @@ class FrontApertureConfig(_ConfigMixin):
                 raise ValueError(f"Aperture type not defined, got {type}")
 
             seed = None if seed is None or int(seed) < 0 else int(seed)
+            taper_depth = self.aperture_config.get(
+                "aperture_taper_depth",
+                self.aperture_config.get("thickness_OH", depth),
+            )
 
             self.aperture.create_circle_aperture(
                 center=center,
@@ -814,6 +822,7 @@ class FrontApertureConfig(_ConfigMixin):
                 use_real_space_coordinates=True,
                 use_roi=self.use_roi,
                 top_radius_factor=top_radius_factor,
+                taper_depth=taper_depth,
             )
 
     def _aperture_values(self, key: str, n: int, default):

@@ -92,7 +92,7 @@ beamstop_config = {
 }
 
 # --- Material stack ---
-recipe = "[Au(70)/Cr(30)]x5/SiN(200)/Co(90)/Pt(120)/Al(60)"
+recipe = "[Au(700)/Cr(300)]x10/SiN(200)/Co(90)/Pt(120)/Al(60)"
 
 # --- Magnetic domain pattern ---
 pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", or "saturated_pattern"
@@ -353,7 +353,7 @@ def random_aperture_config(params):
     for _ in range(n_reference_holes):
         aperture_types.append("RH")
 
-        rh_radius = Uniform(5e-9, 90e-9).sample()
+        rh_radius = Uniform(5e-9, 75e-9).sample()
         aperture_radii.append(rh_radius)
         aperture_angles.append(Uniform(0.0, np.pi).sample())
         aperture_ellipticities.append(Uniform(0.65, 1.55).sample())
