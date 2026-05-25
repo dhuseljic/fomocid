@@ -303,7 +303,11 @@ class HologramPipelineRanges:
     xray_energy: float | Uniform | None = None
     xray_photon_flux: float | Uniform | None = None
     xray_coherence_length: (
-        tuple[float, float] | tuple[Uniform, Uniform] | Uniform | None
+        tuple[float, float]
+        | tuple[Uniform, Uniform]
+        | Uniform
+        | Callable[[dict[str, Any]], tuple[float, float]]
+        | None
     ) = None
 
     # Detector

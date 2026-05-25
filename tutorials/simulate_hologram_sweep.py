@@ -21,7 +21,7 @@ from scattering_calculator.simulation_pipelines.pipelines import (
 #################################################################
 #### HOW MANY SIMULATIONS TO RUN? ####
 #################################################################
-nr_simulations = 20  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 6  # increase to e.g. 1000 for a full training dataset
 
 
 
@@ -386,6 +386,14 @@ def random_aperture_config(params):
         "aperture_seeds": aperture_seeds,
     }
 
+
+def random_coherence_length(params):
+    """Sample similar y/x coherence lengths in metres."""
+    base = Uniform(5e-6, 50e-6).sample()
+    anisotropy = Uniform(-0.13, 0.13).sample()
+    return (base * (1.0 + anisotropy), base * (1.0 - anisotropy))
+
+
 ###############################################################################################################
 ###############################################################################################################
 ###############################################################################################################
@@ -394,6 +402,7 @@ def random_aperture_config(params):
 ranges = HologramPipelineRanges(
     # Sweep X-ray energy across the Co L-edge absorption region
     xray_energy=Uniform(775, 795),
+    xray_coherence_length=random_coherence_length,
     # Random illumination geometry
     illumination_focus_distance=Uniform(0.0, 2e-3),
     illumination_fwhm=Uniform(5e-6, 50e-6),

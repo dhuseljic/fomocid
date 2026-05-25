@@ -129,6 +129,29 @@ radius. A center candidate is tried first so low-density skyrmion samples still
 contain at least one skyrmion inside the OH field of view. Candidates are
 accepted only if they do not overlap previously accepted skyrmions.
 
+### X-ray Ranges
+
+The sweep randomizes the photon energy across the Co L-edge range and also
+randomizes the transverse coherence length:
+
+```python
+xray_energy=Uniform(775, 795)
+xray_coherence_length=random_coherence_length
+```
+
+`random_coherence_length` first samples a shared base coherence length from
+`5e-6` to `50e-6` metres, then applies a small opposite y/x anisotropy:
+
+```python
+def random_coherence_length(params):
+    base = Uniform(5e-6, 50e-6).sample()
+    anisotropy = Uniform(-0.13, 0.13).sample()
+    return (base * (1.0 + anisotropy), base * (1.0 - anisotropy))
+```
+
+This keeps the two components similar while allowing up to about a 30% ratio
+difference between axes. The tuple order is `(y, x)`.
+
 ### Illumination Ranges
 
 The sweep randomizes the Gaussian illumination:
