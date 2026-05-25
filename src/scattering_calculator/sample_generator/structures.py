@@ -1115,8 +1115,13 @@ class Apertures3D:
         roughness_modes: tuple[int, int] = (0, 0),
         seed: int | None = None,
         use_roi: bool = True,
+        top_radius_factor: float = 2.0,
     ) -> None:
-        """Create a circular aperture mask and store it in ``self.aperture_design``.
+        """Create a tapered circular aperture mask.
+
+        The supplied ``radius`` is the base radius at the bottom of the drilled
+        depth. ``top_radius_factor`` controls the top opening radius; the
+        radius changes linearly with physical depth through the layer stack.
 
         Parameters
         ----------
@@ -1133,7 +1138,16 @@ class Apertures3D:
         sigma : float or None, optional
             Standard deviation of the Gaussian smoothing filter in pixels.
             No smoothing when ``None`` or ``0``.
+        top_radius_factor : float, optional
+            Ratio between the aperture radius at the top surface and the base
+            radius at ``depth``. ``1`` gives the old cylindrical aperture;
+            ``2`` gives a cone whose top opening is twice the base radius.
         """
+        top_radius_factor = float(top_radius_factor)
+        if top_radius_factor <= 0:
+            raise ValueError(
+                f"top_radius_factor must be positive, got {top_radius_factor}"
+            )
 
         if use_real_space_coordinates:
             # Convert radius from metres to pixels using the real-space grid
@@ -1152,12 +1166,16 @@ class Apertures3D:
             pixel_depth = depth
             pixel_sigma = sigma
             pixel_center = np.array(center)
+        pixel_depth = int(np.clip(pixel_depth, 0, self.shape[0]))
+        if pixel_depth <= 0:
+            return
 
+        max_pixel_radius = pixel_radius * max(1.0, top_radius_factor)
         if use_roi:
             y_slice, x_slice = self._aperture_bbox(
                 self.shape,
                 pixel_center,
-                pixel_radius,
+                max_pixel_radius,
                 sigma=pixel_sigma,
                 angle=angle,
                 ellipticity=ellipticity,
@@ -1178,20 +1196,30 @@ class Apertures3D:
             local_shape = self.shape
             local_center = pixel_center
 
-        hole_mask = self._aperture_hole_mask(
-            local_shape,
-            local_center,
-            pixel_radius,
-            pixel_sigma,
-            angle=angle,
-            ellipticity=ellipticity,
-            roughness=roughness,
-            roughness_modes=roughness_modes,
-            seed=seed,
+        layer_edges = np.concatenate(([0.0], np.cumsum(self.layer_thicknesses)))
+        if use_real_space_coordinates:
+            drilled_depth = float(layer_edges[pixel_depth])
+            layer_bottom_depths = layer_edges[1 : pixel_depth + 1]
+            depth_fraction = np.clip(layer_bottom_depths / drilled_depth, 0.0, 1.0)
+        else:
+            layer_bottom_indices = np.arange(1, pixel_depth + 1, dtype=float)
+            depth_fraction = np.clip(layer_bottom_indices / pixel_depth, 0.0, 1.0)
+        layer_radii = pixel_radius * (
+            top_radius_factor + (1.0 - top_radius_factor) * depth_fraction
         )
-        self.aperture_design[:pixel_depth, y_slice, x_slice] *= 1 - hole_mask[
-            None, :, :
-        ]
+        for layer_idx, layer_radius in enumerate(layer_radii):
+            hole_mask = self._aperture_hole_mask(
+                local_shape,
+                local_center,
+                layer_radius,
+                pixel_sigma,
+                angle=angle,
+                ellipticity=ellipticity,
+                roughness=roughness,
+                roughness_modes=roughness_modes,
+                seed=seed,
+            )
+            self.aperture_design[layer_idx, y_slice, x_slice] *= 1 - hole_mask
 
     @staticmethod
     def _aperture_bbox(

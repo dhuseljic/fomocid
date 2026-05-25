@@ -252,6 +252,9 @@ class HologramPipelineConfig:
         default_factory=lambda: [(0, 0), (0, 0), (0, 0)]
     )
     aperture_seeds: list[int] = field(default_factory=lambda: [-1, -1, -1])
+    aperture_top_radius_factors: list[float] = field(
+        default_factory=lambda: [2.0, 2.0, 2.0]
+    )
 
     # Illumination
     illumination_function: str | None = "gaussian"
@@ -591,6 +594,7 @@ class HologramPipeline:
                 "aperture_roughnesses": cfg.aperture_roughnesses,
                 "aperture_roughness_modes": cfg.aperture_roughness_modes,
                 "aperture_seeds": cfg.aperture_seeds,
+                "aperture_top_radius_factors": cfg.aperture_top_radius_factors,
             },
             params,
         )
@@ -633,17 +637,34 @@ class HologramPipeline:
         ellipticities = aperture_config.get("aperture_ellipticities", [1.0] * len(radii))
         sigmas = aperture_config.get("aperture_sigmas", [0.0] * len(radii))
         roughnesses = aperture_config.get("aperture_roughnesses", [0.0] * len(radii))
+        top_radius_factors = aperture_config.get(
+            "aperture_top_radius_factors", [2.0] * len(radii)
+        )
 
         boxes: list[tuple[int, int, int, int]] = []
         center_y0 = full_shape[0] / 2
         center_x0 = full_shape[1] / 2
 
-        for aperture_type, radius, center, ellipticity, sigma, roughness in zip(
-            types, radii, centers, ellipticities, sigmas, roughnesses
+        for (
+            aperture_type,
+            radius,
+            center,
+            ellipticity,
+            sigma,
+            roughness,
+            top_radius_factor,
+        ) in zip(
+            types,
+            radii,
+            centers,
+            ellipticities,
+            sigmas,
+            roughnesses,
+            top_radius_factors,
         ):
             if aperture_type != "OH":
                 continue
-            radius_px = float(radius) / pixel_size
+            radius_px = float(radius) * max(1.0, float(top_radius_factor)) / pixel_size
             sigma_px = 0.0 if sigma is None else float(sigma) / pixel_size
             ellipticity = float(ellipticity)
             radius_y = radius_px * np.sqrt(ellipticity)
@@ -776,6 +797,9 @@ class HologramPipeline:
                     "aperture_roughness_modes"
                 ],
                 apertures_seed=p["aperture_config"]["aperture_seeds"],
+                apertures_top_radius_factor=p["aperture_config"][
+                    "aperture_top_radius_factors"
+                ],
                 thickness_OH=float(
                     np.sum(
                         sample_config.sample_structure.layer_thicknesses[
@@ -810,6 +834,13 @@ class HologramPipeline:
                 oh_index = aperture_types.index("OH")
                 oh_center = p["aperture_config"]["aperture_centers"][oh_index]
                 oh_radius = p["aperture_config"]["aperture_radii"][oh_index]
+                top_radius_factors = p["aperture_config"].get(
+                    "aperture_top_radius_factors",
+                    [2.0] * len(p["aperture_config"]["aperture_radii"]),
+                )
+                oh_top_radius = float(oh_radius) * max(
+                    1.0, float(top_radius_factors[oh_index])
+                )
                 full_center_y = sample_shape[1] / 2 + float(oh_center[0]) / real_space_pixel_size
                 full_center_x = sample_shape[2] / 2 + float(oh_center[1]) / real_space_pixel_size
                 if pattern_slices is None:
@@ -822,7 +853,7 @@ class HologramPipeline:
                 pattern_config.setdefault("placement_center", placement_center)
                 pattern_config.setdefault(
                     "placement_radius",
-                    float(oh_radius) + float(pattern_config.get("stripe_width", 0.0)),
+                    oh_top_radius + float(pattern_config.get("stripe_width", 0.0)),
                 )
         magnetic_pattern_config = MagneticPatternConfig(
             pattern_type_method=p["pattern_type"],
@@ -857,7 +888,67 @@ class HologramPipeline:
         t_stage = mark_stage("magnetic pattern", t_stage)
 
         front_aperture_config.setup()
-        sample_config.assign_aperture_mask(front_aperture_config.return_aperture())
+        aperture_mask = front_aperture_config.return_aperture()
+        sample_config.assign_aperture_mask(aperture_mask)
+        aperture_material_fraction = np.mean(aperture_mask, axis=0)
+        aperture_types = p["aperture_config"].get("aperture_types", [])
+        aperture_centers = p["aperture_config"].get("aperture_centers", [])
+        aperture_cut_pixels = []
+        for center in aperture_centers:
+            cut_y = int(
+                np.clip(
+                    round(sample_shape[1] / 2 + float(center[0]) / real_space_pixel_size),
+                    0,
+                    sample_shape[1] - 1,
+                )
+            )
+            cut_x = int(
+                np.clip(
+                    round(sample_shape[2] / 2 + float(center[1]) / real_space_pixel_size),
+                    0,
+                    sample_shape[2] - 1,
+                )
+            )
+            aperture_cut_pixels.append((cut_y, cut_x))
+        if aperture_cut_pixels:
+            aperture_yz_cuts = np.stack(
+                [aperture_mask[:, :, cut_x] for _, cut_x in aperture_cut_pixels]
+            )
+            aperture_xz_cuts = np.stack(
+                [aperture_mask[:, cut_y, :] for cut_y, _ in aperture_cut_pixels]
+            )
+            metadata["aperture/cut_y_px_all"] = np.asarray(
+                [cut_y for cut_y, _ in aperture_cut_pixels], dtype=np.int64
+            )
+            metadata["aperture/cut_x_px_all"] = np.asarray(
+                [cut_x for _, cut_x in aperture_cut_pixels], dtype=np.int64
+            )
+        else:
+            aperture_yz_cuts = np.empty((0, sample_shape[0], sample_shape[1]))
+            aperture_xz_cuts = np.empty((0, sample_shape[0], sample_shape[2]))
+        if "OH" in aperture_types:
+            oh_index = aperture_types.index("OH")
+            oh_center = p["aperture_config"]["aperture_centers"][oh_index]
+        else:
+            oh_center = (0.0, 0.0)
+        aperture_cut_y = int(
+            np.clip(
+                round(sample_shape[1] / 2 + float(oh_center[0]) / real_space_pixel_size),
+                0,
+                sample_shape[1] - 1,
+            )
+        )
+        aperture_cut_x = int(
+            np.clip(
+                round(sample_shape[2] / 2 + float(oh_center[1]) / real_space_pixel_size),
+                0,
+                sample_shape[2] - 1,
+            )
+        )
+        aperture_yz_cut = aperture_mask[:, :, aperture_cut_x]
+        aperture_xz_cut = aperture_mask[:, aperture_cut_y, :]
+        metadata["aperture/cut_y_px"] = aperture_cut_y
+        metadata["aperture/cut_x_px"] = aperture_cut_x
         supportmask = front_aperture_config.create_supportmask(
             output_shape=detector_config.detector_layout.detector_shape,
             output_pixel_size=detector_config.detector_layout.real_space_resolution,
@@ -964,6 +1055,11 @@ class HologramPipeline:
             aperture_config=p["aperture_config"],
             supportmask=supportmask,
             magnetic_pattern_oh=magnetic_pattern_oh,
+            aperture_material_fraction=aperture_material_fraction,
+            aperture_yz_cut=aperture_yz_cut,
+            aperture_xz_cut=aperture_xz_cut,
+            aperture_yz_cuts=aperture_yz_cuts,
+            aperture_xz_cuts=aperture_xz_cuts,
         )
         mark_stage("hdf5 write", t_stage)
 
@@ -987,6 +1083,11 @@ class HologramPipeline:
         aperture_config: dict[str, Any],
         supportmask: np.ndarray,
         magnetic_pattern_oh: np.ndarray,
+        aperture_material_fraction: np.ndarray,
+        aperture_yz_cut: np.ndarray,
+        aperture_xz_cut: np.ndarray,
+        aperture_yz_cuts: np.ndarray,
+        aperture_xz_cuts: np.ndarray,
     ) -> None:
         """Write one simulation's holograms and metadata to an HDF5 group."""
         grp = h5.create_group(f"{idx:05d}", track_order=True)
@@ -1023,6 +1124,31 @@ class HologramPipeline:
         grp.create_dataset(
             "magnetic_pattern_oh",
             data=np.asarray(magnetic_pattern_oh, dtype=np.float32),
+            compression="gzip",
+        )
+        grp.create_dataset(
+            "aperture_material_fraction",
+            data=np.asarray(aperture_material_fraction, dtype=np.float32),
+            compression="gzip",
+        )
+        grp.create_dataset(
+            "aperture_yz_cut",
+            data=np.asarray(aperture_yz_cut, dtype=np.float32),
+            compression="gzip",
+        )
+        grp.create_dataset(
+            "aperture_xz_cut",
+            data=np.asarray(aperture_xz_cut, dtype=np.float32),
+            compression="gzip",
+        )
+        grp.create_dataset(
+            "aperture_yz_cuts",
+            data=np.asarray(aperture_yz_cuts, dtype=np.float32),
+            compression="gzip",
+        )
+        grp.create_dataset(
+            "aperture_xz_cuts",
+            data=np.asarray(aperture_xz_cuts, dtype=np.float32),
             compression="gzip",
         )
 
@@ -1089,6 +1215,16 @@ class HologramPipeline:
         aperture_grp.create_dataset(
             "apertures_seed",
             data=np.asarray(aperture_config["aperture_seeds"], dtype=np.int64),
+        )
+        aperture_grp.create_dataset(
+            "apertures_top_radius_factor",
+            data=np.asarray(
+                aperture_config.get(
+                    "aperture_top_radius_factors",
+                    [2.0] * len(aperture_config["aperture_types"]),
+                ),
+                dtype=np.float64,
+            ),
         )
 
     @staticmethod

@@ -704,6 +704,8 @@ class FrontApertureConfig(_ConfigMixin):
         - ``apertures_roughness`` : list of float — boundary roughness amplitude.
         - ``apertures_roughness_modes`` : list of tuple — inclusive Fourier-mode range.
         - ``apertures_seed`` : list of int — random seeds for rough boundaries.
+        - ``apertures_top_radius_factor`` : list of float — top/base radius
+          ratio for conical holes. Default ``2``.
         - ``thickness_OH`` : float — depth of the object hole in metres.
 
     Attributes
@@ -763,6 +765,9 @@ class FrontApertureConfig(_ConfigMixin):
             "apertures_roughness_modes", len(types), (0, 0)
         )
         seeds = self._aperture_values("apertures_seed", len(types), None)
+        top_radius_factors = self._aperture_values(
+            "apertures_top_radius_factor", len(types), 2.0
+        )
 
         for (
             type,
@@ -774,6 +779,7 @@ class FrontApertureConfig(_ConfigMixin):
             roughness,
             modes,
             seed,
+            top_radius_factor,
         ) in zip(
             types,
             radi,
@@ -784,6 +790,7 @@ class FrontApertureConfig(_ConfigMixin):
             roughnesses,
             roughness_modes,
             seeds,
+            top_radius_factors,
         ):
             if type == "OH":
                 depth = self.aperture_config.get("thickness_OH", None)
@@ -806,6 +813,7 @@ class FrontApertureConfig(_ConfigMixin):
                 seed=seed,
                 use_real_space_coordinates=True,
                 use_roi=self.use_roi,
+                top_radius_factor=top_radius_factor,
             )
 
     def _aperture_values(self, key: str, n: int, default):
@@ -866,10 +874,23 @@ class FrontApertureConfig(_ConfigMixin):
             "apertures_roughness_modes", n, (0, 0)
         )
         seeds = self._aperture_values("apertures_seed", n, None)
+        top_radius_factors = self._aperture_values(
+            "apertures_top_radius_factor", n, 2.0
+        )
         center_y0 = shape[0] / 2
         center_x0 = shape[1] / 2
 
-        for type, radius, center, angle, ellipticity, roughness, modes, seed in zip(
+        for (
+            type,
+            radius,
+            center,
+            angle,
+            ellipticity,
+            roughness,
+            modes,
+            seed,
+            top_radius_factor,
+        ) in zip(
             types,
             radii,
             centers,
@@ -878,12 +899,13 @@ class FrontApertureConfig(_ConfigMixin):
             roughnesses,
             roughness_modes,
             seeds,
+            top_radius_factors,
         ):
             if aperture_types is not None and type not in aperture_types:
                 continue
             center_y = center_y0 + center[0] / pixel_size
             center_x = center_x0 + center[1] / pixel_size
-            radius_px = radius / pixel_size
+            radius_px = radius * max(1.0, float(top_radius_factor)) / pixel_size
             seed = None if seed is None or int(seed) < 0 else int(seed)
             if self.use_roi:
                 y_slice, x_slice = structures.Apertures3D._aperture_bbox(

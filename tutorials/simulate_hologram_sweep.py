@@ -21,7 +21,7 @@ from scattering_calculator.simulation_pipelines.pipelines import (
 #################################################################
 #### HOW MANY SIMULATIONS TO RUN? ####
 #################################################################
-nr_simulations = 6  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 1  # increase to e.g. 1000 for a full training dataset
 
 
 
@@ -92,7 +92,7 @@ beamstop_config = {
 }
 
 # --- Material stack ---
-recipe = "Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"
+recipe = "[Au(70)/Cr(30)]x10/SiN(200)/Co(90)/Pt(120)/Al(60)"
 
 # --- Magnetic domain pattern ---
 pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", or "saturated_pattern"
@@ -157,6 +157,7 @@ aperture_ellipticities = [1.0, 1.0, 1.0]  # y/x axis ratio
 aperture_roughnesses = [0.0, 0.04, 0.04]
 aperture_roughness_modes = [(0, 0), (3, 9), (3, 9)]
 aperture_seeds = [-1, -1, -1]
+aperture_top_radius_factors = [2.0, 2.0, 2.0]
 
 # --- Illumination ---
 illumination_function = "gaussian"
@@ -199,6 +200,7 @@ config = HologramPipelineConfig(
     aperture_roughnesses=aperture_roughnesses,
     aperture_roughness_modes=aperture_roughness_modes,
     aperture_seeds=aperture_seeds,
+    aperture_top_radius_factors=aperture_top_radius_factors,
     # Illumination
     illumination_function=illumination_function,
     illumination_center=illumination_center,
@@ -211,7 +213,7 @@ config = HologramPipelineConfig(
     magnetic_pattern_use_roi=True,
     dielectric_tensor_use_roi=dielectric_tensor_use_roi,
     # Simulation grid: sample_shape = oversampling * detector_shape
-    oversampling=2,
+    oversampling=1,
     random_seed=pipeline_random_seed,
 )
 
@@ -322,6 +324,7 @@ def random_aperture_config(params):
     aperture_roughnesses = [0.0]
     aperture_roughness_modes = [(0, 0)]
     aperture_seeds = [-1]
+    aperture_top_radius_factors = [2.0]
 
     # Object hole radius: larger than the sampled texture period and 100 nm,
     # but smaller than one quarter of the mask FOV and 5 um.
@@ -338,9 +341,13 @@ def random_aperture_config(params):
     # Add 1 to 5 reference holes. Each RH has its own radius, edge sigma, and
     # random position inside the FOV but outside 2 * OH_radius from the origin.
     n_reference_holes = np.random.randint(1, 6)
+    aperture_top_radius_RH = 100e-9
+    #the ref oles should be at least 3 times the OH radius
+    #away from the center to avoid autocorrelation overlap. also avoid cone overlap by ensuring the RH top radius doesn't overlap with the OH top radius at the center, which is the worst case for cone overlap.
     min_center_distance = 3 * oh_radius
+    min_center_distance = np.maximum( min_center_distance, aperture_top_radius_RH+oh_radius* aperture_top_radius_factors[0])
+    # maximum distance from the center is set by the FOV, but we also want to
     center_half_width = np.abs(fov_xy / 2 - oh_radius)
-    # also, we do not want this to be too large, RHs are never further away than 
     center_half_width = np.minimum(center_half_width,6*oh_radius)
 
     for _ in range(n_reference_holes):
@@ -353,6 +360,7 @@ def random_aperture_config(params):
         aperture_roughnesses.append(Uniform(0.01, 0.08).sample())
         aperture_roughness_modes.append((3, 9))
         aperture_seeds.append(int(np.random.randint(0, 2**31 - 1)))
+        aperture_top_radius_factors.append(np.maximum(aperture_top_radius_RH, rh_radius*3)/rh_radius)
 
         rh_sigma_max = max(1e-9, rh_radius / 4)
         if rh_sigma_max == 1e-9:
@@ -384,6 +392,7 @@ def random_aperture_config(params):
         "aperture_roughnesses": aperture_roughnesses,
         "aperture_roughness_modes": aperture_roughness_modes,
         "aperture_seeds": aperture_seeds,
+        "aperture_top_radius_factors": aperture_top_radius_factors,
     }
 
 
@@ -513,6 +522,15 @@ with h5py.File(output_path, "r") as h5:
     cl_exit     = grp["CL/exit_wave"][frame]
     cl_ideal    = grp["CL/ideal"][frame]
     cl_detected = grp["CL/detected"][frame]
+    aperture_material_fraction = grp["aperture_material_fraction"][()]
+    aperture_yz_cut = grp["aperture_yz_cut"][()]
+    aperture_xz_cut = grp["aperture_xz_cut"][()]
+    aperture_yz_cuts = grp["aperture_yz_cuts"][()]
+    aperture_xz_cuts = grp["aperture_xz_cuts"][()]
+    aperture_types_saved = [
+        t.decode() if isinstance(t, bytes) else str(t)
+        for t in grp["metadata/aperture/aperture_config/apertures_type"][()]
+    ]
 
 if False:
     print(f"Hologram shape: {cr_ideal.shape}")
@@ -581,7 +599,74 @@ for row_idx, (cr_d, cl_d, cmap, label, cbar_label) in enumerate(rows_spec):
 plt.show()
 
 # ------------------------------------------------------------------
-# Figure 2 — FTH reconstruction of the ideal CR−CL difference
+# Figure 2 — Aperture geometry sanity check
+#
+# aperture_material_fraction is the depth-averaged material mask:
+#   1 = material remains through the stack
+#   0 = fully drilled away through the stack
+#
+# aperture_yz_cuts and aperture_xz_cuts are material masks through every
+# OH/RH centre. They should show the conical taper from wide top opening to
+# the nominal bottom aperture.
+# ------------------------------------------------------------------
+nr_aperture_plots = min(len(aperture_types_saved), 4)
+fig2, axes2 = plt.subplots(
+    2,
+    1 + nr_aperture_plots,
+    figsize=(4.0 * (1 + nr_aperture_plots), 7.5),
+    constrained_layout=True,
+)
+fig2.suptitle("Aperture geometry — average material and OH/RH cuts", fontsize=12)
+
+axes2[0, 0].axis("off")
+m = axes2[1, 0].imshow(
+    aperture_material_fraction,
+    cmap="gray",
+    vmin=0,
+    vmax=1,
+    origin="upper",
+    aspect="equal",
+)
+axes2[1, 0].set_title("Depth-averaged material", fontsize=10)
+axes2[1, 0].set_xlabel("x (px)")
+axes2[1, 0].set_ylabel("y (px)")
+fig2.colorbar(m, ax=axes2[1, 0], fraction=0.046, pad=0.04, label="material fraction")
+
+for i in range(nr_aperture_plots):
+    label = f"{aperture_types_saved[i]} {i}"
+    for row, data, xlabel in (
+        (0, aperture_yz_cuts[i], "y (px)"),
+        (1, aperture_xz_cuts[i], "x (px)"),
+    ):
+        ax = axes2[row, i + 1]
+        title_axis = "Y-Z" if row == 0 else "X-Z"
+        m = ax.imshow(
+            data,
+            cmap="gray",
+            vmin=0,
+            vmax=1,
+            origin="upper",
+            aspect="auto",
+        )
+        ax.set_title(f"{title_axis} cut {label}", fontsize=10)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("layer index")
+        fig2.colorbar(
+            m, ax=ax, fraction=0.046, pad=0.04, label="material fraction"
+        )
+
+if nr_aperture_plots == 0:
+    for ax in axes2.flat:
+        ax.axis("off")
+else:
+    for j in range(nr_aperture_plots + 1, axes2.shape[1]):
+        axes2[0, j].axis("off")
+        axes2[1, j].axis("off")
+
+plt.show()
+
+# ------------------------------------------------------------------
+# Figure 3 — FTH reconstruction of the ideal CR−CL difference
 #
 # Mirrors HologramConfig.visualize_reconstruction(source="ideal",
 #                                                  helicity="diff")
@@ -597,19 +682,19 @@ rec_panels = [
     (np.imag(rec),  "Imaginary",  "gray",    None,   None,   "Imag part"),
 ]
 
-fig2, axes2 = plt.subplots(2, 2, figsize=(10, 9), constrained_layout=True)
-fig2.suptitle(
+fig3, axes3 = plt.subplots(2, 2, figsize=(10, 9), constrained_layout=True)
+fig3.suptitle(
     "FTH reconstruction — ideal CR−CL difference (simulation 00000)", fontsize=12
 )
 
-for ax, (data, title, cmap, vmin, vmax, cbar_label) in zip(axes2.flat, rec_panels):
+for ax, (data, title, cmap, vmin, vmax, cbar_label) in zip(axes3.flat, rec_panels):
     if vmin is None:
         vmin, vmax = np.nanpercentile(data, [0.1, 99.9])
     m = ax.imshow(data, cmap=cmap, vmin=vmin, vmax=vmax, origin="upper")
     ax.set_title(title, fontsize=10)
     ax.set_xlabel("x (px)")
     ax.set_ylabel("y (px)")
-    fig2.colorbar(m, ax=ax, fraction=0.046, pad=0.04, label=cbar_label)
+    fig3.colorbar(m, ax=ax, fraction=0.046, pad=0.04, label=cbar_label)
 
 plt.show()
 
