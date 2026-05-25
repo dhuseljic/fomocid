@@ -910,45 +910,47 @@ class HologramPipeline:
                 )
             )
             aperture_cut_pixels.append((cut_y, cut_x))
-        if aperture_cut_pixels:
-            aperture_yz_cuts = np.stack(
-                [aperture_mask[:, :, cut_x] for _, cut_x in aperture_cut_pixels]
+        if False:
+            if aperture_cut_pixels:
+                aperture_yz_cuts = np.stack(
+                    [aperture_mask[:, :, cut_x] for _, cut_x in aperture_cut_pixels]
+                )
+                aperture_xz_cuts = np.stack(
+                    [aperture_mask[:, cut_y, :] for cut_y, _ in aperture_cut_pixels]
+                )
+                metadata["aperture/cut_y_px_all"] = np.asarray(
+                    [cut_y for cut_y, _ in aperture_cut_pixels], dtype=np.int64
+                )
+                metadata["aperture/cut_x_px_all"] = np.asarray(
+                    [cut_x for _, cut_x in aperture_cut_pixels], dtype=np.int64
+                )
+            else:
+                aperture_yz_cuts = np.empty((0, sample_shape[0], sample_shape[1]))
+                aperture_xz_cuts = np.empty((0, sample_shape[0], sample_shape[2]))
+            if "OH" in aperture_types:
+                oh_index = aperture_types.index("OH")
+                oh_center = p["aperture_config"]["aperture_centers"][oh_index]
+            else:
+                oh_center = (0.0, 0.0)
+            aperture_cut_y = int(
+                np.clip(
+                    round(sample_shape[1] / 2 + float(oh_center[0]) / real_space_pixel_size),
+                    0,
+                    sample_shape[1] - 1,
+                )
             )
-            aperture_xz_cuts = np.stack(
-                [aperture_mask[:, cut_y, :] for cut_y, _ in aperture_cut_pixels]
+            aperture_cut_x = int(
+                np.clip(
+                    round(sample_shape[2] / 2 + float(oh_center[1]) / real_space_pixel_size),
+                    0,
+                    sample_shape[2] - 1,
+                )
             )
-            metadata["aperture/cut_y_px_all"] = np.asarray(
-                [cut_y for cut_y, _ in aperture_cut_pixels], dtype=np.int64
-            )
-            metadata["aperture/cut_x_px_all"] = np.asarray(
-                [cut_x for _, cut_x in aperture_cut_pixels], dtype=np.int64
-            )
-        else:
-            aperture_yz_cuts = np.empty((0, sample_shape[0], sample_shape[1]))
-            aperture_xz_cuts = np.empty((0, sample_shape[0], sample_shape[2]))
-        if "OH" in aperture_types:
-            oh_index = aperture_types.index("OH")
-            oh_center = p["aperture_config"]["aperture_centers"][oh_index]
-        else:
-            oh_center = (0.0, 0.0)
-        aperture_cut_y = int(
-            np.clip(
-                round(sample_shape[1] / 2 + float(oh_center[0]) / real_space_pixel_size),
-                0,
-                sample_shape[1] - 1,
-            )
-        )
-        aperture_cut_x = int(
-            np.clip(
-                round(sample_shape[2] / 2 + float(oh_center[1]) / real_space_pixel_size),
-                0,
-                sample_shape[2] - 1,
-            )
-        )
-        aperture_yz_cut = aperture_mask[:, :, aperture_cut_x]
-        aperture_xz_cut = aperture_mask[:, aperture_cut_y, :]
-        metadata["aperture/cut_y_px"] = aperture_cut_y
-        metadata["aperture/cut_x_px"] = aperture_cut_x
+            aperture_yz_cut = aperture_mask[:, :, aperture_cut_x]
+            aperture_xz_cut = aperture_mask[:, aperture_cut_y, :]
+            metadata["aperture/cut_y_px"] = aperture_cut_y
+            metadata["aperture/cut_x_px"] = aperture_cut_x
+
         supportmask = front_aperture_config.create_supportmask(
             output_shape=detector_config.detector_layout.detector_shape,
             output_pixel_size=detector_config.detector_layout.real_space_resolution,
@@ -1055,11 +1057,11 @@ class HologramPipeline:
             aperture_config=p["aperture_config"],
             supportmask=supportmask,
             magnetic_pattern_oh=magnetic_pattern_oh,
-            aperture_material_fraction=aperture_material_fraction,
-            aperture_yz_cut=aperture_yz_cut,
-            aperture_xz_cut=aperture_xz_cut,
-            aperture_yz_cuts=aperture_yz_cuts,
-            aperture_xz_cuts=aperture_xz_cuts,
+            #aperture_material_fraction=aperture_material_fraction,
+            #aperture_yz_cut=aperture_yz_cut,
+            #aperture_xz_cut=aperture_xz_cut,
+            #aperture_yz_cuts=aperture_yz_cuts,
+            #aperture_xz_cuts=aperture_xz_cuts,
         )
         mark_stage("hdf5 write", t_stage)
 
@@ -1083,11 +1085,11 @@ class HologramPipeline:
         aperture_config: dict[str, Any],
         supportmask: np.ndarray,
         magnetic_pattern_oh: np.ndarray,
-        aperture_material_fraction: np.ndarray,
-        aperture_yz_cut: np.ndarray,
-        aperture_xz_cut: np.ndarray,
-        aperture_yz_cuts: np.ndarray,
-        aperture_xz_cuts: np.ndarray,
+        #aperture_material_fraction: np.ndarray,
+        #aperture_yz_cut: np.ndarray,
+        #aperture_xz_cut: np.ndarray,
+        #aperture_yz_cuts: np.ndarray,
+        #aperture_xz_cuts: np.ndarray,
     ) -> None:
         """Write one simulation's holograms and metadata to an HDF5 group."""
         grp = h5.create_group(f"{idx:05d}", track_order=True)
@@ -1126,31 +1128,32 @@ class HologramPipeline:
             data=np.asarray(magnetic_pattern_oh, dtype=np.float32),
             compression="gzip",
         )
-        grp.create_dataset(
-            "aperture_material_fraction",
-            data=np.asarray(aperture_material_fraction, dtype=np.float32),
-            compression="gzip",
-        )
-        grp.create_dataset(
-            "aperture_yz_cut",
-            data=np.asarray(aperture_yz_cut, dtype=np.float32),
-            compression="gzip",
-        )
-        grp.create_dataset(
-            "aperture_xz_cut",
-            data=np.asarray(aperture_xz_cut, dtype=np.float32),
-            compression="gzip",
-        )
-        grp.create_dataset(
-            "aperture_yz_cuts",
-            data=np.asarray(aperture_yz_cuts, dtype=np.float32),
-            compression="gzip",
-        )
-        grp.create_dataset(
-            "aperture_xz_cuts",
-            data=np.asarray(aperture_xz_cuts, dtype=np.float32),
-            compression="gzip",
-        )
+        if False:
+            grp.create_dataset(
+                "aperture_material_fraction",
+                data=np.asarray(aperture_material_fraction, dtype=np.float32),
+                compression="gzip",
+            )
+            grp.create_dataset(
+                "aperture_yz_cut",
+                data=np.asarray(aperture_yz_cut, dtype=np.float32),
+                compression="gzip",
+            )
+            grp.create_dataset(
+                "aperture_xz_cut",
+                data=np.asarray(aperture_xz_cut, dtype=np.float32),
+                compression="gzip",
+            )
+            grp.create_dataset(
+                "aperture_yz_cuts",
+                data=np.asarray(aperture_yz_cuts, dtype=np.float32),
+                compression="gzip",
+            )
+            grp.create_dataset(
+                "aperture_xz_cuts",
+                data=np.asarray(aperture_xz_cuts, dtype=np.float32),
+                compression="gzip",
+            )
 
         # Metadata — scalar datasets under metadata/ subgroup
         meta_grp = grp.create_group("metadata")

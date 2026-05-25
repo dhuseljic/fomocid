@@ -213,7 +213,7 @@ config = HologramPipelineConfig(
     magnetic_pattern_use_roi=True,
     dielectric_tensor_use_roi=dielectric_tensor_use_roi,
     # Simulation grid: sample_shape = oversampling * detector_shape
-    oversampling=1,
+    oversampling=2,
     random_seed=pipeline_random_seed,
 )
 
@@ -341,7 +341,7 @@ def random_aperture_config(params):
     # Add 1 to 5 reference holes. Each RH has its own radius, edge sigma, and
     # random position inside the FOV but outside 2 * OH_radius from the origin.
     n_reference_holes = np.random.randint(1, 6)
-    aperture_top_radius_RH = 100e-9
+    aperture_top_radius_RH = 200e-9
     #the ref oles should be at least 3 times the OH radius
     #away from the center to avoid autocorrelation overlap. also avoid cone overlap by ensuring the RH top radius doesn't overlap with the OH top radius at the center, which is the worst case for cone overlap.
     min_center_distance = 3 * oh_radius
@@ -522,11 +522,11 @@ with h5py.File(output_path, "r") as h5:
     cl_exit     = grp["CL/exit_wave"][frame]
     cl_ideal    = grp["CL/ideal"][frame]
     cl_detected = grp["CL/detected"][frame]
-    aperture_material_fraction = grp["aperture_material_fraction"][()]
-    aperture_yz_cut = grp["aperture_yz_cut"][()]
-    aperture_xz_cut = grp["aperture_xz_cut"][()]
-    aperture_yz_cuts = grp["aperture_yz_cuts"][()]
-    aperture_xz_cuts = grp["aperture_xz_cuts"][()]
+    #aperture_material_fraction = grp["aperture_material_fraction"][()]
+    #aperture_yz_cut = grp["aperture_yz_cut"][()]
+    #aperture_xz_cut = grp["aperture_xz_cut"][()]
+    #aperture_yz_cuts = grp["aperture_yz_cuts"][()]
+    #aperture_xz_cuts = grp["aperture_xz_cuts"][()]
     aperture_types_saved = [
         t.decode() if isinstance(t, bytes) else str(t)
         for t in grp["metadata/aperture/aperture_config/apertures_type"][()]
@@ -598,72 +598,73 @@ for row_idx, (cr_d, cl_d, cmap, label, cbar_label) in enumerate(rows_spec):
 
 plt.show()
 
+if False:
 # ------------------------------------------------------------------
-# Figure 2 — Aperture geometry sanity check
-#
-# aperture_material_fraction is the depth-averaged material mask:
-#   1 = material remains through the stack
-#   0 = fully drilled away through the stack
-#
-# aperture_yz_cuts and aperture_xz_cuts are material masks through every
-# OH/RH centre. They should show the conical taper from wide top opening to
-# the nominal bottom aperture.
-# ------------------------------------------------------------------
-nr_aperture_plots = min(len(aperture_types_saved), 4)
-fig2, axes2 = plt.subplots(
-    2,
-    1 + nr_aperture_plots,
-    figsize=(4.0 * (1 + nr_aperture_plots), 7.5),
-    constrained_layout=True,
-)
-fig2.suptitle("Aperture geometry — average material and OH/RH cuts", fontsize=12)
+    # Figure 2 — Aperture geometry sanity check
+    #
+    # aperture_material_fraction is the depth-averaged material mask:
+    #   1 = material remains through the stack
+    #   0 = fully drilled away through the stack
+    #
+    # aperture_yz_cuts and aperture_xz_cuts are material masks through every
+    # OH/RH centre. They should show the conical taper from wide top opening to
+    # the nominal bottom aperture.
+    # ------------------------------------------------------------------
+    nr_aperture_plots = min(len(aperture_types_saved), 4)
+    fig2, axes2 = plt.subplots(
+        2,
+        1 + nr_aperture_plots,
+        figsize=(4.0 * (1 + nr_aperture_plots), 7.5),
+        constrained_layout=True,
+    )
+    fig2.suptitle("Aperture geometry — average material and OH/RH cuts", fontsize=12)
 
-axes2[0, 0].axis("off")
-m = axes2[1, 0].imshow(
-    aperture_material_fraction,
-    cmap="gray",
-    vmin=0,
-    vmax=1,
-    origin="upper",
-    aspect="equal",
-)
-axes2[1, 0].set_title("Depth-averaged material", fontsize=10)
-axes2[1, 0].set_xlabel("x (px)")
-axes2[1, 0].set_ylabel("y (px)")
-fig2.colorbar(m, ax=axes2[1, 0], fraction=0.046, pad=0.04, label="material fraction")
+    axes2[0, 0].axis("off")
+    m = axes2[1, 0].imshow(
+        aperture_material_fraction,
+        cmap="gray",
+        vmin=0,
+        vmax=1,
+        origin="upper",
+        aspect="equal",
+    )
+    axes2[1, 0].set_title("Depth-averaged material", fontsize=10)
+    axes2[1, 0].set_xlabel("x (px)")
+    axes2[1, 0].set_ylabel("y (px)")
+    fig2.colorbar(m, ax=axes2[1, 0], fraction=0.046, pad=0.04, label="material fraction")
 
-for i in range(nr_aperture_plots):
-    label = f"{aperture_types_saved[i]} {i}"
-    for row, data, xlabel in (
-        (0, aperture_yz_cuts[i], "y (px)"),
-        (1, aperture_xz_cuts[i], "x (px)"),
-    ):
-        ax = axes2[row, i + 1]
-        title_axis = "Y-Z" if row == 0 else "X-Z"
-        m = ax.imshow(
-            data,
-            cmap="gray",
-            vmin=0,
-            vmax=1,
-            origin="upper",
-            aspect="auto",
-        )
-        ax.set_title(f"{title_axis} cut {label}", fontsize=10)
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel("layer index")
-        fig2.colorbar(
-            m, ax=ax, fraction=0.046, pad=0.04, label="material fraction"
-        )
+    for i in range(nr_aperture_plots):
+        label = f"{aperture_types_saved[i]} {i}"
+        for row, data, xlabel in (
+            (0, aperture_yz_cuts[i], "y (px)"),
+            (1, aperture_xz_cuts[i], "x (px)"),
+        ):
+            ax = axes2[row, i + 1]
+            title_axis = "Y-Z" if row == 0 else "X-Z"
+            m = ax.imshow(
+                data,
+                cmap="gray",
+                vmin=0,
+                vmax=1,
+                origin="upper",
+                aspect="auto",
+            )
+            ax.set_title(f"{title_axis} cut {label}", fontsize=10)
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("layer index")
+            fig2.colorbar(
+                m, ax=ax, fraction=0.046, pad=0.04, label="material fraction"
+            )
 
-if nr_aperture_plots == 0:
-    for ax in axes2.flat:
-        ax.axis("off")
-else:
-    for j in range(nr_aperture_plots + 1, axes2.shape[1]):
-        axes2[0, j].axis("off")
-        axes2[1, j].axis("off")
+    if nr_aperture_plots == 0:
+        for ax in axes2.flat:
+            ax.axis("off")
+    else:
+        for j in range(nr_aperture_plots + 1, axes2.shape[1]):
+            axes2[0, j].axis("off")
+            axes2[1, j].axis("off")
 
-plt.show()
+    plt.show()
 
 # ------------------------------------------------------------------
 # Figure 3 — FTH reconstruction of the ideal CR−CL difference
