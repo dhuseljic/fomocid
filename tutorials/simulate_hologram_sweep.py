@@ -92,7 +92,7 @@ beamstop_config = {
 }
 
 # --- Material stack ---
-recipe = "[Au(70)/Cr(30)]x10/SiN(200)/Co(90)/Pt(120)/Al(60)"
+recipe = "[Au(70)/Cr(30)]x5/SiN(200)/Co(90)/Pt(120)/Al(60)"
 
 # --- Magnetic domain pattern ---
 pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", or "saturated_pattern"
