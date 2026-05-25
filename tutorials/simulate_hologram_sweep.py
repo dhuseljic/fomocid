@@ -17,6 +17,14 @@ from scattering_calculator.simulation_pipelines.pipelines import (
     HologramPipelineRanges,
 )
 
+
+#################################################################
+#### HOW MANY SIMULATIONS TO RUN? ####
+#################################################################
+nr_simulations = 10  # increase to e.g. 1000 for a full training dataset
+
+
+
 # %%
 # ===================
 # OUTPUT PATH
@@ -87,12 +95,22 @@ beamstop_config = {
 recipe = "Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"
 
 # --- Magnetic domain pattern ---
-pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern" or "binary_labyrinth_pattern"
+pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", or "saturated_pattern"
 stripe_width = 300e-9  # m
 sigma = 30e-9  # m
 angle_stripes = np.pi / 4
 waviness_amplitude = 0e-9  # ms
 waviness_scale = 0e-9  # m
+saturated_config = {
+    "saturation": 1,
+}
+skyrmion_lattice_config = {
+    "skyrmion_density": 0.25,
+    "diameter_spread": 0.10 * stripe_width,
+    "ellipticity": (0.75, 1.35),
+    "roughness": 0.05,
+    "roughness_modes": (3, 9),
+}
 labyrinth_config = {
     "batch": 1,
     "H": 100,
@@ -103,6 +121,10 @@ labyrinth_config = {
     "k0": 1.0,
     "eps": 0.0,
     "noise_amp": 0.0,
+    "domain_conversion": "soft",
+    "softness": 1.0,
+    "auto_size": True,
+    "crop_margin": None,
 }
 pattern_config = {
     "stripe_width": stripe_width,
@@ -118,6 +140,10 @@ if pattern_type == "wavy_stripe_pattern":
     )
 elif pattern_type == "binary_labyrinth_pattern":
     pattern_config.update(labyrinth_config)
+elif pattern_type == "disordered_skyrmion_lattice_pattern":
+    pattern_config.update(skyrmion_lattice_config)
+elif pattern_type == "saturated_pattern":
+    pattern_config.update(saturated_config)
 else:
     raise ValueError(f"Unknown pattern_type: {pattern_type}")
 
@@ -201,13 +227,28 @@ config = HologramPipelineConfig(
 
 def random_pattern_config(params):
     """Generate interdependent magnetic-pattern parameters in physical units."""
-    stripe_width = Uniform(10e-9, 500e-9).sample()
+    stripe_width = Uniform(30e-9, 500e-9).sample()
     config = {
         "stripe_width": stripe_width,
         "sigma": Uniform(np.minimum(3e-9,0.01*stripe_width), np.maximum(3e-9,0.12 * stripe_width)).sample(),
     }
     if params["pattern_type"] == "binary_labyrinth_pattern":
         config.update(labyrinth_config)
+        return config
+    if params["pattern_type"] == "disordered_skyrmion_lattice_pattern":
+        ellipticity_delta = Uniform(0.1, 0.5).sample()
+        config.update(
+            {
+                "skyrmion_density": Uniform(0.1, 0.45).sample(),
+                "diameter_spread": Uniform(0.01 * stripe_width, 0.10 * stripe_width).sample(),
+                "ellipticity": (1.0 - ellipticity_delta, 1.0 + ellipticity_delta),
+                "roughness": Uniform(0.01, 0.08).sample(),
+                "roughness_modes": (3, 9),
+            }
+        )
+        return config
+    if params["pattern_type"] == "saturated_pattern":
+        config.update({"saturation": Choice((-1, 1)).sample()})
         return config
 
     waviness_amplitude = Uniform(0.0, 2.0 * stripe_width).sample()
@@ -353,6 +394,33 @@ def random_aperture_config(params):
 ranges = HologramPipelineRanges(
     # Sweep X-ray energy across the Co L-edge absorption region
     xray_energy=Uniform(775, 795),
+    # Random illumination geometry
+    illumination_focus_distance=Uniform(0.0, 2e-3),
+    illumination_fwhm=Uniform(5e-6, 50e-6),
+    illumination_center=(
+        Uniform(-2e-6, 2e-6),
+        Uniform(-2e-6, 2e-6),
+    ),
+    measurement_config=lambda params: {
+        "number_frames": int(np.random.randint(1, 21)),
+        "max_counts_per_image": Uniform(40_000, 70_000).sample(),
+        "exposure_time": measurement_config["exposure_time"],
+    },
+    # Pattern-type mix: 40% labyrinth, 40% skyrmion lattice, 20% saturated.
+    pattern_type=Choice(
+        (
+            "binary_labyrinth_pattern",
+            "binary_labyrinth_pattern",
+            "binary_labyrinth_pattern",
+            "binary_labyrinth_pattern",
+            "binary_labyrinth_pattern",
+            "disordered_skyrmion_lattice_pattern",
+            "disordered_skyrmion_lattice_pattern",
+            "disordered_skyrmion_lattice_pattern",
+            "saturated_pattern",
+        )
+    ),
+
     # Generate interdependent magnetic stripe parameters first.
     pattern_config=random_pattern_config,
     # Generate beamstop parameters from reasonable ranges
@@ -383,7 +451,7 @@ ranges = HologramPipelineRanges(
 # ===================
 # RUN PIPELINE
 # ===================
-nr_simulations = 5  # increase to e.g. 1000 for a full training dataset
+
 
 pipeline = HologramPipeline(
     config=config,

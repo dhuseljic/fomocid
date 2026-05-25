@@ -137,7 +137,7 @@ class HologramPipelineConfig:
         Propagation distance from the Gaussian waist to the sample plane, in metres.
     illumination_fwhm : float
         Gaussian beam FWHM at the waist in metres.
-    pattern_type : {"wavy_stripe_pattern", "binary_labyrinth_pattern", "skyrmion_pattern"}
+    pattern_type : {"wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", "saturated_pattern", "skyrmion_pattern"}
         Which magnetic domain pattern generator to use.
     pattern_config : dict
         Pattern parameters forwarded to the generator. Physical-length entries
@@ -325,6 +325,15 @@ class HologramPipelineRanges:
     pattern_config: dict | Callable[[dict[str, Any]], dict] | None = None
     pattern_config_length: dict | None = None
 
+    # Illumination
+    illumination_focus_distance: float | Uniform | None = None
+    illumination_fwhm: float | Uniform | None = None
+    illumination_center: (
+        tuple[float | Uniform, float | Uniform]
+        | Callable[[dict[str, Any]], tuple[float, float]]
+        | None
+    ) = None
+
 
 class HologramPipeline:
     """Generate paired CR/CL holograms for *n_samples* parameter configurations.
@@ -474,11 +483,14 @@ class HologramPipeline:
         def _merge_dict(
             range_dict: dict | None, base_dict: dict, params: dict[str, Any]
         ) -> dict:
-            merged = dict(base_dict)
             if range_dict is not None:
                 if callable(range_dict):
-                    range_dict = _resolve(range_dict, params)
+                    resolved = _resolve(range_dict, params)
+                    return _sample_dict_with_params(resolved, params)
+                merged = dict(base_dict)
                 merged.update(_sample_dict_with_params(range_dict, params))
+                return merged
+            merged = dict(base_dict)
             return merged
 
         params: dict[str, Any] = {
@@ -549,6 +561,17 @@ class HologramPipeline:
         params["detector_distance"] = _pick(
             rng.detector_distance, cfg.detector_distance, params
         )
+        params["illumination_focus_distance"] = _pick(
+            rng.illumination_focus_distance,
+            cfg.illumination_focus_distance,
+            params,
+        )
+        params["illumination_fwhm"] = _pick(
+            rng.illumination_fwhm, cfg.illumination_fwhm, params
+        )
+        params["illumination_center"] = _pick(
+            rng.illumination_center, cfg.illumination_center, params
+        )
         params["beamstop_config"] = _merge_dict(
             rng.beamstop_config, cfg.beamstop_config, params
         )
@@ -592,7 +615,11 @@ class HologramPipeline:
         their historical full-field behaviour.
         """
         full_shape = tuple(int(v) for v in sample_shape)
-        roi_pattern_types = {"wavy_stripe_pattern", "binary_labyrinth_pattern"}
+        roi_pattern_types = {
+            "wavy_stripe_pattern",
+            "binary_labyrinth_pattern",
+            "disordered_skyrmion_lattice_pattern",
+        }
         if not enabled or pattern_type not in roi_pattern_types or pixel_size <= 0:
             return full_shape, None, None
 
@@ -773,6 +800,26 @@ class HologramPipeline:
         pattern_config = dict(p["pattern_config"])
         if coordinate_offset is not None:
             pattern_config["coordinate_offset"] = coordinate_offset
+        if p["pattern_type"] == "disordered_skyrmion_lattice_pattern":
+            aperture_types = p["aperture_config"].get("aperture_types", [])
+            if "OH" in aperture_types:
+                oh_index = aperture_types.index("OH")
+                oh_center = p["aperture_config"]["aperture_centers"][oh_index]
+                oh_radius = p["aperture_config"]["aperture_radii"][oh_index]
+                full_center_y = sample_shape[1] / 2 + float(oh_center[0]) / real_space_pixel_size
+                full_center_x = sample_shape[2] / 2 + float(oh_center[1]) / real_space_pixel_size
+                if pattern_slices is None:
+                    placement_center = (full_center_y, full_center_x)
+                else:
+                    placement_center = (
+                        full_center_y - pattern_slices[0].start,
+                        full_center_x - pattern_slices[1].start,
+                    )
+                pattern_config.setdefault("placement_center", placement_center)
+                pattern_config.setdefault(
+                    "placement_radius",
+                    float(oh_radius) + float(pattern_config.get("stripe_width", 0.0)),
+                )
         magnetic_pattern_config = MagneticPatternConfig(
             pattern_type_method=p["pattern_type"],
             shape=pattern_shape,
@@ -849,12 +896,17 @@ class HologramPipeline:
             real_space_pixel_size=real_space_pixel_size,
             illumination_function=cfg.illumination_function,
             illumination_config={
-                "center": np.array(cfg.illumination_center),
-                "distance": cfg.illumination_focus_distance,
-                "fwhm": cfg.illumination_fwhm,
+                "center": np.array(p["illumination_center"]),
+                "distance": p["illumination_focus_distance"],
+                "fwhm": p["illumination_fwhm"],
             },
         )
         illumination_config.setup()
+        metadata["illumination/center_m"] = np.asarray(
+            p["illumination_center"], dtype=float
+        )
+        metadata["illumination/focus_distance_m"] = p["illumination_focus_distance"]
+        metadata["illumination/fwhm_m"] = p["illumination_fwhm"]
         t_stage = mark_stage("illumination", t_stage)
 
         # ---- Hologram simulation loop ------------------------------------

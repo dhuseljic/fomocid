@@ -543,7 +543,7 @@ class MagneticPatternConfig(_ConfigMixin):
 
     Parameters
     ----------
-    pattern_type_method : {"skyrmion_pattern", "wavy_stripe_pattern", "binary_labyrinth_pattern"}
+    pattern_type_method : {"skyrmion_pattern", "disordered_skyrmion_lattice_pattern", "wavy_stripe_pattern", "binary_labyrinth_pattern", "saturated_pattern"}
         Which pattern generator function to use.
     shape : tuple of int or None
         2-D array shape ``(Ny, Nx)`` in pixels.
@@ -570,7 +570,11 @@ class MagneticPatternConfig(_ConfigMixin):
     """
 
     pattern_type_method: Literal[
-        "skyrmion_pattern", "wavy_stripe_pattern", "binary_labyrinth_pattern"
+        "skyrmion_pattern",
+        "disordered_skyrmion_lattice_pattern",
+        "wavy_stripe_pattern",
+        "binary_labyrinth_pattern",
+        "saturated_pattern",
     ] = "skyrmion_pattern"
     shape: tuple[int, int] | None = None
     real_space_pixel_size: float | None = None
@@ -581,8 +585,10 @@ class MagneticPatternConfig(_ConfigMixin):
         """Return the generator function selected by ``pattern_type_method``."""
         _methods = {
             "skyrmion_pattern": pattern_generator.create_skyrmion_pattern,
+            "disordered_skyrmion_lattice_pattern": pattern_generator.create_disordered_skyrmion_lattice_pattern,
             "wavy_stripe_pattern": pattern_generator.create_wavy_stripe_pattern,
             "binary_labyrinth_pattern": pattern_generator.create_binary_labyrinth_pattern,
+            "saturated_pattern": pattern_generator.create_saturated_pattern,
         }
         method = _methods.get(self.pattern_type_method)
         if method is None:
@@ -617,6 +623,13 @@ class MagneticPatternConfig(_ConfigMixin):
             "skyrmion_pattern": {
                 "skyr_radius",
                 "screening_radius",
+            },
+            "disordered_skyrmion_lattice_pattern": {
+                "stripe_width",
+                "sigma",
+                "diameter_spread",
+                "positional_disorder",
+                "placement_radius",
             },
             "binary_labyrinth_pattern": {
                 "stripe_width",

@@ -480,6 +480,260 @@ def skyrmions_on_lattice(
     return pattern
 
 
+def _rough_ellipse_mask(
+    radius_y: float,
+    radius_x: float,
+    angle: float = 0.0,
+    roughness: float = 0.0,
+    roughness_modes: tuple[int, int] = (0, 0),
+    rng: np.random.Generator | None = None,
+) -> NDArray[np.float64]:
+    """Return a local binary mask for one elliptical, rough skyrmion core."""
+    rng = np.random.default_rng() if rng is None else rng
+    radius_y = max(float(radius_y), 0.5)
+    radius_x = max(float(radius_x), 0.5)
+    roughness = max(0.0, float(roughness))
+    roughness_scale = 1.0 + 2.0 * roughness
+    half_y = int(np.ceil(radius_y * roughness_scale)) + 3
+    half_x = int(np.ceil(radius_x * roughness_scale)) + 3
+
+    y = np.arange(-half_y, half_y + 1)
+    x = np.arange(-half_x, half_x + 1)
+    yy, xx = np.meshgrid(y, x, indexing="ij")
+
+    cos_a = np.cos(angle)
+    sin_a = np.sin(angle)
+    x_rot = xx * cos_a + yy * sin_a
+    y_rot = -xx * sin_a + yy * cos_a
+    normalized_radius = np.sqrt((y_rot / radius_y) ** 2 + (x_rot / radius_x) ** 2)
+
+    boundary = 1.0
+    if roughness > 0:
+        polar_angle = np.arctan2(y_rot / radius_y, x_rot / radius_x)
+        min_mode, max_mode = roughness_modes
+        if max_mode >= min_mode and min_mode >= 1:
+            boundary = np.ones_like(normalized_radius)
+            for mode in range(int(min_mode), int(max_mode) + 1):
+                amplitude = rng.normal(scale=roughness / mode)
+                phase = rng.uniform(0, 2 * np.pi)
+                boundary += amplitude * np.cos(mode * polar_angle + phase)
+            boundary = np.clip(boundary, 1.0 - 2.0 * roughness, 1.0 + 2.0 * roughness)
+
+    return (normalized_radius <= boundary).astype(float)
+
+
+def create_disordered_skyrmion_lattice_pattern(
+    sz_array: list[int] | tuple[int, int],
+    stripe_width: float,
+    sigma: float | None = None,
+    skyrmion_density: float = 0.25,
+    diameter_spread: float = 0.0,
+    ellipticity: tuple[float, float] = (0.75, 1.35),
+    roughness: float = 0.05,
+    roughness_modes: tuple[int, int] = (3, 9),
+    positional_disorder: float = 0.0,
+    placement_center: tuple[float, float] | None = None,
+    placement_radius: float | None = None,
+    seed: int | None = None,
+    plot: bool = False,
+    real_space_pixel_size: float = 1,
+    **_,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Create a random non-overlapping distribution of irregular skyrmions.
+
+    ``stripe_width`` is interpreted as the average skyrmion diameter in pixels.
+    ``diameter_spread`` and ``sigma`` are also pixel lengths by the time this
+    function is called; pipeline configs can specify them in metres and
+    :class:`MagneticPatternConfig` converts them. ``diameter_spread`` is a
+    bounded half-range, so diameters are sampled from
+    ``diameter +/- diameter_spread`` instead of an unbounded Gaussian. The
+    skyrmion density is an approximate target area fraction of skyrmion cores
+    in the generated field. If ``placement_radius`` is provided, random
+    candidate centers are drawn inside that circular placement region, normally
+    the OH radius plus one skyrmion diameter. Candidate centers are accepted
+    greedily only when their conservative bounding radii do not overlap any
+    previously accepted skyrmion.
+    """
+    rng = np.random.default_rng(seed)
+    rows, cols = tuple(int(v) for v in sz_array)
+    diameter = float(stripe_width)
+    if diameter <= 0:
+        raise ValueError(f"stripe_width must be positive, got {stripe_width}")
+    if skyrmion_density < 0:
+        raise ValueError(f"skyrmion_density must be non-negative, got {skyrmion_density}")
+    if ellipticity[0] <= 0 or ellipticity[1] <= 0 or ellipticity[0] > ellipticity[1]:
+        raise ValueError(
+            "ellipticity must be ordered positive bounds, "
+            f"got {ellipticity}"
+        )
+
+    core_area = np.pi * (diameter / 2.0) ** 2
+    target_n = max(1, int(np.round(skyrmion_density * rows * cols / core_area)))
+    if target_n <= 0:
+        pattern = np.ones((rows, cols), dtype=float)
+        return pattern, np.empty((0, 2), dtype=float)
+
+    candidate_count = max(1000, 50 * target_n)
+    if placement_center is None:
+        center_y = 0.5 * (rows - 1)
+        center_x = 0.5 * (cols - 1)
+    else:
+        center_y, center_x = (float(placement_center[0]), float(placement_center[1]))
+    center_candidate = np.array([[center_y, center_x]])
+
+    if placement_radius is None:
+        sites_arr = np.column_stack(
+            [
+                rng.uniform(0, rows, size=candidate_count),
+                rng.uniform(0, cols, size=candidate_count),
+            ]
+        )
+    else:
+        radius = max(0.0, float(placement_radius))
+        angles = rng.uniform(0, 2 * np.pi, size=candidate_count)
+        radii = radius * np.sqrt(rng.uniform(0, 1, size=candidate_count))
+        sites_arr = np.column_stack(
+            [
+                center_y + radii * np.sin(angles),
+                center_x + radii * np.cos(angles),
+            ]
+        )
+        inside = (
+            (sites_arr[:, 0] >= 0)
+            & (sites_arr[:, 0] < rows)
+            & (sites_arr[:, 1] >= 0)
+            & (sites_arr[:, 1] < cols)
+        )
+        sites_arr = sites_arr[inside]
+    sites_arr = np.vstack([center_candidate, sites_arr])
+    diameter_half_range = min(max(0.0, float(diameter_spread)), 0.2 * diameter)
+    accepted: list[dict[str, float | NDArray[np.float64]]] = []
+    candidate_order = np.concatenate(
+        ([0], 1 + rng.permutation(len(sites_arr) - 1))
+    )
+    for candidate_index in candidate_order:
+        if len(accepted) >= target_n:
+            break
+        y_center, x_center = sites_arr[candidate_index]
+        local_diameter = diameter
+        if diameter_half_range > 0:
+            local_diameter = rng.uniform(
+                diameter - diameter_half_range,
+                diameter + diameter_half_range,
+            )
+            local_diameter = max(1.0, local_diameter)
+        local_ellipticity = rng.uniform(float(ellipticity[0]), float(ellipticity[1]))
+        radius = 0.5 * local_diameter
+        radius_y = radius * np.sqrt(local_ellipticity)
+        radius_x = radius / np.sqrt(local_ellipticity)
+        roughness_scale = 1.0 + 2.0 * max(0.0, float(roughness))
+        bounding_radius = max(radius_y, radius_x) * roughness_scale
+        if any(
+            np.hypot(y_center - item["y"], x_center - item["x"])
+            < bounding_radius + item["bounding_radius"]
+            for item in accepted
+        ):
+            continue
+
+        accepted.append(
+            {
+                "y": float(y_center),
+                "x": float(x_center),
+                "radius_y": float(radius_y),
+                "radius_x": float(radius_x),
+                "angle": float(rng.uniform(0, np.pi)),
+                "bounding_radius": float(bounding_radius),
+            }
+        )
+
+    sites_arr = np.asarray(
+        [[item["y"], item["x"]] for item in accepted], dtype=float
+    )
+
+    core = np.zeros((rows, cols), dtype=float)
+    for item in accepted:
+        mask = _rough_ellipse_mask(
+            item["radius_y"],
+            item["radius_x"],
+            angle=item["angle"],
+            roughness=roughness,
+            roughness_modes=roughness_modes,
+            rng=rng,
+        )
+        half_y = mask.shape[0] // 2
+        half_x = mask.shape[1] // 2
+        cy = int(np.round(item["y"]))
+        cx = int(np.round(item["x"]))
+        y0 = max(0, cy - half_y)
+        y1 = min(rows, cy - half_y + mask.shape[0])
+        x0 = max(0, cx - half_x)
+        x1 = min(cols, cx - half_x + mask.shape[1])
+        my0 = y0 - (cy - half_y)
+        my1 = my0 + (y1 - y0)
+        mx0 = x0 - (cx - half_x)
+        mx1 = mx0 + (x1 - x0)
+        core[y0:y1, x0:x1] = np.maximum(core[y0:y1, x0:x1], mask[my0:my1, mx0:mx1])
+
+    if sigma is not None and sigma > 0:
+        core = gaussian_filter(core, sigma)
+        max_val = np.max(core)
+        if max_val > 0:
+            core = core / max_val
+
+    pattern = 1.0 - 2.0 * np.clip(core, 0.0, 1.0)
+
+    if plot:
+        extent_real = None
+        if real_space_pixel_size != 1:
+            sample_y = (np.arange(rows) - rows / 2) * real_space_pixel_size
+            sample_x = (np.arange(cols) - cols / 2) * real_space_pixel_size
+            extent_real = 1e6 * np.array(
+                [sample_x[0], sample_x[-1], sample_y[0], sample_y[-1]]
+            )
+        plt.figure(figsize=(5, 5))
+        plt.imshow(pattern, cmap="gray", vmin=-1, vmax=1, extent=extent_real)
+        plt.title("Disordered skyrmion lattice")
+
+    return pattern, sites_arr
+
+
+def create_saturated_pattern(
+    sz_array: list[int] | tuple[int, int],
+    saturation: float | int | str = 1,
+    stripe_width: float | None = None,
+    sigma: float | None = None,
+    plot: bool = False,
+    real_space_pixel_size: float = 1,
+    **_,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Create a uniformly saturated magnetic state with ``mz = +1`` or ``-1``.
+
+    ``stripe_width`` and ``sigma`` are accepted for compatibility with sweep
+    code that uses a common magnetic-pattern parameter dictionary.
+    """
+    rows, cols = tuple(int(v) for v in sz_array)
+    if isinstance(saturation, str):
+        saturation_value = -1.0 if saturation.strip().startswith("-") else 1.0
+    else:
+        saturation_value = 1.0 if float(saturation) >= 0 else -1.0
+
+    pattern = np.full((rows, cols), saturation_value, dtype=float)
+
+    if plot:
+        extent_real = None
+        if real_space_pixel_size != 1:
+            sample_y = (np.arange(rows) - rows / 2) * real_space_pixel_size
+            sample_x = (np.arange(cols) - cols / 2) * real_space_pixel_size
+            extent_real = 1e6 * np.array(
+                [sample_x[0], sample_x[-1], sample_y[0], sample_y[-1]]
+            )
+        plt.figure(figsize=(5, 5))
+        plt.imshow(pattern, cmap="gray", vmin=-1, vmax=1, extent=extent_real)
+        plt.title(f"Saturated state mz={saturation_value:+.0f}")
+
+    return pattern, np.empty((0, 2), dtype=float)
+
+
 def create_wavy_stripe_pattern(
     sz_array: list[int] | tuple[int, int],
     stripe_width: float,
@@ -592,8 +846,15 @@ def create_wavy_stripe_pattern(
     return pattern, stripe_centers
 
 
-def _estimate_binary_period_fft(pattern: NDArray[np.float64]) -> float:
-    """Estimate the dominant binary-domain period in pixels from the FFT peak."""
+def _estimate_labyrinth_stripe_width_fft(
+    pattern: NDArray[np.float64],
+) -> tuple[float, float]:
+    """Estimate labyrinth stripe width and full repeat period in pixels.
+
+    The dominant FFT peak gives the wavelength of a full +/- domain repeat. A
+    single stripe is one half of that repeat, matching the ``stripe_width``
+    convention used by the stripe generators.
+    """
     field = np.asarray(pattern, dtype=float)
     field = field - np.mean(field)
     power = np.abs(np.fft.fftshift(np.fft.fft2(field))) ** 2
@@ -606,30 +867,44 @@ def _estimate_binary_period_fft(pattern: NDArray[np.float64]) -> float:
     radius = np.sqrt(yy**2 + xx**2)
     valid = radius >= 1
     if not np.any(valid):
-        return float(min(rows, cols))
+        period = float(min(rows, cols))
+        return period / 2.0, period
 
     peak_index = np.argmax(power[valid])
     peak_radius = radius[valid][peak_index]
     if peak_radius <= 0:
-        return float(min(rows, cols))
-    return float(min(rows, cols) / peak_radius)
+        period = float(min(rows, cols))
+        return period / 2.0, period
+    period = float(min(rows, cols) / peak_radius)
+    return period / 2.0, period
 
 
-def _tile_center_crop(pattern: NDArray[np.float64], shape: tuple[int, int]) -> NDArray[np.float64]:
-    """Tile *pattern* if needed and return a centered crop with ``shape``."""
+def _center_crop(pattern: NDArray[np.float64], shape: tuple[int, int]) -> NDArray[np.float64]:
+    """Return a centered crop with ``shape``.
+
+    The labyrinth generator intentionally does not tile images: the generated
+    pattern is not periodic, so tiling can create artificial horizontal or
+    vertical domain boundaries.
+    """
     rows, cols = shape
-    reps_y = int(np.ceil(rows / pattern.shape[0])) + 1
-    reps_x = int(np.ceil(cols / pattern.shape[1])) + 1
-    tiled = np.tile(pattern, (reps_y, reps_x))
-    y0 = max(0, (tiled.shape[0] - rows) // 2)
-    x0 = max(0, (tiled.shape[1] - cols) // 2)
-    return tiled[y0 : y0 + rows, x0 : x0 + cols]
+    if pattern.shape[0] < rows or pattern.shape[1] < cols:
+        raise ValueError(
+            "Cannot crop labyrinth pattern because the scaled generated image "
+            f"has shape {pattern.shape}, smaller than requested shape {shape}."
+        )
+    y0 = (pattern.shape[0] - rows) // 2
+    x0 = (pattern.shape[1] - cols) // 2
+    return pattern[y0 : y0 + rows, x0 : x0 + cols]
 
 
 def create_binary_labyrinth_pattern(
     sz_array: list[int] | tuple[int, int],
     stripe_width: float,
     sigma: float | None = None,
+    domain_conversion: str = "soft",
+    softness: float = 1.0,
+    auto_size: bool = True,
+    crop_margin: float | None = None,
     plot: bool = False,
     real_space_pixel_size: float = 1,
     batch: int = 1,
@@ -647,51 +922,121 @@ def create_binary_labyrinth_pattern(
     """Create binary labyrinth domains rescaled to a requested stripe width.
 
     The fast binary generator first creates a continuous labyrinth field. Its
-    dominant period is estimated from the FFT, then the continuous field is
-    linearly rescaled so the period matches ``stripe_width`` in pixels. The
-    rescaled field is tiled/cropped to ``sz_array``, binarised, and finally
-    blurred with ``sigma`` using the same convention as wavy stripes.
+    stripe width is estimated as half of the dominant FFT period, then the
+    continuous field is linearly rescaled so that measured width matches
+    ``stripe_width`` in pixels. If needed, the base labyrinth image is
+    regenerated at a larger size so that the rescaled field can be cropped
+    without tiling artifacts. The rescaled field is then converted to the final
+    domain contrast. By default this
+    conversion is soft, using a tanh mapping after the optional Gaussian blur,
+    which avoids interpolation and thresholding artifacts for small stripes.
+    Set ``domain_conversion="hard"`` to recover exact +/-1 binarisation.
     """
     generator_overrides.pop("coordinate_offset", None)
     rows, cols = tuple(sz_array)
-    _, binary, continuous, meta = generate_binary(
-        batch=batch,
-        H=H,
-        W=W,
-        n_steps=n_steps,
-        region=region,
-        use_gpu=use_gpu,
-        seed=seed,
-        k0=k0,
-        eps=eps,
-        noise_amp=noise_amp,
-        **generator_overrides,
-    )
-    base = np.asarray(continuous[0], dtype=float)
-
-    measured_width = _estimate_binary_period_fft(base)
     if stripe_width <= 0:
         raise ValueError(f"stripe_width must be positive, got {stripe_width}")
-    scale = stripe_width / measured_width if measured_width > 0 else 1.0
-    scale = max(scale, 1e-3)
+
+    requested_H = int(H)
+    requested_W = int(W)
+    current_H = requested_H
+    current_W = requested_W
+    margin = crop_margin
+    if margin is None:
+        margin = max(8.0, 2.0 * float(stripe_width))
+        if sigma is not None:
+            margin = max(margin, 4.0 * float(sigma))
+    required_rows = rows + 2 * int(np.ceil(margin))
+    required_cols = cols + 2 * int(np.ceil(margin))
+
+    meta = {}
+    base = None
+    measured_width = 0.0
+    measured_period = 0.0
+    scale = 1.0
+    for _ in range(6):
+        _, _, continuous, meta = generate_binary(
+            batch=batch,
+            H=current_H,
+            W=current_W,
+            n_steps=n_steps,
+            region=region,
+            use_gpu=use_gpu,
+            seed=seed,
+            k0=k0,
+            eps=eps,
+            noise_amp=noise_amp,
+            **generator_overrides,
+        )
+        base = np.asarray(continuous[0], dtype=float)
+        measured_width, measured_period = _estimate_labyrinth_stripe_width_fft(base)
+        scale = stripe_width / measured_width if measured_width > 0 else 1.0
+        scale = max(scale, 1e-3)
+        scaled_rows = int(np.round(base.shape[0] * scale))
+        scaled_cols = int(np.round(base.shape[1] * scale))
+        if (
+            not auto_size
+            or (scaled_rows >= required_rows and scaled_cols >= required_cols)
+        ):
+            break
+
+        next_H = int(np.ceil(required_rows / scale * 1.1))
+        next_W = int(np.ceil(required_cols / scale * 1.1))
+        current_H = max(current_H + 1, next_H)
+        current_W = max(current_W + 1, next_W)
+
+    if base is None:
+        raise RuntimeError("Labyrinth generator did not return a pattern.")
+
     scaled = zoom(base, scale, order=1)
     if scaled.size == 0:
         scaled = base
-    pattern = _tile_center_crop(scaled, (rows, cols))
-    pattern = np.where(pattern >= 0, 1.0, -1.0)
+    pattern = _center_crop(scaled, (rows, cols))
+    threshold = float(np.median(pattern))
+    pattern = pattern - threshold
 
     if sigma is not None:
         pattern = gaussian_filter(pattern, sigma)
-        max_val = np.max(np.abs(pattern))
-        if max_val > 0:
-            pattern = pattern / max_val
+
+    conversion = str(domain_conversion).lower()
+    if conversion == "hard":
+        pattern = np.where(pattern >= 0, 1.0, -1.0)
+    elif conversion == "soft":
+        if softness <= 0:
+            raise ValueError(f"softness must be positive, got {softness}")
+        contrast_scale = float(np.std(pattern))
+        if contrast_scale > 0:
+            pattern = np.tanh(pattern / (softness * contrast_scale))
+        else:
+            pattern = np.zeros_like(pattern)
+    else:
+        raise ValueError(
+            "domain_conversion must be 'soft' or 'hard', "
+            f"got {domain_conversion!r}"
+        )
+
+    max_val = np.max(np.abs(pattern))
+    if max_val > 0:
+        pattern = pattern / max_val
 
     meta = dict(meta)
     meta.update(
         {
             "measured_stripe_width_px": measured_width,
+            "measured_period_px": measured_period,
             "target_stripe_width_px": stripe_width,
             "rescale_factor": scale,
+            "requested_H": requested_H,
+            "requested_W": requested_W,
+            "generated_H": current_H,
+            "generated_W": current_W,
+            "scaled_H": scaled.shape[0],
+            "scaled_W": scaled.shape[1],
+            "auto_size": bool(auto_size),
+            "crop_margin_px": margin,
+            "binarization_threshold": threshold,
+            "domain_conversion": conversion,
+            "softness": softness,
             "k0": k0,
             "eps": eps,
             "noise_amp": noise_amp,
