@@ -1209,18 +1209,15 @@ class Apertures3D:
         if use_real_space_coordinates:
             drilled_depth = float(layer_edges[pixel_depth])
             layer_top_depths = layer_edges[:pixel_depth]
-            layer_bottom_depths = layer_edges[1 : pixel_depth + 1]
             taper_limit = drilled_depth if pixel_taper_depth is None else min(
                 max(pixel_taper_depth, 0.0), drilled_depth
             )
             if taper_limit > 0:
                 depth_fraction = np.clip(layer_top_depths / taper_limit, 0.0, 1.0)
-                depth_fraction[layer_bottom_depths >= taper_limit] = 1.0
             else:
-                depth_fraction = np.ones_like(layer_bottom_depths)
+                depth_fraction = np.ones(pixel_depth, dtype=float)
         else:
             layer_top_indices = np.arange(0, pixel_depth, dtype=float)
-            layer_bottom_indices = np.arange(1, pixel_depth + 1, dtype=float)
             taper_limit = (
                 float(pixel_depth)
                 if pixel_taper_depth is None
@@ -1228,13 +1225,13 @@ class Apertures3D:
             )
             if taper_limit > 0:
                 depth_fraction = np.clip(layer_top_indices / taper_limit, 0.0, 1.0)
-                depth_fraction[layer_bottom_indices >= taper_limit] = 1.0
             else:
-                depth_fraction = np.ones_like(layer_bottom_indices)
+                depth_fraction = np.ones(pixel_depth, dtype=float)
         layer_radii = pixel_radius * (
             top_radius_factor + (1.0 - top_radius_factor) * depth_fraction
         )
         for layer_idx, layer_radius in enumerate(layer_radii):
+            layer_seed = None if seed is None else int(seed) + 104729 * layer_idx
             hole_mask = self._aperture_hole_mask(
                 local_shape,
                 local_center,
@@ -1244,7 +1241,7 @@ class Apertures3D:
                 ellipticity=ellipticity,
                 roughness=roughness,
                 roughness_modes=roughness_modes,
-                seed=seed,
+                seed=layer_seed,
             )
             self.aperture_design[layer_idx, y_slice, x_slice] *= 1 - hole_mask
 

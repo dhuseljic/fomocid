@@ -164,6 +164,11 @@ class HologramPipelineConfig:
         local aperture bounding boxes. If ``False``, use the full aperture
         support mask, matching the pre-ROI tensor path for timing comparisons.
         Default ``True``.
+    propagate : bool
+        If ``True``, propagate the Jones field through free space between
+        material layers using each layer thickness and the sample pixel size.
+        If ``False``, apply only local Jones transmission per layer. Default
+        ``False``.
     oversampling : int
         Oversampling factor relative to the Nyquist limit from the detector.
         ``real_space_pixel_size = detector_resolution / oversampling``.
@@ -269,6 +274,7 @@ class HologramPipelineConfig:
     use_roi: bool = True
     magnetic_pattern_use_roi: bool = True
     dielectric_tensor_use_roi: bool = True
+    propagate: bool = False
 
     # Simulation grid
     oversampling: int = 2
@@ -775,13 +781,20 @@ class HologramPipeline:
         )
         sample_config.setup()
         t_stage = mark_stage("sample setup", t_stage)
+        sample_layer_names = sample_config.sample_structure.layer_names
+        sample_layer_thicknesses = sample_config.sample_structure.layer_thicknesses
+        membrane_index = sample_layer_names.index("SiN")
+        aperture_taper_depth = float(
+            np.sum(sample_layer_thicknesses[: max(0, membrane_index - 2)])
+        )
+        thickness_oh = float(np.sum(sample_layer_thicknesses[:membrane_index]))
 
         # ---- Front aperture config ---------------------------------------
         front_aperture_config = FrontApertureConfig(
             aperture_method=cfg.aperture_method,
             aperture_shape=sample_shape,
             real_space_pixel_size=sample_config.sample_structure.real_space_pixel_size,
-            aperture_thicknesses=sample_config.sample_structure.layer_thicknesses,
+            aperture_thicknesses=sample_layer_thicknesses,
             use_roi=cfg.use_roi,
             aperture_config=dict(
                 apertures_type=p["aperture_config"]["aperture_types"],
@@ -800,13 +813,8 @@ class HologramPipeline:
                 apertures_top_radius_factor=p["aperture_config"][
                     "aperture_top_radius_factors"
                 ],
-                thickness_OH=float(
-                    np.sum(
-                        sample_config.sample_structure.layer_thicknesses[
-                            : sample_config.sample_structure.layer_names.index("SiN")
-                        ]
-                    )
-                ),
+                aperture_taper_depth=aperture_taper_depth,
+                thickness_OH=thickness_oh,
             ),
         )
 
@@ -1025,6 +1033,7 @@ class HologramPipeline:
                 SampleConfig=sample_config,
                 IlluminationConfig=illumination_config,
                 propagator_method="Jones",
+                propagator_config={"propagate": cfg.propagate},
             )
             propagator_config.setup()
             t_stage = mark_stage(f"{pol} Jones propagation", t_stage)
@@ -1245,6 +1254,7 @@ class HologramPipeline:
         grp.create_dataset("recipe", data=np.bytes_(cfg.recipe))
         grp.create_dataset("n_samples", data=self.n_samples)
         grp.create_dataset("oversampling", data=cfg.oversampling)
+        grp.create_dataset("propagate", data=bool(cfg.propagate))
         grp.create_dataset("aperture_method", data=np.bytes_(str(cfg.aperture_method)))
         grp.create_dataset(
             "illumination_function", data=np.bytes_(str(cfg.illumination_function))

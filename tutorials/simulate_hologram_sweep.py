@@ -10,20 +10,20 @@ from fomocid import DATA_ROOT
 from scattering_calculator.simulation_pipelines import (
     Uniform,
     Choice,
+    FrontApertureConfig,
 )
 from scattering_calculator.simulation_pipelines.pipelines import (
     HologramPipeline,
     HologramPipelineConfig,
     HologramPipelineRanges,
 )
+from scattering_calculator.sample_generator import structures
 
 
 #################################################################
 #### HOW MANY SIMULATIONS TO RUN? ####
 #################################################################
-nr_simulations = 1  # increase to e.g. 1000 for a full training dataset
-
-
+nr_simulations = 5  # increase to e.g. 1000 for a full training dataset
 
 # %%
 # ===================
@@ -34,6 +34,7 @@ output_path = output_folder / "simulation_sweep.h5"
 pipeline_random_seed = None  # set to None for non-reproducible random sweeps
 use_roi = True
 dielectric_tensor_use_roi = True
+propagate = True  # set True for multislice free-space propagation between layers
 
 os.makedirs(output_folder, exist_ok=True)
 
@@ -92,7 +93,7 @@ beamstop_config = {
 }
 
 # --- Material stack ---
-recipe = "[Au(700)/Cr(300)]x10/SiN(200)/Co(90)/Pt(120)/Al(60)"
+recipe = "[Au(700)/Cr(300)]x7/SiN(200)/Co(90)/Pt(120)/Al(60)"
 
 # --- Magnetic domain pattern ---
 pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", or "saturated_pattern"
@@ -150,12 +151,17 @@ else:
 # --- FTH holography mask ---
 aperture_types = ["OH", "RH", "RH"]
 aperture_radii = [60e-9, 6e-9, 4e-9]  # m
+oh_boundary_roughness = 20e-9  # m, target OH boundary fluctuation scale
 aperture_centers = [(0, 0), (0.2e-6, -0.15e-6), (0.15e-6, 0.15e-6)]  # m (y, x)
 aperture_sigmas = [1e-9, 2e-9, 2e-9]  # m
 aperture_angles = [0.0, 0.0, 0.0]  # rad
 aperture_ellipticities = [1.0, 1.0, 1.0]  # y/x axis ratio
-aperture_roughnesses = [0.0, 0.04, 0.04]
-aperture_roughness_modes = [(0, 0), (3, 9), (3, 9)]
+aperture_roughnesses = [
+    min(0.08, oh_boundary_roughness / aperture_radii[0]),
+    0.04,
+    0.04,
+]
+aperture_roughness_modes = [(3, 9), (3, 9), (3, 9)]
 aperture_seeds = [-1, -1, -1]
 aperture_top_radius_factors = [2.0, 2.0, 2.0]
 
@@ -212,6 +218,7 @@ config = HologramPipelineConfig(
     use_roi=use_roi,
     magnetic_pattern_use_roi=True,
     dielectric_tensor_use_roi=dielectric_tensor_use_roi,
+    propagate=propagate,
     # Simulation grid: sample_shape = oversampling * detector_shape
     oversampling=2,
     random_seed=pipeline_random_seed,
@@ -321,15 +328,14 @@ def random_aperture_config(params):
     aperture_centers = [(0.0, 0.0)]
     aperture_angles = [0.0]
     aperture_ellipticities = [1.0]
-    aperture_roughnesses = [0.0]
-    aperture_roughness_modes = [(0, 0)]
-    aperture_seeds = [-1]
+    aperture_roughness_modes = [(3, 9)]
+    aperture_seeds = [int(np.random.randint(0, 2**31 - 1))]
     aperture_top_radius_factors = [2.0]
 
     # Object hole radius: larger than the sampled texture period and 100 nm,
     # but smaller than one quarter of the mask FOV and 5 um.
     oh_radius_min = max(stripe_width, 250e-9)
-    oh_radius_max = min(fov_xy / 8, 3e-6)
+    oh_radius_max = np.amin([min(fov_xy / 8, 3e-6) ,3e-6])
     if oh_radius_max <= oh_radius_min:
         oh_radius = oh_radius_min
     else:
@@ -337,6 +343,7 @@ def random_aperture_config(params):
 
     aperture_radii = [oh_radius]
     aperture_sigmas = [Uniform(10e-9, 20e-9).sample()]
+    aperture_roughnesses = [min(0.08, 20e-9 / oh_radius)]
 
     # Add 1 to 5 reference holes. Each RH has its own radius, edge sigma, and
     # random position inside the FOV but outside 2 * OH_radius from the origin.
@@ -522,15 +529,81 @@ with h5py.File(output_path, "r") as h5:
     cl_exit     = grp["CL/exit_wave"][frame]
     cl_ideal    = grp["CL/ideal"][frame]
     cl_detected = grp["CL/detected"][frame]
-    #aperture_material_fraction = grp["aperture_material_fraction"][()]
-    #aperture_yz_cut = grp["aperture_yz_cut"][()]
-    #aperture_xz_cut = grp["aperture_xz_cut"][()]
-    #aperture_yz_cuts = grp["aperture_yz_cuts"][()]
-    #aperture_xz_cuts = grp["aperture_xz_cuts"][()]
+
+    recipe_saved = h5["_pipeline_config/recipe"][()].decode()
+    detector_shape_saved = tuple(h5["_pipeline_config/detector_shape"][()].astype(int))
+    oversampling_saved = int(h5["_pipeline_config/oversampling"][()])
+    real_space_pixel_size_saved = float(
+        grp["metadata/sample/real_space_pixel_size"][()]
+    )
+    parsed_recipe = structures.parse_recipe(recipe_saved)
+    layer_names_saved = [layer.material for layer in parsed_recipe.layers]
+    layer_thicknesses_saved = [layer.thickness for layer in parsed_recipe.layers]
+    sample_shape_saved = (
+        len(layer_names_saved),
+        oversampling_saved * detector_shape_saved[0],
+        oversampling_saved * detector_shape_saved[1],
+    )
+    membrane_index_saved = layer_names_saved.index("SiN")
+    thickness_oh_saved = float(np.sum(layer_thicknesses_saved[:membrane_index_saved]))
+    aperture_taper_depth_saved = float(
+        np.sum(layer_thicknesses_saved[: max(0, membrane_index_saved - 2)])
+    )
+    aperture_meta = grp["metadata/aperture/aperture_config"]
     aperture_types_saved = [
         t.decode() if isinstance(t, bytes) else str(t)
-        for t in grp["metadata/aperture/aperture_config/apertures_type"][()]
+        for t in aperture_meta["apertures_type"][()]
     ]
+    aperture_config_saved = dict(
+        apertures_type=aperture_types_saved,
+        apertures_radius=aperture_meta["apertures_radius"][()],
+        apertures_center=aperture_meta["apertures_center"][()],
+        apertures_sigma=aperture_meta["apertures_sigma"][()],
+        apertures_angle=aperture_meta["apertures_angle"][()],
+        apertures_ellipticity=aperture_meta["apertures_ellipticity"][()],
+        apertures_roughness=aperture_meta["apertures_roughness"][()],
+        apertures_roughness_modes=aperture_meta["apertures_roughness_modes"][()],
+        apertures_seed=aperture_meta["apertures_seed"][()],
+        apertures_top_radius_factor=aperture_meta[
+            "apertures_top_radius_factor"
+        ][()],
+        aperture_taper_depth=aperture_taper_depth_saved,
+        thickness_OH=thickness_oh_saved,
+    )
+    aperture_view = FrontApertureConfig(
+        aperture_method="FTH_circular",
+        aperture_shape=sample_shape_saved,
+        real_space_pixel_size=real_space_pixel_size_saved,
+        aperture_thicknesses=layer_thicknesses_saved,
+        aperture_config=aperture_config_saved,
+        use_roi=use_roi,
+    )
+    aperture_view.setup()
+    aperture_mask = aperture_view.return_aperture()
+    aperture_material_fraction = np.mean(aperture_mask, axis=0)
+    aperture_cut_pixels = []
+    for center in aperture_config_saved["apertures_center"]:
+        cut_y = int(
+            np.clip(
+                round(sample_shape_saved[1] / 2 + float(center[0]) / real_space_pixel_size_saved),
+                0,
+                sample_shape_saved[1] - 1,
+            )
+        )
+        cut_x = int(
+            np.clip(
+                round(sample_shape_saved[2] / 2 + float(center[1]) / real_space_pixel_size_saved),
+                0,
+                sample_shape_saved[2] - 1,
+            )
+        )
+        aperture_cut_pixels.append((cut_y, cut_x))
+    aperture_yz_cuts = np.stack(
+        [aperture_mask[:, :, cut_x] for _, cut_x in aperture_cut_pixels]
+    )
+    aperture_xz_cuts = np.stack(
+        [aperture_mask[:, cut_y, :] for cut_y, _ in aperture_cut_pixels]
+    )
 
 if False:
     print(f"Hologram shape: {cr_ideal.shape}")
@@ -598,73 +671,65 @@ for row_idx, (cr_d, cl_d, cmap, label, cbar_label) in enumerate(rows_spec):
 
 plt.show()
 
-if False:
 # ------------------------------------------------------------------
-    # Figure 2 — Aperture geometry sanity check
-    #
-    # aperture_material_fraction is the depth-averaged material mask:
-    #   1 = material remains through the stack
-    #   0 = fully drilled away through the stack
-    #
-    # aperture_yz_cuts and aperture_xz_cuts are material masks through every
-    # OH/RH centre. They should show the conical taper from wide top opening to
-    # the nominal bottom aperture.
-    # ------------------------------------------------------------------
-    nr_aperture_plots = min(len(aperture_types_saved), 4)
-    fig2, axes2 = plt.subplots(
-        2,
-        1 + nr_aperture_plots,
-        figsize=(4.0 * (1 + nr_aperture_plots), 7.5),
-        constrained_layout=True,
-    )
-    fig2.suptitle("Aperture geometry — average material and OH/RH cuts", fontsize=12)
+# Figure 2 — Aperture depth profile sanity check
+#
+# Rebuilds the aperture mask from metadata for plotting only. Nothing extra is
+# saved in the HDF5 file.
+# ------------------------------------------------------------------
+nr_aperture_plots = min(len(aperture_types_saved), 4)
+fig2, axes2 = plt.subplots(
+    2,
+    1 + nr_aperture_plots,
+    figsize=(4.0 * (1 + nr_aperture_plots), 7.5),
+    constrained_layout=True,
+)
+fig2.suptitle("Aperture depth profiles — OH/RH cuts", fontsize=12)
 
-    axes2[0, 0].axis("off")
-    m = axes2[1, 0].imshow(
-        aperture_material_fraction,
-        cmap="gray",
-        vmin=0,
-        vmax=1,
-        origin="upper",
-        aspect="equal",
-    )
-    axes2[1, 0].set_title("Depth-averaged material", fontsize=10)
-    axes2[1, 0].set_xlabel("x (px)")
-    axes2[1, 0].set_ylabel("y (px)")
-    fig2.colorbar(m, ax=axes2[1, 0], fraction=0.046, pad=0.04, label="material fraction")
+axes2[0, 0].axis("off")
+m = axes2[1, 0].imshow(
+    aperture_material_fraction,
+    cmap="gray",
+    vmin=0,
+    vmax=1,
+    origin="upper",
+    aspect="equal",
+)
+axes2[1, 0].set_title("Depth-averaged material", fontsize=10)
+axes2[1, 0].set_xlabel("x (px)")
+axes2[1, 0].set_ylabel("y (px)")
+fig2.colorbar(m, ax=axes2[1, 0], fraction=0.046, pad=0.04, label="material fraction")
 
-    for i in range(nr_aperture_plots):
-        label = f"{aperture_types_saved[i]} {i}"
-        for row, data, xlabel in (
-            (0, aperture_yz_cuts[i], "y (px)"),
-            (1, aperture_xz_cuts[i], "x (px)"),
-        ):
-            ax = axes2[row, i + 1]
-            title_axis = "Y-Z" if row == 0 else "X-Z"
-            m = ax.imshow(
-                data,
-                cmap="gray",
-                vmin=0,
-                vmax=1,
-                origin="upper",
-                aspect="auto",
-            )
-            ax.set_title(f"{title_axis} cut {label}", fontsize=10)
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel("layer index")
-            fig2.colorbar(
-                m, ax=ax, fraction=0.046, pad=0.04, label="material fraction"
-            )
+for i in range(nr_aperture_plots):
+    label = f"{aperture_types_saved[i]} {i}"
+    for row, data, xlabel in (
+        (0, aperture_yz_cuts[i], "y (px)"),
+        (1, aperture_xz_cuts[i], "x (px)"),
+    ):
+        ax = axes2[row, i + 1]
+        title_axis = "Y-Z" if row == 0 else "X-Z"
+        m = ax.imshow(
+            data,
+            cmap="gray",
+            vmin=0,
+            vmax=1,
+            origin="upper",
+            aspect="auto",
+        )
+        ax.set_title(f"{title_axis} cut {label}", fontsize=10)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("layer index")
+        fig2.colorbar(m, ax=ax, fraction=0.046, pad=0.04, label="material fraction")
 
-    if nr_aperture_plots == 0:
-        for ax in axes2.flat:
-            ax.axis("off")
-    else:
-        for j in range(nr_aperture_plots + 1, axes2.shape[1]):
-            axes2[0, j].axis("off")
-            axes2[1, j].axis("off")
+if nr_aperture_plots == 0:
+    for ax in axes2.flat:
+        ax.axis("off")
+else:
+    for j in range(nr_aperture_plots + 1, axes2.shape[1]):
+        axes2[0, j].axis("off")
+        axes2[1, j].axis("off")
 
-    plt.show()
+plt.show()
 
 # ------------------------------------------------------------------
 # Figure 3 — FTH reconstruction of the ideal CR−CL difference

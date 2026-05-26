@@ -19,6 +19,8 @@ def reconstruct(holo):
     return np.fft.fftshift(np.fft.fft2(np.fft.fftshift(holo)))
 
 class wavefronts:
+    _free_space_kernel_cache = {}
+
     def __init__(
         self,
         beam_parameters,
@@ -274,22 +276,90 @@ class wavefronts:
             E_out: (Ny, Nx, 2)
         """
         E_in = np.asarray(E_in, dtype=complex)
+        wavelength = float(wavelength)
+        dz = float(dz)
+        pixel_size = float(pixel_size)
+        if not np.isfinite(wavelength) or wavelength <= 0:
+            raise ValueError(f"wavelength must be finite and positive, got {wavelength}")
+        if not np.isfinite(pixel_size) or pixel_size <= 0:
+            raise ValueError(f"pixel_size must be finite and positive, got {pixel_size}")
+        if not np.isfinite(dz):
+            raise ValueError(f"dz must be finite, got {dz}")
+        if dz == 0:
+            return E_in.copy()
+
         Ny, Nx, _ = E_in.shape
+        H = self._free_space_kernel(Ny, Nx, wavelength, dz, pixel_size)
+
+        F = scp.fft.fft2(E_in, axes=(0, 1), workers=-1)
+        F *= H[..., None]
+        return scp.fft.ifft2(F, axes=(0, 1), workers=-1)
+
+    @classmethod
+    def _free_space_kernel(cls, Ny, Nx, wavelength, dz, pixel_size):
+        """Return a cached angular-spectrum propagator for one free-space step."""
+        key = (int(Ny), int(Nx), float(wavelength), float(dz), float(pixel_size))
+        H = cls._free_space_kernel_cache.get(key)
+        if H is not None:
+            return H
 
         k0 = 2 * np.pi / wavelength
-
         fx = np.fft.fftfreq(Nx, d=pixel_size)
         fy = np.fft.fftfreq(Ny, d=pixel_size)
         FX, FY = np.meshgrid(fx, fy, indexing="xy")
+        k_perp2 = (2 * np.pi * FX) ** 2 + (2 * np.pi * FY) ** 2
 
-        kx = 2 * np.pi * FX
-        ky = 2 * np.pi * FY
+        propagating = k_perp2 <= k0**2
+        kz_real = np.zeros_like(k_perp2, dtype=float)
+        kz_real[propagating] = np.sqrt(np.maximum(k0**2 - k_perp2[propagating], 0.0))
+        evanescent_decay = np.ones_like(k_perp2, dtype=float)
+        if np.any(~propagating):
+            alpha = np.sqrt(k_perp2[~propagating] - k0**2)
+            evanescent_decay[~propagating] = np.exp(-alpha * abs(dz))
+        H = np.asarray(
+            np.exp(-1j * kz_real * dz) * evanescent_decay,
+            dtype=np.complex128,
+        )
 
-        kz = np.sqrt((k0**2 - kx**2 - ky**2) + 0j)
-        H = np.exp(-1j * kz * dz)
+        cls._free_space_kernel_cache[key] = H
+        return H
+
+    def propagate_free_space_jones_260526(self,E_in, wavelength, dz, pixel_size):
+        """
+        Previous per-polarization free-space propagation implementation kept
+        for comparison/debugging. New code should use
+        ``propagate_free_space_jones``.
+        """
+        E_in = np.asarray(E_in, dtype=complex)
+        wavelength = float(wavelength)
+        dz = float(dz)
+        pixel_size = float(pixel_size)
+        if not np.isfinite(wavelength) or wavelength <= 0:
+            raise ValueError(f"wavelength must be finite and positive, got {wavelength}")
+        if not np.isfinite(pixel_size) or pixel_size <= 0:
+            raise ValueError(f"pixel_size must be finite and positive, got {pixel_size}")
+        if not np.isfinite(dz):
+            raise ValueError(f"dz must be finite, got {dz}")
+        if dz == 0:
+            return E_in.copy()
+
+        Ny, Nx, _ = E_in.shape
+        k0 = 2 * np.pi / wavelength
+        fx = np.fft.fftfreq(Nx, d=pixel_size)
+        fy = np.fft.fftfreq(Ny, d=pixel_size)
+        FX, FY = np.meshgrid(fx, fy, indexing="xy")
+        k_perp2 = (2 * np.pi * FX) ** 2 + (2 * np.pi * FY) ** 2
+
+        propagating = k_perp2 <= k0**2
+        kz_real = np.zeros_like(k_perp2, dtype=float)
+        kz_real[propagating] = np.sqrt(np.maximum(k0**2 - k_perp2[propagating], 0.0))
+        evanescent_decay = np.ones_like(k_perp2, dtype=float)
+        if np.any(~propagating):
+            alpha = np.sqrt(k_perp2[~propagating] - k0**2)
+            evanescent_decay[~propagating] = np.exp(-alpha * abs(dz))
+        H = np.exp(-1j * kz_real * dz) * evanescent_decay
 
         E_out = np.zeros_like(E_in, dtype=complex)
-
         for pol in range(2):
             F = np.fft.fft2(E_in[..., pol])
             F_prop = F * H

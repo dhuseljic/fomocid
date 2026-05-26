@@ -1181,7 +1181,7 @@ class SamplePropagatorConfig(_ConfigMixin):
                 "aperture_support_regions",
                 None,
             ),
-            propagate=False,
+            propagate=bool(self.propagator_config.get("propagate", False)),
         )
         return wavefront
 
