@@ -40,7 +40,7 @@ use_roi = True # set True to use a region of interest around the sample for the 
 dielectric_tensor_use_roi = True # set True to only compute the dielectric tensor in a region of interest around the sample, which can greatly speed up simulations with large free-space regions; set False to compute the full dense tensor stack, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
 dielectric_tensor_compact = True  # avoid allocating the full dense tensor stack
 propagate = True  # set True for multislice free-space propagation between layers
-multislice_propagation_roi = True  # if True, approximate free-space propagation only inside aperture ROIs
+multislice_propagation_roi = False  # if True, approximate free-space propagation only inside aperture ROIs
 multislice_propagation_roi_padding_px = 64  # enlarges ROI propagation boxes around apertures, especially useful for RHs
 propagation_padding_px = 128  # 0 disables padded free-space propagation
 propagation_padding_mode = "edge"  # "edge", "reflect", "symmetric", or "constant"
@@ -539,6 +539,17 @@ ranges = HologramPipelineRanges(
         "wire_bend": Uniform(0.0, 0.75e-3),
         "antialias": 4,
     },
+
+    artifacts_config = {
+        "counts_per_photon": Uniform(80,220),
+        "sigma_photon": Uniform(0.7,0.9),
+        "photon_n_classes": 1,
+        "photon_n_variants": 30,
+        "photon_kernel_size": 9,
+        "photon_irregularity": 2.0,
+        "regenerate_photon_kernels": True,
+    },
+
 
     # generating detector distances from reasonable ranges based on the stripe width and xray energy
     # you can also choose a uniform distribution or a fixed value
