@@ -110,6 +110,7 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         field[7:9, 8:10, 0] = 5.0
         field[7:9, 8:10, 1] = -2.0j
         region = (slice(6, 11), slice(7, 12))
+        roi_padding_px = 2
 
         wf = object.__new__(wavefronts)
         out = wf.propagate_free_space_jones_roi(
@@ -118,17 +119,28 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
             dz=4e-9,
             pixel_size=1e-9,
             aperture_support_regions=(region,),
+            roi_padding_px=roi_padding_px,
             padding_px=2,
             padding_mode="edge",
         )
 
         expected_outside = field * np.exp(-1j * 2 * np.pi / 1e-9 * 4e-9)
         outside = np.ones(field.shape[:2], dtype=bool)
-        outside[region] = False
+        padded_region = (
+            slice(region[0].start - roi_padding_px, region[0].stop + roi_padding_px),
+            slice(region[1].start - roi_padding_px, region[1].stop + roi_padding_px),
+        )
+        outside[padded_region] = False
 
         self.assertEqual(out.shape, field.shape)
         self.assertTrue(np.allclose(out[outside], expected_outside[outside]))
         self.assertTrue(np.all(np.isfinite(out)))
+
+    def test_pad_regions_clips_to_field_shape(self) -> None:
+        regions = ((slice(1, 4), slice(2, 5)),)
+        padded = wavefronts._pad_regions(regions, shape=(6, 7), padding_px=3)
+
+        self.assertEqual(padded, ((slice(0, 6), slice(0, 7)),))
 
     def test_roi_free_space_propagation_falls_back_without_regions(self) -> None:
         field = np.zeros((8, 9, 2), dtype=complex)

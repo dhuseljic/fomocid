@@ -208,6 +208,11 @@ class HologramPipelineConfig:
         angular-spectrum propagation only inside aperture ROI boxes and applying
         a plane-wave phase outside those boxes. If ``False``, use full-field
         free-space propagation. Default ``False``.
+    multislice_propagation_roi_padding_px : int
+        Extra pixels added around each aperture ROI box before approximate
+        ROI-only free-space propagation. This is separate from
+        ``propagation_padding_px``, which pads FFT boundaries inside each ROI
+        crop but does not enlarge the returned propagated area. Default ``0``.
     oversampling : int
         Oversampling factor relative to the Nyquist limit from the detector.
         ``real_space_pixel_size = detector_resolution / oversampling``.
@@ -322,6 +327,7 @@ class HologramPipelineConfig:
     propagation_absorber_strength: float = 0.0
     propagation_absorber_profile: str = "cosine"
     multislice_propagation_roi: bool = False
+    multislice_propagation_roi_padding_px: int = 0
 
     # Simulation grid
     oversampling: int = 2
@@ -1090,6 +1096,9 @@ class HologramPipeline:
                     "propagation_absorber_strength": cfg.propagation_absorber_strength,
                     "propagation_absorber_profile": cfg.propagation_absorber_profile,
                     "multislice_propagation_roi": cfg.multislice_propagation_roi,
+                    "multislice_propagation_roi_padding_px": (
+                        cfg.multislice_propagation_roi_padding_px
+                    ),
                 },
             )
             propagator_config.setup()
@@ -1128,6 +1137,9 @@ class HologramPipeline:
         metadata.update(xray_config.get_metadata(prefix="xray/"))
         metadata["propagation/multislice_roi"] = bool(
             cfg.multislice_propagation_roi
+        )
+        metadata["propagation/multislice_roi_padding_px"] = int(
+            cfg.multislice_propagation_roi_padding_px
         )
         metadata["detector/save_detected_no_beamstop"] = bool(
             cfg.save_detected_hologram_without_beamstop
@@ -1357,6 +1369,10 @@ class HologramPipeline:
         grp.create_dataset(
             "multislice_propagation_roi",
             data=bool(cfg.multislice_propagation_roi),
+        )
+        grp.create_dataset(
+            "multislice_propagation_roi_padding_px",
+            data=int(cfg.multislice_propagation_roi_padding_px),
         )
         grp.create_dataset("aperture_method", data=np.bytes_(str(cfg.aperture_method)))
         grp.create_dataset(

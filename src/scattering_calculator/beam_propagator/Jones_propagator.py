@@ -36,6 +36,7 @@ class wavefronts:
         propagation_absorber_strength=0.0,
         propagation_absorber_profile="cosine",
         multislice_propagation_roi=False,
+        multislice_propagation_roi_padding_px=0,
     ):
         self.E_in=E_in
         self.aperture_support_regions = aperture_support_regions
@@ -45,6 +46,9 @@ class wavefronts:
         self.propagation_absorber_strength = max(0.0, float(propagation_absorber_strength))
         self.propagation_absorber_profile = str(propagation_absorber_profile)
         self.multislice_propagation_roi = bool(multislice_propagation_roi)
+        self.multislice_propagation_roi_padding_px = max(
+            0, int(multislice_propagation_roi_padding_px)
+        )
         self.exit_wave = self.propagate_jones_multislice(
             E_in=self.E_in,
             eps_stack=eps_stack,
@@ -58,6 +62,9 @@ class wavefronts:
             propagation_absorber_strength=self.propagation_absorber_strength,
             propagation_absorber_profile=self.propagation_absorber_profile,
             multislice_propagation_roi=self.multislice_propagation_roi,
+            multislice_propagation_roi_padding_px=(
+                self.multislice_propagation_roi_padding_px
+            ),
         )
         self.detector_wave = image_transformator.Fraunhofer_propagation_jones(self.exit_wave)
         self.hologram = E_I(self.detector_wave)
@@ -81,6 +88,7 @@ class wavefronts:
         propagation_absorber_strength=0.0,
         propagation_absorber_profile="cosine",
         multislice_propagation_roi=False,
+        multislice_propagation_roi_padding_px=0,
     ):
         """
         Multislice propagation through a dielectric tensor stack.
@@ -139,6 +147,7 @@ class wavefronts:
                             dz,
                             pixel_size,
                             self.aperture_support_regions,
+                            roi_padding_px=multislice_propagation_roi_padding_px,
                             padding_px=propagation_padding_px,
                             padding_mode=propagation_padding_mode,
                             absorber_width_px=propagation_absorber_width_px,
@@ -424,6 +433,7 @@ class wavefronts:
         dz,
         pixel_size,
         aperture_support_regions,
+        roi_padding_px=0,
         padding_px=0,
         padding_mode="edge",
         absorber_width_px=0,
@@ -458,7 +468,12 @@ class wavefronts:
         k0 = 2 * np.pi / wavelength
         E_out = np.asarray(E_in * np.exp(-1j * k0 * dz), dtype=complex)
 
-        for region in aperture_support_regions:
+        roi_regions = self._pad_regions(
+            aperture_support_regions,
+            E_in.shape[:2],
+            roi_padding_px,
+        )
+        for region in roi_regions:
             region_key = (*region, slice(None))
             E_out[region_key] = self.propagate_free_space_jones(
                 E_in[region_key],
@@ -473,6 +488,24 @@ class wavefronts:
             )
 
         return E_out
+
+    @staticmethod
+    def _pad_regions(regions, shape, padding_px):
+        """Return y/x slice regions padded and clipped to ``shape``."""
+        pad = max(0, int(padding_px))
+        if pad == 0:
+            return tuple(regions)
+
+        ny, nx = shape
+        padded = []
+        for y_slice, x_slice in regions:
+            y0 = max(0, int(y_slice.start or 0) - pad)
+            y1 = min(ny, int(y_slice.stop) + pad)
+            x0 = max(0, int(x_slice.start or 0) - pad)
+            x1 = min(nx, int(x_slice.stop) + pad)
+            if y1 > y0 and x1 > x0:
+                padded.append((slice(y0, y1), slice(x0, x1)))
+        return tuple(padded)
 
     @classmethod
     def _normalize_padding_mode(cls, padding_mode):

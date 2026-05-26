@@ -100,6 +100,7 @@ the script:
 ```python
 propagate = True
 multislice_propagation_roi = False
+multislice_propagation_roi_padding_px = 64
 propagation_padding_px = 128
 propagation_padding_mode = "edge"
 propagation_absorber_width_px = 64
@@ -121,6 +122,13 @@ with the zero-spatial-frequency plane-wave phase. This can be much faster for
 large grids with small apertures, but it is approximate because true free-space
 propagation is nonlocal and diffracted light can move between ROI and non-ROI
 pixels.
+
+`multislice_propagation_roi_padding_px` enlarges each aperture ROI box before
+that approximate ROI-only free-space step. This is useful around small reference
+holes, where a tight support box can truncate nearby diffracted structure. It is
+separate from `propagation_padding_px`: ROI padding changes which pixels receive
+full local propagation, while propagation padding only pads the FFT calculation
+inside each crop and is cropped away afterward.
 
 The free-space propagator damps evanescent spatial frequencies to avoid
 unphysical exponential growth and caches repeated propagation kernels for
@@ -386,7 +394,8 @@ The `_pipeline_config/` group stores fixed top-level settings such as `recipe`,
 `oversampling`, detector shape, `propagate`, `propagation_padding_px`,
 `propagation_padding_mode`, `propagation_absorber_width_px`,
 `propagation_absorber_strength`, `propagation_absorber_profile`, and
-`multislice_propagation_roi`, and
+`multislice_propagation_roi`,
+`multislice_propagation_roi_padding_px`, and
 `save_detected_hologram_without_beamstop`.
 
 ## Reading The HDF5 File

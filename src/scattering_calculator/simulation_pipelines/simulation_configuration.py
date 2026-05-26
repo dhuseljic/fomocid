@@ -1236,6 +1236,11 @@ class SamplePropagatorConfig(_ConfigMixin):
             multislice_propagation_roi=bool(
                 self.propagator_config.get("multislice_propagation_roi", False)
             ),
+            multislice_propagation_roi_padding_px=int(
+                self.propagator_config.get(
+                    "multislice_propagation_roi_padding_px", 0
+                )
+            ),
         )
         return wavefront
 
