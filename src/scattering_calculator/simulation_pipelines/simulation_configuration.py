@@ -403,12 +403,30 @@ class DetectorConfig(_ConfigMixin):
             raise ValueError("No propagated wavefront assigned to detector layout.")
         return self.hologram_exp.hologram_detector
 
-    def return_detected_hologram(self) -> np.ndarray:
+    def return_detected_hologram(
+        self,
+        apply_beamstop_mask: bool = True,
+        apply_detector_threshold: bool = True,
+        store_no_beamstop: bool = False,
+    ) -> np.ndarray:
         """Return the simulated detected hologram as a 2-D array."""
-        self.hologram_exp.add_noise()
+        self.hologram_exp.add_noise(
+            apply_beamstop_mask=apply_beamstop_mask,
+            apply_detector_threshold=apply_detector_threshold,
+            store_no_beamstop=store_no_beamstop,
+        )
         if not hasattr(self, "hologram_exp"):
             raise ValueError("No hologram detected yet. Call detect_hologram() first.")
         return self.hologram_exp.hologram_exp
+
+    def return_detected_hologram_without_beamstop(self) -> np.ndarray:
+        """Return the no-beamstop detected hologram from the latest noise draw."""
+        if not hasattr(self.hologram_exp, "hologram_exp_no_beamstop"):
+            raise ValueError(
+                "No no-beamstop hologram stored. Call return_detected_hologram("
+                "store_no_beamstop=True) first."
+            )
+        return self.hologram_exp.hologram_exp_no_beamstop
 
     def visualize_beamstop(self) -> None:
         """Display the beamstop mask using the detector layout's visualizer."""
@@ -1312,6 +1330,7 @@ class HologramConfig(_ConfigMixin):
 
     ideal_holograms: dict = field(default_factory=dict)
     detected_holograms: dict = field(default_factory=dict)
+    detected_holograms_no_beamstop: dict = field(default_factory=dict)
     exit_waves: dict = field(default_factory=dict)
     detector_layout: detector.detector_layout | None = None
     sample_x: NDArray[np.float64] | None = None
@@ -1325,6 +1344,10 @@ class HologramConfig(_ConfigMixin):
         for store_name, store in (
             ("ideal_holograms", self.ideal_holograms),
             ("detected_holograms", self.detected_holograms),
+            (
+                "detected_holograms_no_beamstop",
+                self.detected_holograms_no_beamstop,
+            ),
             ("exit_waves", self.exit_waves),
         ):
             for helicity, arr in store.items():
@@ -1339,15 +1362,21 @@ class HologramConfig(_ConfigMixin):
                         f"got shape {arr.shape}."
                     )
 
-    def _get_store(self, source: Literal["ideal", "detected", "exit_wave"]) -> dict:
+    def _get_store(
+        self,
+        source: Literal["ideal", "detected", "detected_no_beamstop", "exit_wave"],
+    ) -> dict:
         if source == "ideal":
             return self.ideal_holograms
         if source == "detected":
             return self.detected_holograms
+        if source == "detected_no_beamstop":
+            return self.detected_holograms_no_beamstop
         if source == "exit_wave":
             return self.exit_waves
         raise ValueError(
-            f"Unknown source {source!r}. Must be 'ideal', 'detected', or 'exit_wave'."
+            f"Unknown source {source!r}. Must be 'ideal', 'detected', "
+            "'detected_no_beamstop', or 'exit_wave'."
         )
 
     @property
@@ -1409,7 +1438,7 @@ class HologramConfig(_ConfigMixin):
     def add_holograms(
         self,
         holograms: dict,
-        source: Literal["ideal", "detected"] = "detected",
+        source: Literal["ideal", "detected", "detected_no_beamstop"] = "detected",
     ) -> None:
         """Stack new holograms onto the existing store for each helicity.
 
@@ -1418,7 +1447,7 @@ class HologramConfig(_ConfigMixin):
         holograms : dict[str, ndarray]
             Mapping of helicity → array. Each array may be 2-D ``(Ny, Nx)``
             or 3-D ``(N_frames, Ny, Nx)``.
-        source : {"ideal", "detected"}
+        source : {"ideal", "detected", "detected_no_beamstop"}
             Which hologram store to append to.
         """
         self._stack_into(self._get_store(source), holograms)
@@ -1742,7 +1771,10 @@ class HologramConfig(_ConfigMixin):
     def to_dict(
         self,
         helicities: list[str] | None = None,
-        sources: list[Literal["exit_wave", "ideal", "detected"]] | None = None,
+        sources: list[
+            Literal["exit_wave", "ideal", "detected", "detected_no_beamstop"]
+        ]
+        | None = None,
     ) -> dict[str, dict[str, np.ndarray]]:
         """Return exit waves, ideal holograms, and detected holograms grouped by helicity.
 
@@ -1751,7 +1783,7 @@ class HologramConfig(_ConfigMixin):
         helicities : list of str or None
             Helicity keys to include, e.g. ``["CR", "CL"]``.
             If ``None`` (default), all available helicities are returned.
-        sources : list of {"exit_wave", "ideal", "detected"} or None
+        sources : list of {"exit_wave", "ideal", "detected", "detected_no_beamstop"} or None
             Which data stores to include. If ``None`` (default), all three are returned.
 
         Returns
@@ -1765,6 +1797,7 @@ class HologramConfig(_ConfigMixin):
             "exit_wave": self.exit_waves,
             "ideal": self.ideal_holograms,
             "detected": self.detected_holograms,
+            "detected_no_beamstop": self.detected_holograms_no_beamstop,
         }
         active_sources = set(sources) if sources is not None else set(_store_map)
 

@@ -96,7 +96,9 @@ class wavefronts:
             Output field after all slices
         """
         E_in = np.asarray(E_in, dtype=complex)
-        eps_stack = np.asarray(eps_stack, dtype=complex)
+        compact_eps_stack = self._is_compact_eps_stack(eps_stack)
+        if not compact_eps_stack:
+            eps_stack = np.asarray(eps_stack, dtype=complex)
 
         if E_in.ndim != 3 or E_in.shape[-1] != 2:
             raise ValueError("E_in must have shape (Ny, Nx, 2)")
@@ -109,16 +111,19 @@ class wavefronts:
 
         for iz in range(Nz):
             #print(iz)
-            eps_slice = eps_stack[iz]
             dz = thicknesses[iz]
             # Local Jones interaction
-            E_in = self.propagate_jones_single_slice(
-                E_in,
-                eps_slice,
-                wavelength,
-                dz,
-                aperture_support_regions=self.aperture_support_regions,
-            )
+            if compact_eps_stack:
+                E_in = self.apply_compact_eps_slice(E_in, eps_stack, iz, wavelength, dz)
+            else:
+                eps_slice = eps_stack[iz]
+                E_in = self.propagate_jones_single_slice(
+                    E_in,
+                    eps_slice,
+                    wavelength,
+                    dz,
+                    aperture_support_regions=self.aperture_support_regions,
+                )
 
             # Free-space propagation between slices
             if propagate:
@@ -136,6 +141,14 @@ class wavefronts:
                     )
 
         return E_in
+
+    @staticmethod
+    def _is_compact_eps_stack(eps_stack):
+        return (
+            hasattr(eps_stack, "base_diagonal")
+            and hasattr(eps_stack, "patches")
+            and hasattr(eps_stack, "shape")
+        )
 
 
     # ============================================================
@@ -511,6 +524,26 @@ class wavefronts:
             F_prop = F * H
             E_out[..., pol] = np.fft.ifft2(F_prop)
 
+        return E_out
+
+    def apply_compact_eps_slice(self, E, eps_stack, layer_idx, wavelength, thickness):
+        """Apply one compact dielectric layer without materializing the full slice."""
+        phase = -1j * (2 * np.pi / wavelength) * thickness
+        base_a, base_d = eps_stack.base_diagonal[layer_idx]
+
+        E_out = np.empty_like(E, dtype=complex)
+        E_out[..., 0] = np.exp(phase * np.sqrt(base_a)) * E[..., 0]
+        E_out[..., 1] = np.exp(phase * np.sqrt(base_d)) * E[..., 1]
+
+        for region, eps_patch in eps_stack.patches[layer_idx]:
+            region_key = (*region, slice(None))
+            E_out[region_key] = self.apply_eps_slice(
+                E[region_key],
+                eps_patch,
+                wavelength,
+                thickness,
+                aperture_support_regions=None,
+            )
         return E_out
 
 

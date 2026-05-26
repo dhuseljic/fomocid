@@ -111,6 +111,11 @@ class HologramPipelineConfig:
         Optional keyword arguments forwarded to the beamstop generator. If
         ``"radius"`` is missing, no beamstop or wire is created. Beamstop
         lengths, including ``"sigma"``, are in metres.
+    save_detected_hologram_without_beamstop : bool
+        If ``True``, save an additional detected hologram source named
+        ``detected_no_beamstop``. It is produced by the same detector-noise
+        pipeline, but skips the beamstop mask and detector threshold cap before
+        frame averaging. Default ``False``.
     aperture_method : {"FTH_circular"} or None
         Holography mask layout. ``None`` → fully transparent.
     aperture_types : list of {"OH", "RH"}
@@ -167,6 +172,11 @@ class HologramPipelineConfig:
         local aperture bounding boxes. If ``False``, use the full aperture
         support mask, matching the pre-ROI tensor path for timing comparisons.
         Default ``True``.
+    dielectric_tensor_compact : bool
+        If ``True``, keep the dielectric tensor as constant per-layer diagonal
+        terms plus aperture ROI patches and evaluate those patches during Jones
+        propagation. This avoids allocating the full dense tensor stack. Default
+        ``True``.
     propagate : bool
         If ``True``, propagate the Jones field through free space between
         material layers using each layer thickness and the sample pixel size.
@@ -249,6 +259,7 @@ class HologramPipelineConfig:
     beamstop_method: str | None = "circular"
     beamstop_distance: float = 0.001  # m
     beamstop_config: dict = field(default_factory=dict)
+    save_detected_hologram_without_beamstop: bool = False
 
     # FTH holography mask
     aperture_method: str | None = "FTH_circular"
@@ -298,6 +309,7 @@ class HologramPipelineConfig:
     use_roi: bool = True
     magnetic_pattern_use_roi: bool = True
     dielectric_tensor_use_roi: bool = True
+    dielectric_tensor_compact: bool = True
     propagate: bool = False
     propagation_padding_px: int = 0
     propagation_padding_mode: str = "edge"
@@ -1016,11 +1028,13 @@ class HologramPipeline:
         t_stage = mark_stage("front aperture", t_stage)
 
         sample_config.sample_structure.calculate_final_dielectric_tensor(
-            use_aperture_roi=cfg.use_roi and cfg.dielectric_tensor_use_roi
+            use_aperture_roi=cfg.use_roi and cfg.dielectric_tensor_use_roi,
+            compact=cfg.dielectric_tensor_compact,
         )
         metadata["dielectric_tensor/use_roi"] = bool(
             cfg.use_roi and cfg.dielectric_tensor_use_roi
         )
+        metadata["dielectric_tensor/compact"] = bool(cfg.dielectric_tensor_compact)
         t_stage = mark_stage("dielectric tensor", t_stage)
 
         # ---- Illumination config -----------------------------------------
@@ -1085,12 +1099,29 @@ class HologramPipeline:
                 {pol: detector_config.return_ideal_hologram()}, source="ideal"
             )
             hologram_config.add_holograms(
-                {pol: detector_config.return_detected_hologram()}, source="detected"
+                {
+                    pol: detector_config.return_detected_hologram(
+                        store_no_beamstop=(
+                            cfg.save_detected_hologram_without_beamstop
+                        )
+                    )
+                },
+                source="detected",
             )
+            if cfg.save_detected_hologram_without_beamstop:
+                hologram_config.add_holograms(
+                    {
+                        pol: detector_config.return_detected_hologram_without_beamstop()
+                    },
+                    source="detected_no_beamstop",
+                )
             t_stage = mark_stage(f"{pol} detector noise", t_stage)
 
         metadata.update(propagator_config.get_metadata())
         metadata.update(xray_config.get_metadata(prefix="xray/"))
+        metadata["detector/save_detected_no_beamstop"] = bool(
+            cfg.save_detected_hologram_without_beamstop
+        )
 
         # ---- Write to HDF5 ----------------------------------------------
         self._write_sample(
@@ -1142,7 +1173,12 @@ class HologramPipeline:
         # Hologram arrays — same structure as test.ipynb save_data dict
         save_arrays = hologram_config.to_dict(
             helicities=["CR", "CL"],
-            sources=["exit_wave", "ideal", "detected"],
+            sources=[
+                "exit_wave",
+                "ideal",
+                "detected",
+                "detected_no_beamstop",
+            ],
         )
         for helicity, per_source in save_arrays.items():
             for source, arr in per_source.items():
@@ -1314,6 +1350,10 @@ class HologramPipeline:
         )
         grp.create_dataset("beamstop_method", data=np.bytes_(str(cfg.beamstop_method)))
         grp.create_dataset("beamstop_distance_m", data=cfg.beamstop_distance)
+        grp.create_dataset(
+            "save_detected_hologram_without_beamstop",
+            data=bool(cfg.save_detected_hologram_without_beamstop),
+        )
         beamstop_cfg_grp = grp.create_group("beamstop_config")
         for key, value in cfg.beamstop_config.items():
             if isinstance(value, str):

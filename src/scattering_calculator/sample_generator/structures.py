@@ -20,6 +20,41 @@ from typing import List, Tuple
 
 
 @dataclass(frozen=True)
+class CompactDielectricTensorStack:
+    """Layer stack represented by constant diagonals plus aperture ROI patches."""
+
+    shape: tuple[int, int, int, int, int]
+    base_diagonal: NDArray[np.complex128]
+    patches: tuple[tuple[tuple[tuple[slice, slice], NDArray[np.complex128]], ...], ...]
+    aperture_support_regions: tuple[tuple[slice, slice], ...] | None = None
+
+    @property
+    def ndim(self) -> int:
+        return 5
+
+    @property
+    def dtype(self) -> np.dtype:
+        return self.base_diagonal.dtype
+
+    def __len__(self) -> int:
+        return self.shape[0]
+
+    def materialize_layer(self, layer_idx: int) -> NDArray[np.complex128]:
+        """Return one dense ``(Ny, Nx, 2, 2)`` dielectric tensor slice."""
+        _, ny, nx, _, _ = self.shape
+        out = np.zeros((ny, nx, 2, 2), dtype=self.dtype)
+        out[..., 0, 0] = self.base_diagonal[layer_idx, 0]
+        out[..., 1, 1] = self.base_diagonal[layer_idx, 1]
+        for region, eps_patch in self.patches[layer_idx]:
+            out[region] = eps_patch
+        return out
+
+    def materialize(self) -> NDArray[np.complex128]:
+        """Return the full dense ``(Nz, Ny, Nx, 2, 2)`` tensor stack."""
+        return np.stack([self.materialize_layer(iz) for iz in range(len(self))])
+
+
+@dataclass(frozen=True)
 class Layer:
     """A single material layer in a multilayer stack.
 
@@ -723,7 +758,11 @@ class Structure:
 
         return eps_eff
 
-    def calculate_final_dielectric_tensor(self, use_aperture_roi: bool = True) -> None:
+    def calculate_final_dielectric_tensor(
+        self,
+        use_aperture_roi: bool = True,
+        compact: bool = False,
+    ) -> None:
         """Build the spatially resolved dielectric tensor for propagation.
 
         The base tensor is the charge/isotropic contribution for each layer.
@@ -745,11 +784,31 @@ class Structure:
             ``False``, use the full 2-D aperture-support mask, matching the
             pre-ROI optimization path for timing comparisons.
 
+        compact : bool
+            If ``True``, store a compact stack made of constant per-layer
+            diagonal terms plus dense aperture ROI patches. This avoids
+            allocating the full ``(Nz, Ny, Nx, 2, 2)`` tensor during multislice
+            propagation.
+
         Returns
         -------
         ndarray of shape (Nz,Ny,Nx, 2, 2)
             Final dielectric tensor stored in ``self.final_dielectric_tensor``.
         """
+
+        compact_stack = self.calculate_compact_dielectric_tensor(
+            use_aperture_roi=use_aperture_roi
+        )
+        if compact:
+            self.final_dielectric_tensor = compact_stack
+            return
+        self.final_dielectric_tensor = compact_stack.materialize()
+
+    def calculate_compact_dielectric_tensor(
+        self,
+        use_aperture_roi: bool = True,
+    ) -> CompactDielectricTensorStack:
+        """Build a compact dielectric tensor stack for lazy propagation."""
 
         mask = self.mask
         m = self.magnetization
@@ -762,9 +821,10 @@ class Structure:
         eps_mz = dt[:, 1]  # (Nz, 2, 2)
         eps_xy = dt[:, 2]  # (Nz, 2, 2)
 
-        out = np.zeros((*mask.shape, 2, 2), dtype=dt.dtype)
-        out[..., 0, 0] = eps0[:, None, None, 0, 0]
-        out[..., 1, 1] = eps0[:, None, None, 1, 1]
+        base_diagonal = np.stack(
+            (eps0[:, 0, 0], eps0[:, 1, 1]),
+            axis=-1,
+        ).astype(dt.dtype, copy=False)
 
         # Per-layer checks skip materials with no magnetic tensor contribution.
         tol = 1e-14
@@ -792,39 +852,58 @@ class Structure:
         def _region_active(layer_idx: int, region: tuple[slice, slice]) -> np.ndarray:
             return aperture_support[region] & (mask[(layer_idx, *region)] > tol)
 
-        for layer_idx in np.flatnonzero(has_mz):
+        patches: list[list[tuple[tuple[slice, slice], NDArray[np.complex128]]]] = [
+            [] for _ in range(mask.shape[0])
+        ]
+
+        for layer_idx in range(mask.shape[0]):
             for region in support_objects:
-                active_pixels = _region_active(layer_idx, region)
-                if not np.any(active_pixels):
+                region_support = aperture_support[region]
+                region_mask = mask[(layer_idx, *region)]
+                needs_patch = np.any(region_support & (np.abs(region_mask - 1.0) > tol))
+                if has_mz[layer_idx] or has_xy[layer_idx]:
+                    needs_patch = needs_patch or np.any(_region_active(layer_idx, region))
+                if not needs_patch:
                     continue
-                layer_region = (layer_idx, *region)
-                out[layer_region][active_pixels] += (
-                    m[layer_region + (2,)][active_pixels, None, None]
-                    * eps_mz[layer_idx, None, :, :]
-                )
 
-        for layer_idx in np.flatnonzero(has_xy):
-            for region in support_objects:
+                region_shape = region_mask.shape
+                eps_patch = np.zeros((*region_shape, 2, 2), dtype=dt.dtype)
+                eps_patch[..., 0, 0] = base_diagonal[layer_idx, 0]
+                eps_patch[..., 1, 1] = base_diagonal[layer_idx, 1]
+
                 active_pixels = _region_active(layer_idx, region)
-                if not np.any(active_pixels):
-                    continue
                 layer_region = (layer_idx, *region)
-                mx = m[layer_region + (0,)][active_pixels]
-                my = m[layer_region + (1,)][active_pixels]
-                dxy = np.abs(mx) ** 2 - np.abs(my) ** 2
-                out[layer_region][active_pixels] += (
-                    dxy[:, None, None] * eps_xy[layer_idx, None, :, :]
-                )
 
-        for region in support_objects:
-            region_mask = mask[(slice(None), *region)]
-            out_region = out[(slice(None), *region)]
-            out_region *= region_mask[..., None, None]
-            vac = 1.0 - region_mask
-            out_region[..., 0, 0] += vac
-            out_region[..., 1, 1] += vac
+                if has_mz[layer_idx] and np.any(active_pixels):
+                    eps_patch[active_pixels] += (
+                        m[layer_region + (2,)][active_pixels, None, None]
+                        * eps_mz[layer_idx, None, :, :]
+                    )
 
-        self.final_dielectric_tensor = out
+                if has_xy[layer_idx] and np.any(active_pixels):
+                    mx = m[layer_region + (0,)][active_pixels]
+                    my = m[layer_region + (1,)][active_pixels]
+                    dxy = np.abs(mx) ** 2 - np.abs(my) ** 2
+                    eps_patch[active_pixels] += (
+                        dxy[:, None, None] * eps_xy[layer_idx, None, :, :]
+                    )
+
+                eps_patch *= region_mask[..., None, None]
+                vac = 1.0 - region_mask
+                eps_patch[..., 0, 0] += vac
+                eps_patch[..., 1, 1] += vac
+                patches[layer_idx].append((region, eps_patch))
+
+        return CompactDielectricTensorStack(
+            shape=(*mask.shape, 2, 2),
+            base_diagonal=base_diagonal,
+            patches=tuple(tuple(layer_patches) for layer_patches in patches),
+            aperture_support_regions=(
+                tuple(self.aperture_support_regions)
+                if self.aperture_support_regions is not None
+                else None
+            ),
+        )
 
 
 

@@ -508,7 +508,12 @@ class detector_hologram:
             hologram_shape[0] * real_space_resolution / coherence_length_x
         )
 
-    def add_noise(self):
+    def add_noise(
+        self,
+        apply_beamstop_mask: bool = True,
+        apply_detector_threshold: bool = True,
+        store_no_beamstop: bool = False,
+    ):
         """
         Given the hologram, the function simulates the holograms introducing drift,
          coherence effects and Poisson noise
@@ -526,7 +531,9 @@ class detector_hologram:
         # 0. we start with holo, the FFT of the exit wave, hence the distribution of photons (or counts) at a certain point in the detector for a single image
         rng = np.random.default_rng(getattr(self, "noise_seed", None))
         holo = np.array(self.hologram_detector, dtype=float, copy=True)
-        holo *= self.exposure_time * self.quantum_efficiency
+        if self.max_counts_per_image is None:
+            holo *= self.exposure_time * self.quantum_efficiency
+
         npx, npy = holo.shape
         self._set_coherence_sigmas(holo.shape)
 
@@ -603,30 +610,59 @@ class detector_hologram:
             )
 
         # 7. convert photons back to detector counts
-        holo = photon_counts.astype(float) * self.counts_per_photon
+        detected_counts = photon_counts.astype(float) * self.counts_per_photon
 
-        # 8. apply beamstop mask to shadow
-        holo *= 1.0 - self.beamstop.beamstop
-
-        # 9. add gaussian readout noise from detector
+        # 9. generate gaussian readout noise from detector once, then reuse it
+        # for any requested output variants from this same detector realization.
+        readout_noise = 0.0
         if self.readout_noise_average > 0 or self.readout_noise_sigma > 0:
-            holo += np.random.normal(
+            readout_noise = rng.normal(
                 self.readout_noise_average * self.number_frames,
                 self.readout_noise_sigma * np.sqrt(self.number_frames),
-                holo.shape,
+                detected_counts.shape,
             )
 
-        # 10. round to integers and cap image at thresholding camera value
-        holo = np.round(holo, 0)
-        holo = np.minimum(holo, self.number_frames * self.detector_threshold)
+        def _finalize_variant(
+            source_counts: np.ndarray,
+            *,
+            use_beamstop: bool,
+            use_threshold: bool,
+        ) -> np.ndarray:
+            holo_variant = np.array(source_counts, dtype=float, copy=True)
 
-        # 11. divide by frame number: it is an average
-        holo /= self.number_frames
+            # 8. apply beamstop mask to shadow
+            if use_beamstop:
+                holo_variant *= 1.0 - self.beamstop.beamstop
 
-        # 12. just making sure the final product is positive
-        holo[holo < 0] = 0
+            # 9. add gaussian readout noise from detector
+            holo_variant += readout_noise
 
-        self.hologram_exp = holo
+            # 10. round to integers and optionally cap image at thresholding camera value
+            holo_variant = np.round(holo_variant, 0)
+            if use_threshold:
+                holo_variant = np.minimum(
+                    holo_variant,
+                    self.number_frames * self.detector_threshold,
+                )
+
+            # 11. divide by frame number: it is an average
+            holo_variant /= self.number_frames
+
+            # 12. just making sure the final product is positive
+            holo_variant[holo_variant < 0] = 0
+            return holo_variant
+
+        self.hologram_exp = _finalize_variant(
+            detected_counts,
+            use_beamstop=apply_beamstop_mask,
+            use_threshold=apply_detector_threshold,
+        )
+        if store_no_beamstop:
+            self.hologram_exp_no_beamstop = _finalize_variant(
+                detected_counts,
+                use_beamstop=False,
+                use_threshold=False,
+            )
 
     def gnomonic_projection(self) -> NDArray[np.float64]:
         """Apply gnomonic projection to the hologram to correct for curvature of the Ewald sphere.

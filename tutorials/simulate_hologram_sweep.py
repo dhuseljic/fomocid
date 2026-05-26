@@ -35,15 +35,17 @@ oversampling=2
 # ===================
 output_folder = DATA_ROOT / "Data" / "hologram_sweep"
 output_path = output_folder / "simulation_sweep.h5"
-pipeline_random_seed = None  # set to None for non-reproducible random sweeps
-use_roi = True
-dielectric_tensor_use_roi = True
+pipeline_random_seed = 0  # set to None for non-reproducible random sweeps
+use_roi = True # set True to use a region of interest around the sample for the whole pipeline, which can greatly speed up simulations with large free-space regions; set False to use the full grid, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
+dielectric_tensor_use_roi = True # set True to only compute the dielectric tensor in a region of interest around the sample, which can greatly speed up simulations with large free-space regions; set False to compute the full dense tensor stack, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
+dielectric_tensor_compact = True  # avoid allocating the full dense tensor stack
 propagate = True  # set True for multislice free-space propagation between layers
 propagation_padding_px = 128  # 0 disables padded free-space propagation
 propagation_padding_mode = "edge"  # "edge", "reflect", "symmetric", or "constant"
 propagation_absorber_width_px = 64  # 0 disables edge absorption
 propagation_absorber_strength = 6.0  # larger values damp padded-edge wraparound more
 propagation_absorber_profile = "cosine"  # "cosine", "smoothstep", "quadratic", or "linear"
+save_detected_hologram_without_beamstop = True # set True to save an extra detected hologram without the beamstop shadow (for supervised learning or beamstop ablation studies)
 
 os.makedirs(output_folder, exist_ok=True)
 
@@ -228,6 +230,7 @@ config = HologramPipelineConfig(
     beamstop_method=beamstop_method,
     beamstop_distance=beamstop_distance,
     beamstop_config=beamstop_config,
+    save_detected_hologram_without_beamstop=save_detected_hologram_without_beamstop,
     # FTH holography mask
     aperture_method="FTH_circular",
     aperture_types=aperture_types,
@@ -251,6 +254,7 @@ config = HologramPipelineConfig(
     use_roi=use_roi,
     magnetic_pattern_use_roi=True,
     dielectric_tensor_use_roi=dielectric_tensor_use_roi,
+    dielectric_tensor_compact=dielectric_tensor_compact,
     propagate=propagate,
     propagation_padding_px=propagation_padding_px,
     propagation_padding_mode=propagation_padding_mode,
@@ -571,11 +575,16 @@ pipeline.run()
 #
 #   CR/ideal       — ideal (noise-free) hologram for circular-right polarisation
 #   CR/detected    — detected (noisy) hologram
+#   CR/detected_no_beamstop — optional detected hologram without beamstop shadow
 #   CR/exit_wave   — complex scalar exit wavefield
 #   CL/...         — same for circular-left
 #   beamstop_mask  — 2D beamstop mask
 #   metadata/      — all physical parameters used for this run
 import matplotlib.pyplot as plt
+
+PLOT_FIGSIZE_MAIN = (11, 8)
+PLOT_FIGSIZE_APERTURE = (11, 6.5)
+PLOT_FIGSIZE_RECONSTRUCTION = (9, 7)
 
 with h5py.File(output_path, "r") as h5:
     grp = h5["00000"]
@@ -715,7 +724,7 @@ rows_spec = [
     (cr_detected, cl_detected, "viridis", "Detected hologram", "counts"),
 ]
 
-fig1, axes1 = plt.subplots(4, 3, figsize=(13, 17), constrained_layout=True)
+fig1, axes1 = plt.subplots(4, 3, figsize=PLOT_FIGSIZE_MAIN, constrained_layout=True)
 fig1.suptitle("Simulation 00000 — CR, CL, CR−CL difference", fontsize=13)
 
 for row_idx, (cr_d, cl_d, cmap, label, cbar_label) in enumerate(rows_spec):
@@ -738,7 +747,14 @@ for row_idx, (cr_d, cl_d, cmap, label, cbar_label) in enumerate(rows_spec):
 
     for col_idx, (img, title, lo, hi, cm) in enumerate(panels):
         ax = axes1[row_idx, col_idx]
-        m = ax.imshow(img, cmap=cm, vmin=lo, vmax=hi, origin="upper")
+        m = ax.imshow(
+            img,
+            cmap=cm,
+            vmin=lo,
+            vmax=hi,
+            origin="upper",
+            interpolation="none",
+        )
         ax.set_title(title, fontsize=10)
         ax.set_xlabel("x (px)")
         ax.set_ylabel("y (px)")
@@ -756,7 +772,7 @@ nr_aperture_plots = min(len(aperture_types_saved), 4)
 fig2, axes2 = plt.subplots(
     2,
     1 + nr_aperture_plots,
-    figsize=(4.0 * (1 + nr_aperture_plots), 7.5),
+    figsize=PLOT_FIGSIZE_APERTURE,
     constrained_layout=True,
 )
 fig2.suptitle("Aperture depth profiles — OH/RH cuts", fontsize=12)
@@ -769,6 +785,7 @@ m = axes2[1, 0].imshow(
     vmax=1,
     origin="upper",
     aspect="equal",
+    interpolation="none",
 )
 axes2[1, 0].set_title("Depth-averaged material", fontsize=10)
 axes2[1, 0].set_xlabel("x (px)")
@@ -790,6 +807,7 @@ for i in range(nr_aperture_plots):
             vmax=1,
             origin="upper",
             aspect="auto",
+            interpolation="none",
         )
         ax.set_title(f"{title_axis} cut {label}", fontsize=10)
         ax.set_xlabel(xlabel)
@@ -823,7 +841,12 @@ rec_panels = [
     (np.imag(rec),  "Imaginary",  "gray",    None,   None,   "Imag part"),
 ]
 
-fig3, axes3 = plt.subplots(2, 2, figsize=(10, 9), constrained_layout=True)
+fig3, axes3 = plt.subplots(
+    2,
+    2,
+    figsize=PLOT_FIGSIZE_RECONSTRUCTION,
+    constrained_layout=True,
+)
 fig3.suptitle(
     "FTH reconstruction — ideal CR−CL difference (simulation 00000)", fontsize=12
 )
@@ -831,7 +854,14 @@ fig3.suptitle(
 for ax, (data, title, cmap, vmin, vmax, cbar_label) in zip(axes3.flat, rec_panels):
     if vmin is None:
         vmin, vmax = np.nanpercentile(data, [0.1, 99.9])
-    m = ax.imshow(data, cmap=cmap, vmin=vmin, vmax=vmax, origin="upper")
+    m = ax.imshow(
+        data,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        origin="upper",
+        interpolation="none",
+    )
     ax.set_title(title, fontsize=10)
     ax.set_xlabel("x (px)")
     ax.set_ylabel("y (px)")
