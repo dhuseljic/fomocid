@@ -151,17 +151,33 @@ else:
 # --- FTH holography mask ---
 aperture_types = ["OH", "RH", "RH"]
 aperture_radii = [60e-9, 6e-9, 4e-9]  # m
-oh_boundary_roughness = 20e-9  # m, target OH boundary fluctuation scale
+aperture_roughness_amplitude = 10e-9  # m, target boundary fluctuation scale
+aperture_roughness_period = 10e-9  # m, target boundary fluctuation period
 aperture_centers = [(0, 0), (0.2e-6, -0.15e-6), (0.15e-6, 0.15e-6)]  # m (y, x)
 aperture_sigmas = [1e-9, 2e-9, 2e-9]  # m
 aperture_angles = [0.0, 0.0, 0.0]  # rad
 aperture_ellipticities = [1.0, 1.0, 1.0]  # y/x axis ratio
-aperture_roughnesses = [
-    min(0.08, oh_boundary_roughness / aperture_radii[0]),
-    0.04,
-    0.04,
-]
-aperture_roughness_modes = [(3, 9), (3, 9), (3, 9)]
+
+
+def aperture_roughness_from_length(radius, amplitude=10e-9, period=10e-9):
+    """Convert physical roughness amplitude/period to relative Fourier settings."""
+    relative_amplitude = min(0.08, float(amplitude) / float(radius))
+    center_mode = max(1, int(round(2.0 * np.pi * float(radius) / float(period))))
+    return relative_amplitude, (max(1, center_mode - 2), center_mode + 2)
+
+
+aperture_roughnesses, aperture_roughness_modes = zip(
+    *[
+        aperture_roughness_from_length(
+            radius,
+            amplitude=aperture_roughness_amplitude,
+            period=aperture_roughness_period,
+        )
+        for radius in aperture_radii
+    ]
+)
+aperture_roughnesses = list(aperture_roughnesses)
+aperture_roughness_modes = list(aperture_roughness_modes)
 aperture_seeds = [-1, -1, -1]
 aperture_top_radius_factors = [2.0, 2.0, 2.0]
 
@@ -328,7 +344,6 @@ def random_aperture_config(params):
     aperture_centers = [(0.0, 0.0)]
     aperture_angles = [0.0]
     aperture_ellipticities = [1.0]
-    aperture_roughness_modes = [(3, 9)]
     aperture_seeds = [int(np.random.randint(0, 2**31 - 1))]
     aperture_top_radius_factors = [2.0]
 
@@ -343,51 +358,89 @@ def random_aperture_config(params):
 
     aperture_radii = [oh_radius]
     aperture_sigmas = [Uniform(10e-9, 20e-9).sample()]
-    aperture_roughnesses = [min(0.08, 20e-9 / oh_radius)]
+    oh_roughness, oh_roughness_modes = aperture_roughness_from_length(
+        oh_radius,
+        amplitude=aperture_roughness_amplitude,
+        period=aperture_roughness_period,
+    )
+    aperture_roughnesses = [oh_roughness]
+    aperture_roughness_modes = [oh_roughness_modes]
 
     # Add 1 to 5 reference holes. Each RH has its own radius, edge sigma, and
     # random position inside the FOV but outside 2 * OH_radius from the origin.
     n_reference_holes = np.random.randint(1, 6)
     aperture_top_radius_RH = 200e-9
-    #the ref oles should be at least 3 times the OH radius
-    #away from the center to avoid autocorrelation overlap. also avoid cone overlap by ensuring the RH top radius doesn't overlap with the OH top radius at the center, which is the worst case for cone overlap.
-    min_center_distance = 3 * oh_radius
-    min_center_distance = np.maximum( min_center_distance, aperture_top_radius_RH+oh_radius* aperture_top_radius_factors[0])
+    oh_top_radius = oh_radius * aperture_top_radius_factors[0]
+    # The reference holes should be far from the OH autocorrelation and should
+    # not overlap the OH or each other at the widest/top aperture opening.
+    min_oh_distance = max(3 * oh_radius, aperture_top_radius_RH + oh_top_radius)
     # maximum distance from the center is set by the FOV, but we also want to
     center_half_width = np.abs(fov_xy / 2 - oh_radius)
     center_half_width = np.minimum(center_half_width,6*oh_radius)
+    placed_reference_holes = []
 
     for _ in range(n_reference_holes):
-        aperture_types.append("RH")
-
         rh_radius = Uniform(5e-9, 75e-9).sample()
-        aperture_radii.append(rh_radius)
-        aperture_angles.append(Uniform(0.0, np.pi).sample())
-        aperture_ellipticities.append(Uniform(0.65, 1.55).sample())
-        aperture_roughnesses.append(Uniform(0.01, 0.08).sample())
-        aperture_roughness_modes.append((3, 9))
-        aperture_seeds.append(int(np.random.randint(0, 2**31 - 1)))
-        aperture_top_radius_factors.append(np.maximum(aperture_top_radius_RH, rh_radius*3)/rh_radius)
+        rh_top_radius_factor = np.maximum(aperture_top_radius_RH, rh_radius*3)/rh_radius
+        rh_top_radius = rh_radius * rh_top_radius_factor
+        rh_roughness, rh_roughness_modes = aperture_roughness_from_length(
+            rh_radius,
+            amplitude=aperture_roughness_amplitude,
+            period=aperture_roughness_period,
+        )
 
         rh_sigma_max = max(1e-9, rh_radius / 4)
         if rh_sigma_max == 1e-9:
-            aperture_sigmas.append(1e-9)
+            rh_sigma = 1e-9
         else:
-            aperture_sigmas.append(Uniform(1e-9, rh_sigma_max).sample())
+            rh_sigma = Uniform(1e-9, rh_sigma_max).sample()
+
+        def _reference_hole_is_clear(candidate_y, candidate_x):
+            if np.hypot(candidate_y, candidate_x) <= min_oh_distance:
+                return False
+            for placed_y, placed_x, placed_top_radius in placed_reference_holes:
+                min_distance = rh_top_radius + placed_top_radius
+                if np.hypot(candidate_y - placed_y, candidate_x - placed_x) <= min_distance:
+                    return False
+                twin_distance = np.hypot(
+                    np.abs(candidate_y) - np.abs(placed_y),
+                    np.abs(candidate_x) - np.abs(placed_x),
+                )
+                if twin_distance <= min_distance:
+                    return False
+            return True
 
         for _attempt in range(1000):
             center_y = np.random.uniform(-center_half_width, center_half_width)
             center_x = np.random.uniform(-center_half_width, center_half_width)
-            if np.hypot(center_y, center_x) > min_center_distance:
+            if _reference_hole_is_clear(center_y, center_x):
                 break
         else:
-            # Extremely unlikely fallback for very tight geometries.
-            center_radius = min(0.45 * fov_xy, 1.05 * min_center_distance)
-            center_angle = np.random.uniform(0.0, 2 * np.pi)
-            center_y = center_radius * np.sin(center_angle)
-            center_x = center_radius * np.cos(center_angle)
+            # Tight geometries can run out of room; try polar candidates, then
+            # skip this RH rather than allowing aperture overlap.
+            for _attempt in range(1000):
+                center_radius = np.random.uniform(
+                    min_oh_distance, max(min_oh_distance, 0.45 * fov_xy)
+                )
+                center_angle = np.random.uniform(0.0, 2 * np.pi)
+                center_y = center_radius * np.sin(center_angle)
+                center_x = center_radius * np.cos(center_angle)
+                if _reference_hole_is_clear(center_y, center_x):
+                    break
+            else:
+                continue
 
+        aperture_types.append("RH")
+        aperture_radii.append(rh_radius)
         aperture_centers.append((center_y, center_x))
+        aperture_sigmas.append(rh_sigma)
+        aperture_angles.append(Uniform(0.0, np.pi).sample())
+        aperture_ellipticities.append(Uniform(0.65, 1.55).sample())
+        aperture_roughnesses.append(rh_roughness)
+        aperture_roughness_modes.append(rh_roughness_modes)
+        aperture_seeds.append(int(np.random.randint(0, 2**31 - 1)))
+        aperture_top_radius_factors.append(rh_top_radius_factor)
+        placed_reference_holes.append((center_y, center_x, rh_top_radius))
 
     return {
         "aperture_types": aperture_types,

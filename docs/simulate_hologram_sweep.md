@@ -26,7 +26,7 @@ output_path = output_folder / "simulation_sweep.h5"
 The number of simulated configurations is controlled at the bottom:
 
 ```python
-nr_simulations = 20
+nr_simulations = 5
 ```
 
 Set `pipeline_random_seed` to an integer for reproducible sweeps, or to `None`
@@ -64,6 +64,27 @@ dielectric_tensor_use_roi = True
 `use_roi=True` enables OH-local magnetic patterns and local aperture/dielectric
 optimizations. Turn it off to compute on the full slab.
 
+### Multislice Propagation
+
+Free-space propagation between material layers is controlled near the top of
+the script:
+
+```python
+propagate = True
+```
+
+When `propagate=True`, the Jones field is propagated between consecutive
+material layers with an angular-spectrum free-space propagator using the actual
+sample pixel size and each layer thickness. This is more physical for thick
+or strongly structured aperture stacks, but it is slower because it adds FFTs
+between layers. When `propagate=False`, the simulator applies only the local
+Jones transmission for each layer, which is the faster historical mode.
+
+The free-space propagator damps evanescent spatial frequencies to avoid
+unphysical exponential growth and caches repeated propagation kernels for
+repeated layer thicknesses. The previous per-polarization implementation is
+kept in `propagate_free_space_jones_260526` for future comparisons.
+
 ### Magnetic Patterns
 
 The fixed fallback pattern is selected with:
@@ -87,6 +108,8 @@ pattern_type=Choice(
         "binary_labyrinth_pattern",
         "binary_labyrinth_pattern",
         "binary_labyrinth_pattern",
+        "binary_labyrinth_pattern",
+        "binary_labyrinth_pattern",
         "disordered_skyrmion_lattice_pattern",
         "disordered_skyrmion_lattice_pattern",
         "disordered_skyrmion_lattice_pattern",
@@ -95,8 +118,8 @@ pattern_type=Choice(
 )
 ```
 
-That is 3/7 labyrinth, 3/7 skyrmions, and 1/7 saturated. Add or remove repeated
-entries to change the mixture.
+That is 5/9 labyrinth, 3/9 skyrmions, and 1/9 saturated. Add or remove
+repeated entries to change the mixture.
 
 ### Pattern Size Parameter
 
@@ -128,6 +151,36 @@ region, using the OH radius plus one average skyrmion diameter as the placement
 radius. A center candidate is tried first so low-density skyrmion samples still
 contain at least one skyrmion inside the OH field of view. Candidates are
 accepted only if they do not overlap previously accepted skyrmions.
+
+### Aperture Geometry And Roughness
+
+The FTH mask contains one object hole (`OH`) and a random number of reference
+holes (`RH`). Apertures are layer-aware:
+
+- `aperture_top_radius_factors` controls the top/base radius ratio.
+- The taper is derived from the material stack above the SiN membrane.
+- The two layers closest to the SiN membrane remain cylindrical; if the stack
+  above SiN is only two layers, the aperture stays cylindrical.
+- Deeper layers below the taper keep the base aperture size.
+
+Boundary roughness is specified in physical units in the sweep script:
+
+```python
+aperture_roughness_amplitude = 10e-9
+aperture_roughness_period = 10e-9
+```
+
+`aperture_roughness_from_length` converts those physical values into the
+relative roughness amplitude and Fourier-mode band used by the aperture
+generator. The OH remains circular (`ellipticity = 1`, `angle = 0`) but has a
+small high-frequency boundary roughness. RHs can still be elliptical/rotated,
+with the same physical roughness scale. Rough contours are regenerated per
+layer using deterministic per-layer seeds, so a tapered aperture is not just
+the same rough outline rescaled through depth.
+
+After the sweep runs, the script rebuilds the first sample's aperture mask from
+metadata and plots the depth-averaged mask plus Y-Z/X-Z cuts through the OH/RHs.
+These aperture depth diagnostics are not saved as extra HDF5 datasets.
 
 ### X-ray Ranges
 
@@ -227,6 +280,9 @@ Metadata is stored as nested scalar/list datasets below `metadata/`, including
 x-ray, detector, measurement, illumination, aperture, magnetic-pattern, ROI, and
 propagation parameters.
 
+The `_pipeline_config/` group stores fixed top-level settings such as `recipe`,
+`oversampling`, detector shape, and `propagate`.
+
 ## Reading The HDF5 File
 
 Basic inspection:
@@ -270,6 +326,8 @@ with h5py.File(path, "r") as h5:
     pattern_type = m["magnetic_pattern/pattern_type_method"][()].decode()
     detector_distance = m["detector/detector_distance"][()]
     illumination_center = m["illumination/center_m"][()]
+    aperture_roughness = m["aperture/aperture_config/apertures_roughness"][()]
+    propagate = h5["_pipeline_config/propagate"][()]
 ```
 
 Some string datasets are stored as bytes, so use `.decode()` when needed.
