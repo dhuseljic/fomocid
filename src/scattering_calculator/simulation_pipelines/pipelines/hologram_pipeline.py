@@ -79,7 +79,7 @@ class HologramPipelineConfig:
     ----------
     recipe : str
         Multilayer thin-film recipe, e.g. ``"Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"``.
-        Thicknesses are in angstroms, ordered top-to-bottom.
+        Thicknesses are in nanometres, ordered top-to-bottom.
     sample_name : str or None
         Optional label stored in the HDF5 metadata.
     xray_energy : float
@@ -170,9 +170,13 @@ class HologramPipelineConfig:
         If ``False``, apply only local Jones transmission per layer. Default
         ``False``.
     propagation_padding_px : int
-        Number of pixels to zero-pad on each side during each free-space
+        Number of pixels to pad on each side during each free-space
         propagation step. Padding is cropped away after propagation and reduces
         periodic FFT wraparound. ``0`` disables padding. Default ``0``.
+    propagation_padding_mode : str
+        NumPy padding mode for free-space propagation margins. ``"edge"`` and
+        ``"reflect"`` avoid the hard crop-to-zero discontinuity of
+        ``"constant"`` padding. Default ``"edge"``.
     propagation_absorber_width_px : int
         Width of the smooth edge absorber used during free-space propagation.
         When padding is enabled, the absorber is clamped to the padded margin so
@@ -181,6 +185,11 @@ class HologramPipelineConfig:
     propagation_absorber_strength : float
         Strength of the exponential edge absorber. Larger values damp the edge
         more strongly. Default ``0``.
+    propagation_absorber_profile : str
+        Smooth profile used to ramp absorption from zero in the interior to the
+        configured strength at the outer edge. One of ``"cosine"``,
+        ``"smoothstep"``, ``"quadratic"``, or ``"linear"``. Default
+        ``"cosine"``.
     oversampling : int
         Oversampling factor relative to the Nyquist limit from the detector.
         ``real_space_pixel_size = detector_resolution / oversampling``.
@@ -288,8 +297,10 @@ class HologramPipelineConfig:
     dielectric_tensor_use_roi: bool = True
     propagate: bool = False
     propagation_padding_px: int = 0
+    propagation_padding_mode: str = "edge"
     propagation_absorber_width_px: int = 0
     propagation_absorber_strength: float = 0.0
+    propagation_absorber_profile: str = "cosine"
 
     # Simulation grid
     oversampling: int = 2
@@ -1051,8 +1062,10 @@ class HologramPipeline:
                 propagator_config={
                     "propagate": cfg.propagate,
                     "propagation_padding_px": cfg.propagation_padding_px,
+                    "propagation_padding_mode": cfg.propagation_padding_mode,
                     "propagation_absorber_width_px": cfg.propagation_absorber_width_px,
                     "propagation_absorber_strength": cfg.propagation_absorber_strength,
+                    "propagation_absorber_profile": cfg.propagation_absorber_profile,
                 },
             )
             propagator_config.setup()
@@ -1277,12 +1290,20 @@ class HologramPipeline:
         grp.create_dataset("propagate", data=bool(cfg.propagate))
         grp.create_dataset("propagation_padding_px", data=int(cfg.propagation_padding_px))
         grp.create_dataset(
+            "propagation_padding_mode",
+            data=np.bytes_(str(cfg.propagation_padding_mode)),
+        )
+        grp.create_dataset(
             "propagation_absorber_width_px",
             data=int(cfg.propagation_absorber_width_px),
         )
         grp.create_dataset(
             "propagation_absorber_strength",
             data=float(cfg.propagation_absorber_strength),
+        )
+        grp.create_dataset(
+            "propagation_absorber_profile",
+            data=np.bytes_(str(cfg.propagation_absorber_profile)),
         )
         grp.create_dataset("aperture_method", data=np.bytes_(str(cfg.aperture_method)))
         grp.create_dataset(

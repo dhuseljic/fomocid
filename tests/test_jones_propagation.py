@@ -26,18 +26,39 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
             dz=10e-9,
             pixel_size=1e-9,
             padding_px=4,
+            padding_mode="edge",
             absorber_width_px=2,
             absorber_strength=4.0,
+            absorber_profile="cosine",
         )
 
         self.assertEqual(out.shape, field.shape)
         self.assertTrue(np.all(np.isfinite(out)))
 
     def test_edge_absorber_is_one_in_the_center(self) -> None:
-        absorber = wavefronts._edge_absorber(32, 32, width_px=8, strength=6.0)
+        absorber = wavefronts._edge_absorber(
+            32,
+            32,
+            width_px=8,
+            strength=6.0,
+            profile="cosine",
+        )
 
         self.assertLess(absorber[0, 0], 1.0)
         self.assertAlmostEqual(absorber[16, 16], 1.0)
+
+    def test_absorber_profile_varies_smoothly(self) -> None:
+        absorber = wavefronts._edge_absorber(
+            32,
+            32,
+            width_px=8,
+            strength=6.0,
+            profile="smoothstep",
+        )
+        edge_to_center = absorber[:9, 16]
+
+        self.assertTrue(np.all(np.diff(edge_to_center) > 0.0))
+        self.assertAlmostEqual(edge_to_center[-1], 1.0)
 
 
 if __name__ == "__main__":

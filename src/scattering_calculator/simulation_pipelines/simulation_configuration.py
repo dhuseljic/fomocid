@@ -465,7 +465,7 @@ class SampleConfig(_ConfigMixin):
     ----------
     recipe : str
         Layer stack recipe string, e.g. ``"Au(700)/Cr(300)/SiN(200)/Co(90)"``.
-        Thicknesses are in angstroms.
+        Thicknesses are in nanometres.
     sample_shape : tuple of int
         Sample array shape ``(Nz, Ny, Nx)`` in pixels. ``Nz = 0`` is a
         sentinel that gets updated to the number of layers after ``setup()``.
@@ -1190,11 +1190,17 @@ class SamplePropagatorConfig(_ConfigMixin):
             propagation_padding_px=int(
                 self.propagator_config.get("propagation_padding_px", 0)
             ),
+            propagation_padding_mode=str(
+                self.propagator_config.get("propagation_padding_mode", "edge")
+            ),
             propagation_absorber_width_px=int(
                 self.propagator_config.get("propagation_absorber_width_px", 0)
             ),
             propagation_absorber_strength=float(
                 self.propagator_config.get("propagation_absorber_strength", 0.0)
+            ),
+            propagation_absorber_profile=str(
+                self.propagator_config.get("propagation_absorber_profile", "cosine")
             ),
         )
         return wavefront

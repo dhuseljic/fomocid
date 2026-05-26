@@ -72,8 +72,10 @@ the script:
 ```python
 propagate = True
 propagation_padding_px = 128
+propagation_padding_mode = "edge"
 propagation_absorber_width_px = 64
 propagation_absorber_strength = 6.0
+propagation_absorber_profile = "cosine"
 ```
 
 When `propagate=True`, the Jones field is propagated between consecutive
@@ -86,15 +88,20 @@ Jones transmission for each layer, which is the faster historical mode.
 The free-space propagator damps evanescent spatial frequencies to avoid
 unphysical exponential growth and caches repeated propagation kernels for
 repeated layer thicknesses. Because angular-spectrum propagation is FFT-based,
-the sweep exposes three boundary controls:
+the sweep exposes several boundary controls:
 
-- `propagation_padding_px`: zero-padding added on each side for every
+- `propagation_padding_px`: padding added on each side for every
   free-space step, then cropped away after propagation. Set to `0` to disable.
+- `propagation_padding_mode`: padding strategy. `"edge"` and `"reflect"` avoid
+  introducing a hard zero wall at the original crop boundary; `"constant"` keeps
+  the historical zero padding.
 - `propagation_absorber_width_px`: smooth edge-absorber width. If padding is
   enabled, the absorber is clamped to the padded margin so it does not attenuate
   the returned field. Set to `0` to disable.
-- `propagation_absorber_strength`: exponential absorber strength. Larger
-  values damp boundary wraparound more aggressively.
+- `propagation_absorber_strength`: maximum exponential absorber strength.
+  Larger values damp boundary wraparound more aggressively.
+- `propagation_absorber_profile`: how absorption ramps from the interior to the
+  edge. `"cosine"` and `"smoothstep"` are usually smoother than a linear ramp.
 
 The previous per-polarization implementation is kept in
 `propagate_free_space_jones_260526` for future comparisons.
@@ -322,7 +329,8 @@ propagation parameters.
 
 The `_pipeline_config/` group stores fixed top-level settings such as `recipe`,
 `oversampling`, detector shape, `propagate`, `propagation_padding_px`,
-`propagation_absorber_width_px`, and `propagation_absorber_strength`.
+`propagation_padding_mode`, `propagation_absorber_width_px`,
+`propagation_absorber_strength`, and `propagation_absorber_profile`.
 
 ## Reading The HDF5 File
 
@@ -370,7 +378,9 @@ with h5py.File(path, "r") as h5:
     aperture_roughness = m["aperture/aperture_config/apertures_roughness"][()]
     propagate = h5["_pipeline_config/propagate"][()]
     propagation_padding_px = h5["_pipeline_config/propagation_padding_px"][()]
+    propagation_padding_mode = h5["_pipeline_config/propagation_padding_mode"][()].decode()
     propagation_absorber_width_px = h5["_pipeline_config/propagation_absorber_width_px"][()]
+    propagation_absorber_profile = h5["_pipeline_config/propagation_absorber_profile"][()].decode()
 ```
 
 Some string datasets are stored as bytes, so use `.decode()` when needed.

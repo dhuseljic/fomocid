@@ -31,14 +31,18 @@ class wavefronts:
         aperture_support_regions=None,
         propagate=False,
         propagation_padding_px=0,
+        propagation_padding_mode="edge",
         propagation_absorber_width_px=0,
         propagation_absorber_strength=0.0,
+        propagation_absorber_profile="cosine",
     ):
         self.E_in=E_in
         self.aperture_support_regions = aperture_support_regions
         self.propagation_padding_px = max(0, int(propagation_padding_px))
+        self.propagation_padding_mode = str(propagation_padding_mode)
         self.propagation_absorber_width_px = max(0, int(propagation_absorber_width_px))
         self.propagation_absorber_strength = max(0.0, float(propagation_absorber_strength))
+        self.propagation_absorber_profile = str(propagation_absorber_profile)
         self.exit_wave = self.propagate_jones_multislice(
             E_in=self.E_in,
             eps_stack=eps_stack,
@@ -47,8 +51,10 @@ class wavefronts:
             pixel_size=real_space_pixel_size,
             propagate=propagate,
             propagation_padding_px=self.propagation_padding_px,
+            propagation_padding_mode=self.propagation_padding_mode,
             propagation_absorber_width_px=self.propagation_absorber_width_px,
             propagation_absorber_strength=self.propagation_absorber_strength,
+            propagation_absorber_profile=self.propagation_absorber_profile,
         )
         self.detector_wave = image_transformator.Fraunhofer_propagation_jones(self.exit_wave)
         self.hologram = E_I(self.detector_wave)
@@ -67,8 +73,10 @@ class wavefronts:
         pixel_size,
         propagate=True,
         propagation_padding_px=0,
+        propagation_padding_mode="edge",
         propagation_absorber_width_px=0,
         propagation_absorber_strength=0.0,
+        propagation_absorber_profile="cosine",
     ):
         """
         Multislice propagation through a dielectric tensor stack.
@@ -121,8 +129,10 @@ class wavefronts:
                         dz,
                         pixel_size,
                         padding_px=propagation_padding_px,
+                        padding_mode=propagation_padding_mode,
                         absorber_width_px=propagation_absorber_width_px,
                         absorber_strength=propagation_absorber_strength,
+                        absorber_profile=propagation_absorber_profile,
                     )
 
         return E_in
@@ -298,8 +308,10 @@ class wavefronts:
         dz,
         pixel_size,
         padding_px=0,
+        padding_mode="edge",
         absorber_width_px=0,
         absorber_strength=0.0,
+        absorber_profile="cosine",
     ):
         """
         Free-space propagation of a Jones wavefield by angular spectrum.
@@ -326,15 +338,17 @@ class wavefronts:
             return E_in.copy()
 
         padding_px = max(0, int(padding_px))
+        padding_mode = self._normalize_padding_mode(padding_mode)
         absorber_width_px = max(0, int(absorber_width_px))
         absorber_strength = max(0.0, float(absorber_strength))
+        absorber_profile = str(absorber_profile).lower()
         if padding_px > 0:
             absorber_width_px = min(absorber_width_px, padding_px)
         if padding_px > 0:
             E_work = np.pad(
                 E_in,
                 ((padding_px, padding_px), (padding_px, padding_px), (0, 0)),
-                mode="constant",
+                mode=padding_mode,
             )
         else:
             E_work = E_in
@@ -345,6 +359,7 @@ class wavefronts:
                 E_work.shape[1],
                 absorber_width_px,
                 absorber_strength,
+                absorber_profile,
             )[..., None]
 
         Ny, Nx, _ = E_work.shape
@@ -360,6 +375,7 @@ class wavefronts:
                 E_out.shape[1],
                 absorber_width_px,
                 absorber_strength,
+                absorber_profile,
             )[..., None]
 
         if padding_px > 0:
@@ -371,7 +387,26 @@ class wavefronts:
         return E_out
 
     @classmethod
-    def _edge_absorber(cls, Ny, Nx, width_px, strength):
+    def _normalize_padding_mode(cls, padding_mode):
+        """Return a NumPy padding mode for free-space propagation margins."""
+        mode = str(padding_mode).lower()
+        aliases = {
+            "zero": "constant",
+            "zeros": "constant",
+            "constant": "constant",
+            "edge": "edge",
+            "reflect": "reflect",
+            "symmetric": "symmetric",
+        }
+        if mode not in aliases:
+            raise ValueError(
+                "padding_mode must be one of 'edge', 'reflect', 'symmetric', "
+                f"or 'constant', got {padding_mode!r}."
+            )
+        return aliases[mode]
+
+    @classmethod
+    def _edge_absorber(cls, Ny, Nx, width_px, strength, profile="cosine"):
         """Return a smooth edge absorber equal to one away from the border."""
         width_px = max(0, int(width_px))
         strength = max(0.0, float(strength))
@@ -382,10 +417,29 @@ class wavefronts:
         xx = np.minimum(np.arange(Nx), np.arange(Nx)[::-1]).astype(float)
         dist = np.minimum(yy[:, None], xx[None, :])
         ramp = np.clip(dist / float(width_px), 0.0, 1.0)
+        edge_weight = cls._absorber_edge_weight(ramp, profile)
         absorber = np.ones((Ny, Nx), dtype=float)
         edge = ramp < 1.0
-        absorber[edge] = np.exp(-strength * (1.0 - ramp[edge]) ** 2)
+        absorber[edge] = np.exp(-strength * edge_weight[edge])
         return absorber
+
+    @classmethod
+    def _absorber_edge_weight(cls, ramp, profile):
+        """Return a smooth 0-to-1 absorption profile from interior to edge."""
+        profile = str(profile).lower()
+        t = 1.0 - np.clip(ramp, 0.0, 1.0)
+        if profile == "linear":
+            return t
+        if profile == "quadratic":
+            return t**2
+        if profile == "cosine":
+            return 0.5 * (1.0 - np.cos(np.pi * t))
+        if profile == "smoothstep":
+            return t * t * (3.0 - 2.0 * t)
+        raise ValueError(
+            "absorber_profile must be one of 'cosine', 'smoothstep', "
+            f"'quadratic', or 'linear', got {profile!r}."
+        )
 
     @classmethod
     def _free_space_kernel(cls, Ny, Nx, wavelength, dz, pixel_size):

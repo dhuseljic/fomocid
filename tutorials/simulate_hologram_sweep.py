@@ -25,19 +25,24 @@ from scattering_calculator.sample_generator import structures
 #################################################################
 nr_simulations = 2  # increase to e.g. 1000 for a full training dataset
 
+# --- Material stack ---
+recipe = "[Au(700)/Cr(300)]x4/SiN(200)/Co(90)/Pt(120)/Al(60)"
+
 # %%
 # ===================
 # OUTPUT PATH
 # ===================
 output_folder = DATA_ROOT / "Data" / "hologram_sweep"
 output_path = output_folder / "simulation_sweep.h5"
-pipeline_random_seed = None  # set to None for non-reproducible random sweeps
+pipeline_random_seed = 3  # set to None for non-reproducible random sweeps
 use_roi = True
 dielectric_tensor_use_roi = True
 propagate = True  # set True for multislice free-space propagation between layers
 propagation_padding_px = 128  # 0 disables padded free-space propagation
+propagation_padding_mode = "edge"  # "edge", "reflect", "symmetric", or "constant"
 propagation_absorber_width_px = 64  # 0 disables edge absorption
 propagation_absorber_strength = 6.0  # larger values damp padded-edge wraparound more
+propagation_absorber_profile = "cosine"  # "cosine", "smoothstep", "quadratic", or "linear"
 
 os.makedirs(output_folder, exist_ok=True)
 
@@ -96,8 +101,7 @@ beamstop_config = {
     "seed": None,
 }
 
-# --- Material stack ---
-recipe = "[Au(70)/Cr(30)]x10/SiN(200)/Co(90)/Pt(120)/Al(60)"
+
 
 # --- Magnetic domain pattern ---
 pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", or "saturated_pattern"
@@ -248,8 +252,10 @@ config = HologramPipelineConfig(
     dielectric_tensor_use_roi=dielectric_tensor_use_roi,
     propagate=propagate,
     propagation_padding_px=propagation_padding_px,
+    propagation_padding_mode=propagation_padding_mode,
     propagation_absorber_width_px=propagation_absorber_width_px,
     propagation_absorber_strength=propagation_absorber_strength,
+    propagation_absorber_profile=propagation_absorber_profile,
     # Simulation grid: sample_shape = oversampling * detector_shape
     oversampling=2,
     random_seed=pipeline_random_seed,
@@ -473,7 +479,7 @@ def random_aperture_config(params):
 
 def random_coherence_length(params):
     """Sample similar y/x coherence lengths in metres."""
-    base = Uniform(5e-6, 50e-6).sample()
+    base = Uniform(15e-6, 50e-6).sample()
     anisotropy = Uniform(-0.13, 0.13).sample()
     return (base * (1.0 + anisotropy), base * (1.0 - anisotropy))
 
