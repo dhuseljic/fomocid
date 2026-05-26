@@ -169,6 +169,18 @@ class HologramPipelineConfig:
         material layers using each layer thickness and the sample pixel size.
         If ``False``, apply only local Jones transmission per layer. Default
         ``False``.
+    propagation_padding_px : int
+        Number of pixels to zero-pad on each side during each free-space
+        propagation step. Padding is cropped away after propagation and reduces
+        periodic FFT wraparound. ``0`` disables padding. Default ``0``.
+    propagation_absorber_width_px : int
+        Width of the smooth edge absorber used during free-space propagation.
+        When padding is enabled, the absorber is clamped to the padded margin so
+        it does not damp the returned crop. ``0`` disables absorption. Default
+        ``0``.
+    propagation_absorber_strength : float
+        Strength of the exponential edge absorber. Larger values damp the edge
+        more strongly. Default ``0``.
     oversampling : int
         Oversampling factor relative to the Nyquist limit from the detector.
         ``real_space_pixel_size = detector_resolution / oversampling``.
@@ -275,6 +287,9 @@ class HologramPipelineConfig:
     magnetic_pattern_use_roi: bool = True
     dielectric_tensor_use_roi: bool = True
     propagate: bool = False
+    propagation_padding_px: int = 0
+    propagation_absorber_width_px: int = 0
+    propagation_absorber_strength: float = 0.0
 
     # Simulation grid
     oversampling: int = 2
@@ -1033,7 +1048,12 @@ class HologramPipeline:
                 SampleConfig=sample_config,
                 IlluminationConfig=illumination_config,
                 propagator_method="Jones",
-                propagator_config={"propagate": cfg.propagate},
+                propagator_config={
+                    "propagate": cfg.propagate,
+                    "propagation_padding_px": cfg.propagation_padding_px,
+                    "propagation_absorber_width_px": cfg.propagation_absorber_width_px,
+                    "propagation_absorber_strength": cfg.propagation_absorber_strength,
+                },
             )
             propagator_config.setup()
             t_stage = mark_stage(f"{pol} Jones propagation", t_stage)
@@ -1255,6 +1275,15 @@ class HologramPipeline:
         grp.create_dataset("n_samples", data=self.n_samples)
         grp.create_dataset("oversampling", data=cfg.oversampling)
         grp.create_dataset("propagate", data=bool(cfg.propagate))
+        grp.create_dataset("propagation_padding_px", data=int(cfg.propagation_padding_px))
+        grp.create_dataset(
+            "propagation_absorber_width_px",
+            data=int(cfg.propagation_absorber_width_px),
+        )
+        grp.create_dataset(
+            "propagation_absorber_strength",
+            data=float(cfg.propagation_absorber_strength),
+        )
         grp.create_dataset("aperture_method", data=np.bytes_(str(cfg.aperture_method)))
         grp.create_dataset(
             "illumination_function", data=np.bytes_(str(cfg.illumination_function))

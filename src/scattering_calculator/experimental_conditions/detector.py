@@ -199,6 +199,7 @@ class beamstop:
         roughness_modes: tuple[int, int] = (0, 0),
         wire_width: float = 0.0,
         wire_bend: float = 0.0,
+        antialias: int = 1,
         seed: int | None = None,
         theta: float | None = None,
         ellipticity_range: tuple[float, float] | None = None,
@@ -233,6 +234,10 @@ class beamstop:
             Wire width. A value of ``0`` disables the wire.
         wire_bend : float, optional
             Maximum wire bend amplitude.
+        antialias : int, optional
+            Supersampling factor used while rasterising the beamstop and wire.
+            Values greater than 1 average sub-pixels back to detector pixels,
+            reducing stair-step artifacts for thin or diagonal features.
         seed : int or None, optional
             Random seed for reproducible beamstops.
         theta : float or None, optional
@@ -263,9 +268,26 @@ class beamstop:
         if ellipticity_range is not None:
             ellipticity = ellipticity_range
         orientation = angle
+        antialias = max(1, int(antialias))
 
-        dy = np.arange(self.detector_shape[0], dtype=float)[:, None] - center[0]
-        dx = np.arange(self.detector_shape[1], dtype=float)[None, :] - center[1]
+        if antialias > 1:
+            rows, cols = self.detector_shape
+            sample_y = (
+                (np.arange(rows * antialias, dtype=float) + 0.5) / antialias
+                - 0.5
+            )
+            sample_x = (
+                (np.arange(cols * antialias, dtype=float) + 0.5) / antialias
+                - 0.5
+            )
+            raster_shape = (rows * antialias, cols * antialias)
+        else:
+            sample_y = np.arange(self.detector_shape[0], dtype=float)
+            sample_x = np.arange(self.detector_shape[1], dtype=float)
+            raster_shape = self.detector_shape
+
+        dy = sample_y[:, None] - center[0]
+        dx = sample_x[None, :] - center[1]
 
         axis_ratio = rng.uniform(*ellipticity)
         radius_y = radius_effective * np.sqrt(axis_ratio)
@@ -278,7 +300,7 @@ class beamstop:
         normalized_radius = np.sqrt((xr / radius_x) ** 2 + (yr / radius_y) ** 2)
         polar_angle = np.arctan2(yr / radius_y, xr / radius_x)
 
-        boundary = np.ones(self.detector_shape, dtype=float)
+        boundary = np.ones(raster_shape, dtype=float)
         if roughness > 0:
             min_mode, max_mode = roughness_modes
             for mode in range(max(1, min_mode), max_mode + 1):
@@ -303,6 +325,10 @@ class beamstop:
             )
             wire_mask = np.abs(across_wire - bend) <= (0.5 * wire_width_effective)
             mask = np.maximum(mask, wire_mask.astype(float))
+
+        if antialias > 1:
+            rows, cols = self.detector_shape
+            mask = mask.reshape(rows, antialias, cols, antialias).mean(axis=(1, 3))
 
         if sigma_effective is not None and sigma_effective != 0:
             mask = gaussian_filter(mask, sigma_effective)

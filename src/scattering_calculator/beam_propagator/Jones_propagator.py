@@ -30,16 +30,25 @@ class wavefronts:
         E_in,
         aperture_support_regions=None,
         propagate=False,
+        propagation_padding_px=0,
+        propagation_absorber_width_px=0,
+        propagation_absorber_strength=0.0,
     ):
         self.E_in=E_in
         self.aperture_support_regions = aperture_support_regions
+        self.propagation_padding_px = max(0, int(propagation_padding_px))
+        self.propagation_absorber_width_px = max(0, int(propagation_absorber_width_px))
+        self.propagation_absorber_strength = max(0.0, float(propagation_absorber_strength))
         self.exit_wave = self.propagate_jones_multislice(
             E_in=self.E_in,
             eps_stack=eps_stack,
             wavelength=beam_parameters.wavelength,
             thicknesses=layer_thicknesses,
             pixel_size=real_space_pixel_size,
-            propagate=propagate
+            propagate=propagate,
+            propagation_padding_px=self.propagation_padding_px,
+            propagation_absorber_width_px=self.propagation_absorber_width_px,
+            propagation_absorber_strength=self.propagation_absorber_strength,
         )
         self.detector_wave = image_transformator.Fraunhofer_propagation_jones(self.exit_wave)
         self.hologram = E_I(self.detector_wave)
@@ -49,7 +58,18 @@ class wavefronts:
     # Multislice propagation through stack of dielectric tensor images
     # ============================================================
 
-    def propagate_jones_multislice(self,E_in, eps_stack, wavelength, thicknesses, pixel_size, propagate=True):
+    def propagate_jones_multislice(
+        self,
+        E_in,
+        eps_stack,
+        wavelength,
+        thicknesses,
+        pixel_size,
+        propagate=True,
+        propagation_padding_px=0,
+        propagation_absorber_width_px=0,
+        propagation_absorber_strength=0.0,
+    ):
         """
         Multislice propagation through a dielectric tensor stack.
 
@@ -95,7 +115,15 @@ class wavefronts:
             # Free-space propagation between slices
             if propagate:
                 if iz < Nz - 1:
-                    E_in = self.propagate_free_space_jones(E_in, wavelength, dz, pixel_size)
+                    E_in = self.propagate_free_space_jones(
+                        E_in,
+                        wavelength,
+                        dz,
+                        pixel_size,
+                        padding_px=propagation_padding_px,
+                        absorber_width_px=propagation_absorber_width_px,
+                        absorber_strength=propagation_absorber_strength,
+                    )
 
         return E_in
 
@@ -263,7 +291,16 @@ class wavefronts:
     # Free-space propagation of a Jones wavefield (angular spectrum)
     # ============================================================
 
-    def propagate_free_space_jones(self,E_in, wavelength, dz, pixel_size):
+    def propagate_free_space_jones(
+        self,
+        E_in,
+        wavelength,
+        dz,
+        pixel_size,
+        padding_px=0,
+        absorber_width_px=0,
+        absorber_strength=0.0,
+    ):
         """
         Free-space propagation of a Jones wavefield by angular spectrum.
 
@@ -288,12 +325,67 @@ class wavefronts:
         if dz == 0:
             return E_in.copy()
 
-        Ny, Nx, _ = E_in.shape
+        padding_px = max(0, int(padding_px))
+        absorber_width_px = max(0, int(absorber_width_px))
+        absorber_strength = max(0.0, float(absorber_strength))
+        if padding_px > 0:
+            absorber_width_px = min(absorber_width_px, padding_px)
+        if padding_px > 0:
+            E_work = np.pad(
+                E_in,
+                ((padding_px, padding_px), (padding_px, padding_px), (0, 0)),
+                mode="constant",
+            )
+        else:
+            E_work = E_in
+
+        if absorber_width_px > 0 and absorber_strength > 0 and padding_px == 0:
+            E_work = E_work * self._edge_absorber(
+                E_work.shape[0],
+                E_work.shape[1],
+                absorber_width_px,
+                absorber_strength,
+            )[..., None]
+
+        Ny, Nx, _ = E_work.shape
         H = self._free_space_kernel(Ny, Nx, wavelength, dz, pixel_size)
 
-        F = scp.fft.fft2(E_in, axes=(0, 1), workers=-1)
+        F = scp.fft.fft2(E_work, axes=(0, 1), workers=-1)
         F *= H[..., None]
-        return scp.fft.ifft2(F, axes=(0, 1), workers=-1)
+        E_out = scp.fft.ifft2(F, axes=(0, 1), workers=-1)
+
+        if absorber_width_px > 0 and absorber_strength > 0:
+            E_out = E_out * self._edge_absorber(
+                E_out.shape[0],
+                E_out.shape[1],
+                absorber_width_px,
+                absorber_strength,
+            )[..., None]
+
+        if padding_px > 0:
+            return E_out[
+                padding_px : padding_px + E_in.shape[0],
+                padding_px : padding_px + E_in.shape[1],
+                :,
+            ]
+        return E_out
+
+    @classmethod
+    def _edge_absorber(cls, Ny, Nx, width_px, strength):
+        """Return a smooth edge absorber equal to one away from the border."""
+        width_px = max(0, int(width_px))
+        strength = max(0.0, float(strength))
+        if width_px <= 0 or strength <= 0:
+            return np.ones((Ny, Nx), dtype=float)
+
+        yy = np.minimum(np.arange(Ny), np.arange(Ny)[::-1]).astype(float)
+        xx = np.minimum(np.arange(Nx), np.arange(Nx)[::-1]).astype(float)
+        dist = np.minimum(yy[:, None], xx[None, :])
+        ramp = np.clip(dist / float(width_px), 0.0, 1.0)
+        absorber = np.ones((Ny, Nx), dtype=float)
+        edge = ramp < 1.0
+        absorber[edge] = np.exp(-strength * (1.0 - ramp[edge]) ** 2)
+        return absorber
 
     @classmethod
     def _free_space_kernel(cls, Ny, Nx, wavelength, dz, pixel_size):

@@ -23,7 +23,7 @@ from scattering_calculator.sample_generator import structures
 #################################################################
 #### HOW MANY SIMULATIONS TO RUN? ####
 #################################################################
-nr_simulations = 5  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 2  # increase to e.g. 1000 for a full training dataset
 
 # %%
 # ===================
@@ -35,6 +35,9 @@ pipeline_random_seed = None  # set to None for non-reproducible random sweeps
 use_roi = True
 dielectric_tensor_use_roi = True
 propagate = True  # set True for multislice free-space propagation between layers
+propagation_padding_px = 128  # 0 disables padded free-space propagation
+propagation_absorber_width_px = 64  # 0 disables edge absorption
+propagation_absorber_strength = 6.0  # larger values damp padded-edge wraparound more
 
 os.makedirs(output_folder, exist_ok=True)
 
@@ -89,11 +92,12 @@ beamstop_config = {
     "roughness_modes": (3, 9),
     "wire_width": 0.05e-3,
     "wire_bend": 0.1e-3,
+    "antialias": 4,
     "seed": None,
 }
 
 # --- Material stack ---
-recipe = "[Au(700)/Cr(300)]x7/SiN(200)/Co(90)/Pt(120)/Al(60)"
+recipe = "[Au(70)/Cr(30)]x10/SiN(200)/Co(90)/Pt(120)/Al(60)"
 
 # --- Magnetic domain pattern ---
 pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", or "saturated_pattern"
@@ -151,7 +155,7 @@ else:
 # --- FTH holography mask ---
 aperture_types = ["OH", "RH", "RH"]
 aperture_radii = [60e-9, 6e-9, 4e-9]  # m
-aperture_roughness_amplitude = 10e-9  # m, target boundary fluctuation scale
+aperture_roughness_amplitude = 20e-9  # m, target boundary fluctuation scale
 aperture_roughness_period = 10e-9  # m, target boundary fluctuation period
 aperture_centers = [(0, 0), (0.2e-6, -0.15e-6), (0.15e-6, 0.15e-6)]  # m (y, x)
 aperture_sigmas = [1e-9, 2e-9, 2e-9]  # m
@@ -159,9 +163,17 @@ aperture_angles = [0.0, 0.0, 0.0]  # rad
 aperture_ellipticities = [1.0, 1.0, 1.0]  # y/x axis ratio
 
 
-def aperture_roughness_from_length(radius, amplitude=10e-9, period=10e-9):
+def aperture_roughness_from_length(
+    radius,
+    amplitude=20e-9,
+    period=10e-9,
+    max_relative_amplitude=0.25,
+):
     """Convert physical roughness amplitude/period to relative Fourier settings."""
-    relative_amplitude = min(0.08, float(amplitude) / float(radius))
+    relative_amplitude = min(
+        float(max_relative_amplitude),
+        float(amplitude) / float(radius),
+    )
     center_mode = max(1, int(round(2.0 * np.pi * float(radius) / float(period))))
     return relative_amplitude, (max(1, center_mode - 2), center_mode + 2)
 
@@ -235,6 +247,9 @@ config = HologramPipelineConfig(
     magnetic_pattern_use_roi=True,
     dielectric_tensor_use_roi=dielectric_tensor_use_roi,
     propagate=propagate,
+    propagation_padding_px=propagation_padding_px,
+    propagation_absorber_width_px=propagation_absorber_width_px,
+    propagation_absorber_strength=propagation_absorber_strength,
     # Simulation grid: sample_shape = oversampling * detector_shape
     oversampling=2,
     random_seed=pipeline_random_seed,
@@ -508,6 +523,7 @@ ranges = HologramPipelineRanges(
         "sigma": Uniform(10e-6, 30e-6),
         "wire_width": Uniform(0.05e-3, 0.1e-3),
         "wire_bend": Uniform(0.0, 0.75e-3),
+        "antialias": 4,
     },
 
     # generating detector distances from reasonable ranges based on the stripe width and xray energy

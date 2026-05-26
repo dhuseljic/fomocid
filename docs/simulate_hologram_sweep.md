@@ -23,10 +23,10 @@ output_folder = DATA_ROOT / "Data" / "hologram_sweep"
 output_path = output_folder / "simulation_sweep.h5"
 ```
 
-The number of simulated configurations is controlled at the bottom:
+The number of simulated configurations is controlled near the top:
 
 ```python
-nr_simulations = 5
+nr_simulations = 2
 ```
 
 Set `pipeline_random_seed` to an integer for reproducible sweeps, or to `None`
@@ -71,6 +71,9 @@ the script:
 
 ```python
 propagate = True
+propagation_padding_px = 128
+propagation_absorber_width_px = 64
+propagation_absorber_strength = 6.0
 ```
 
 When `propagate=True`, the Jones field is propagated between consecutive
@@ -82,8 +85,19 @@ Jones transmission for each layer, which is the faster historical mode.
 
 The free-space propagator damps evanescent spatial frequencies to avoid
 unphysical exponential growth and caches repeated propagation kernels for
-repeated layer thicknesses. The previous per-polarization implementation is
-kept in `propagate_free_space_jones_260526` for future comparisons.
+repeated layer thicknesses. Because angular-spectrum propagation is FFT-based,
+the sweep exposes three boundary controls:
+
+- `propagation_padding_px`: zero-padding added on each side for every
+  free-space step, then cropped away after propagation. Set to `0` to disable.
+- `propagation_absorber_width_px`: smooth edge-absorber width. If padding is
+  enabled, the absorber is clamped to the padded margin so it does not attenuate
+  the returned field. Set to `0` to disable.
+- `propagation_absorber_strength`: exponential absorber strength. Larger
+  values damp boundary wraparound more aggressively.
+
+The previous per-polarization implementation is kept in
+`propagate_free_space_jones_260526` for future comparisons.
 
 ### Magnetic Patterns
 
@@ -135,6 +149,31 @@ it means average skyrmion diameter. For saturated states, it is still sampled so
 the detector and aperture geometry can be chosen consistently, but the magnetic
 pattern itself ignores it.
 
+For `binary_labyrinth_pattern`, `auto_size=True` estimates how much the
+generated labyrinth image will be rescaled to reach the requested stripe width.
+Large final stripes therefore use a smaller generated source field when
+possible, while still regenerating a larger field if the measured FFT stripe
+width would make the scaled image too small to crop safely.
+
+### Beamstop And Wire Mask
+
+The beamstop can include a bent support wire:
+
+```python
+beamstop_config = {
+    "radius": 0.2e-3,
+    "sigma": 20e-6,
+    "wire_width": 0.05e-3,
+    "wire_bend": 0.1e-3,
+    "antialias": 4,
+}
+```
+
+`antialias` supersamples the beamstop and wire mask before averaging back to
+detector pixels. Values above `1` reduce stair-step artifacts for thin or
+diagonal wires and produce fractional mask values at edges. Use `1` for the
+historical binary rasterization.
+
 ### Skyrmion Parameters
 
 The random skyrmion generator uses:
@@ -166,14 +205,15 @@ holes (`RH`). Apertures are layer-aware:
 Boundary roughness is specified in physical units in the sweep script:
 
 ```python
-aperture_roughness_amplitude = 10e-9
+aperture_roughness_amplitude = 20e-9
 aperture_roughness_period = 10e-9
 ```
 
 `aperture_roughness_from_length` converts those physical values into the
 relative roughness amplitude and Fourier-mode band used by the aperture
-generator. The OH remains circular (`ellipticity = 1`, `angle = 0`) but has a
-small high-frequency boundary roughness. RHs can still be elliptical/rotated,
+generator. The helper caps the relative roughness at `0.25` by default. The OH
+remains circular (`ellipticity = 1`, `angle = 0`) but has high-frequency
+boundary roughness. RHs can still be elliptical/rotated,
 with the same physical roughness scale. Rough contours are regenerated per
 layer using deterministic per-layer seeds, so a tapered aperture is not just
 the same rough outline rescaled through depth.
@@ -272,7 +312,7 @@ Polarization groups:
 
 Other arrays:
 
-- `beamstop_mask`: detector beamstop mask.
+- `beamstop_mask`: detector beamstop mask; anti-aliased edges can be fractional.
 - `supportmask`: binary support mask in FTH reconstruction coordinates.
 - `magnetic_pattern_oh`: magnetic pattern inside the OH save ROI; pixels outside the OH are zeroed.
 
@@ -281,7 +321,8 @@ x-ray, detector, measurement, illumination, aperture, magnetic-pattern, ROI, and
 propagation parameters.
 
 The `_pipeline_config/` group stores fixed top-level settings such as `recipe`,
-`oversampling`, detector shape, and `propagate`.
+`oversampling`, detector shape, `propagate`, `propagation_padding_px`,
+`propagation_absorber_width_px`, and `propagation_absorber_strength`.
 
 ## Reading The HDF5 File
 
@@ -328,6 +369,8 @@ with h5py.File(path, "r") as h5:
     illumination_center = m["illumination/center_m"][()]
     aperture_roughness = m["aperture/aperture_config/apertures_roughness"][()]
     propagate = h5["_pipeline_config/propagate"][()]
+    propagation_padding_px = h5["_pipeline_config/propagation_padding_px"][()]
+    propagation_absorber_width_px = h5["_pipeline_config/propagation_absorber_width_px"][()]
 ```
 
 Some string datasets are stored as bytes, so use `.decode()` when needed.

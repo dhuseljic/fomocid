@@ -213,6 +213,11 @@ class BeamstopConfig(_ConfigMixin):
             raise ValueError(
                 f'bs_config["wire_bend"] must be non-negative, got {wire_bend}'
             )
+        antialias = self.bs_config.get("antialias", 1)
+        if int(antialias) < 1:
+            raise ValueError(
+                f'bs_config["antialias"] must be at least 1, got {antialias}'
+            )
 
     def setup(self, detector_layout: detector.detector_layout) -> detector.beamstop:
         """Create the beamstop object and attach it to the detector layout.
@@ -1182,6 +1187,15 @@ class SamplePropagatorConfig(_ConfigMixin):
                 None,
             ),
             propagate=bool(self.propagator_config.get("propagate", False)),
+            propagation_padding_px=int(
+                self.propagator_config.get("propagation_padding_px", 0)
+            ),
+            propagation_absorber_width_px=int(
+                self.propagator_config.get("propagation_absorber_width_px", 0)
+            ),
+            propagation_absorber_strength=float(
+                self.propagator_config.get("propagation_absorber_strength", 0.0)
+            ),
         )
         return wavefront
 

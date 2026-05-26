@@ -905,6 +905,8 @@ def create_binary_labyrinth_pattern(
     softness: float = 1.0,
     auto_size: bool = True,
     crop_margin: float | None = None,
+    min_auto_size: int = 32,
+    auto_size_overshoot: float = 1.35,
     plot: bool = False,
     real_space_pixel_size: float = 1,
     batch: int = 1,
@@ -926,11 +928,13 @@ def create_binary_labyrinth_pattern(
     continuous field is linearly rescaled so that measured width matches
     ``stripe_width`` in pixels. If needed, the base labyrinth image is
     regenerated at a larger size so that the rescaled field can be cropped
-    without tiling artifacts. The rescaled field is then converted to the final
-    domain contrast. By default this
-    conversion is soft, using a tanh mapping after the optional Gaussian blur,
-    which avoids interpolation and thresholding artifacts for small stripes.
-    Set ``domain_conversion="hard"`` to recover exact +/-1 binarisation.
+    without tiling artifacts. With ``auto_size=True``, the generated base image
+    can also be smaller than the requested ``H``/``W`` when large target stripes
+    imply strong upscaling. The rescaled field is then converted to the final
+    domain contrast. By default this conversion is soft, using a tanh mapping
+    after the optional Gaussian blur, which avoids interpolation and
+    thresholding artifacts for small stripes. Set ``domain_conversion="hard"``
+    to recover exact +/-1 binarisation.
     """
     generator_overrides.pop("coordinate_offset", None)
     rows, cols = tuple(sz_array)
@@ -939,8 +943,8 @@ def create_binary_labyrinth_pattern(
 
     requested_H = int(H)
     requested_W = int(W)
-    current_H = requested_H
-    current_W = requested_W
+    min_auto_size = max(8, int(min_auto_size))
+    auto_size_overshoot = max(1.0, float(auto_size_overshoot))
     margin = crop_margin
     if margin is None:
         margin = max(8.0, 2.0 * float(stripe_width))
@@ -949,11 +953,29 @@ def create_binary_labyrinth_pattern(
     required_rows = rows + 2 * int(np.ceil(margin))
     required_cols = cols + 2 * int(np.ceil(margin))
 
+    region_key = region[0] if isinstance(region, list) and region else region
+    effective_k0 = 0.7 if region_key in (None, "labyrinth", "stripes") else float(k0)
+    estimated_source_width = np.pi / effective_k0 if effective_k0 > 0 else 4.0
+    estimated_scale = max(float(stripe_width) / estimated_source_width, 1e-3)
+    if auto_size:
+        current_H = max(
+            min_auto_size,
+            int(np.ceil(required_rows / estimated_scale * 1.1)),
+        )
+        current_W = max(
+            min_auto_size,
+            int(np.ceil(required_cols / estimated_scale * 1.1)),
+        )
+    else:
+        current_H = requested_H
+        current_W = requested_W
+
     meta = {}
     base = None
     measured_width = 0.0
     measured_period = 0.0
     scale = 1.0
+    resized_after_measurement = False
     for _ in range(6):
         _, _, continuous, meta = generate_binary(
             batch=batch,
@@ -974,16 +996,32 @@ def create_binary_labyrinth_pattern(
         scale = max(scale, 1e-3)
         scaled_rows = int(np.round(base.shape[0] * scale))
         scaled_cols = int(np.round(base.shape[1] * scale))
-        if (
-            not auto_size
-            or (scaled_rows >= required_rows and scaled_cols >= required_cols)
-        ):
+        if not auto_size:
             break
 
-        next_H = int(np.ceil(required_rows / scale * 1.1))
-        next_W = int(np.ceil(required_cols / scale * 1.1))
-        current_H = max(current_H + 1, next_H)
-        current_W = max(current_W + 1, next_W)
+        next_H = max(
+            min_auto_size,
+            int(np.ceil(required_rows / scale * 1.1)),
+        )
+        next_W = max(
+            min_auto_size,
+            int(np.ceil(required_cols / scale * 1.1)),
+        )
+        large_enough = scaled_rows >= required_rows and scaled_cols >= required_cols
+        oversized = (
+            current_H > max(min_auto_size, int(np.ceil(next_H * auto_size_overshoot)))
+            or current_W > max(min_auto_size, int(np.ceil(next_W * auto_size_overshoot)))
+        )
+        if large_enough and (not oversized or resized_after_measurement):
+            break
+
+        if large_enough and oversized:
+            current_H = next_H
+            current_W = next_W
+            resized_after_measurement = True
+        else:
+            current_H = max(current_H + 1, next_H)
+            current_W = max(current_W + 1, next_W)
 
     if base is None:
         raise RuntimeError("Labyrinth generator did not return a pattern.")
@@ -1033,6 +1071,9 @@ def create_binary_labyrinth_pattern(
             "scaled_H": scaled.shape[0],
             "scaled_W": scaled.shape[1],
             "auto_size": bool(auto_size),
+            "min_auto_size": min_auto_size,
+            "auto_size_overshoot": auto_size_overshoot,
+            "estimated_source_stripe_width_px": estimated_source_width,
             "crop_margin_px": margin,
             "binarization_threshold": threshold,
             "domain_conversion": conversion,
