@@ -35,6 +35,7 @@ class wavefronts:
         propagation_absorber_width_px=0,
         propagation_absorber_strength=0.0,
         propagation_absorber_profile="cosine",
+        multislice_propagation_roi=False,
     ):
         self.E_in=E_in
         self.aperture_support_regions = aperture_support_regions
@@ -43,6 +44,7 @@ class wavefronts:
         self.propagation_absorber_width_px = max(0, int(propagation_absorber_width_px))
         self.propagation_absorber_strength = max(0.0, float(propagation_absorber_strength))
         self.propagation_absorber_profile = str(propagation_absorber_profile)
+        self.multislice_propagation_roi = bool(multislice_propagation_roi)
         self.exit_wave = self.propagate_jones_multislice(
             E_in=self.E_in,
             eps_stack=eps_stack,
@@ -55,6 +57,7 @@ class wavefronts:
             propagation_absorber_width_px=self.propagation_absorber_width_px,
             propagation_absorber_strength=self.propagation_absorber_strength,
             propagation_absorber_profile=self.propagation_absorber_profile,
+            multislice_propagation_roi=self.multislice_propagation_roi,
         )
         self.detector_wave = image_transformator.Fraunhofer_propagation_jones(self.exit_wave)
         self.hologram = E_I(self.detector_wave)
@@ -77,6 +80,7 @@ class wavefronts:
         propagation_absorber_width_px=0,
         propagation_absorber_strength=0.0,
         propagation_absorber_profile="cosine",
+        multislice_propagation_roi=False,
     ):
         """
         Multislice propagation through a dielectric tensor stack.
@@ -128,17 +132,31 @@ class wavefronts:
             # Free-space propagation between slices
             if propagate:
                 if iz < Nz - 1:
-                    E_in = self.propagate_free_space_jones(
-                        E_in,
-                        wavelength,
-                        dz,
-                        pixel_size,
-                        padding_px=propagation_padding_px,
-                        padding_mode=propagation_padding_mode,
-                        absorber_width_px=propagation_absorber_width_px,
-                        absorber_strength=propagation_absorber_strength,
-                        absorber_profile=propagation_absorber_profile,
-                    )
+                    if multislice_propagation_roi and self.aperture_support_regions:
+                        E_in = self.propagate_free_space_jones_roi(
+                            E_in,
+                            wavelength,
+                            dz,
+                            pixel_size,
+                            self.aperture_support_regions,
+                            padding_px=propagation_padding_px,
+                            padding_mode=propagation_padding_mode,
+                            absorber_width_px=propagation_absorber_width_px,
+                            absorber_strength=propagation_absorber_strength,
+                            absorber_profile=propagation_absorber_profile,
+                        )
+                    else:
+                        E_in = self.propagate_free_space_jones(
+                            E_in,
+                            wavelength,
+                            dz,
+                            pixel_size,
+                            padding_px=propagation_padding_px,
+                            padding_mode=propagation_padding_mode,
+                            absorber_width_px=propagation_absorber_width_px,
+                            absorber_strength=propagation_absorber_strength,
+                            absorber_profile=propagation_absorber_profile,
+                        )
 
         return E_in
 
@@ -397,6 +415,63 @@ class wavefronts:
                 padding_px : padding_px + E_in.shape[1],
                 :,
             ]
+        return E_out
+
+    def propagate_free_space_jones_roi(
+        self,
+        E_in,
+        wavelength,
+        dz,
+        pixel_size,
+        aperture_support_regions,
+        padding_px=0,
+        padding_mode="edge",
+        absorber_width_px=0,
+        absorber_strength=0.0,
+        absorber_profile="cosine",
+    ):
+        """Approximate free-space propagation with FFTs only in aperture ROIs.
+
+        Outside the ROI boxes the field is assumed locally plane-wave-like and
+        receives only the zero-spatial-frequency angular-spectrum phase. This is
+        faster than a global FFT but intentionally approximate because true
+        free-space propagation couples all pixels.
+        """
+        E_in = np.asarray(E_in, dtype=complex)
+        wavelength = float(wavelength)
+        dz = float(dz)
+        if dz == 0:
+            return E_in.copy()
+        if not aperture_support_regions:
+            return self.propagate_free_space_jones(
+                E_in,
+                wavelength,
+                dz,
+                pixel_size,
+                padding_px=padding_px,
+                padding_mode=padding_mode,
+                absorber_width_px=absorber_width_px,
+                absorber_strength=absorber_strength,
+                absorber_profile=absorber_profile,
+            )
+
+        k0 = 2 * np.pi / wavelength
+        E_out = np.asarray(E_in * np.exp(-1j * k0 * dz), dtype=complex)
+
+        for region in aperture_support_regions:
+            region_key = (*region, slice(None))
+            E_out[region_key] = self.propagate_free_space_jones(
+                E_in[region_key],
+                wavelength,
+                dz,
+                pixel_size,
+                padding_px=padding_px,
+                padding_mode=padding_mode,
+                absorber_width_px=absorber_width_px,
+                absorber_strength=absorber_strength,
+                absorber_profile=absorber_profile,
+            )
+
         return E_out
 
     @classmethod

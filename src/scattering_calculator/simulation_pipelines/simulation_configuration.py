@@ -1233,6 +1233,9 @@ class SamplePropagatorConfig(_ConfigMixin):
             propagation_absorber_profile=str(
                 self.propagator_config.get("propagation_absorber_profile", "cosine")
             ),
+            multislice_propagation_roi=bool(
+                self.propagator_config.get("multislice_propagation_roi", False)
+            ),
         )
         return wavefront
 

@@ -203,6 +203,11 @@ class HologramPipelineConfig:
         configured strength at the outer edge. One of ``"cosine"``,
         ``"smoothstep"``, ``"quadratic"``, or ``"linear"``. Default
         ``"cosine"``.
+    multislice_propagation_roi : bool
+        If ``True``, approximate the free-space step between slices by running
+        angular-spectrum propagation only inside aperture ROI boxes and applying
+        a plane-wave phase outside those boxes. If ``False``, use full-field
+        free-space propagation. Default ``False``.
     oversampling : int
         Oversampling factor relative to the Nyquist limit from the detector.
         ``real_space_pixel_size = detector_resolution / oversampling``.
@@ -316,6 +321,7 @@ class HologramPipelineConfig:
     propagation_absorber_width_px: int = 0
     propagation_absorber_strength: float = 0.0
     propagation_absorber_profile: str = "cosine"
+    multislice_propagation_roi: bool = False
 
     # Simulation grid
     oversampling: int = 2
@@ -1083,6 +1089,7 @@ class HologramPipeline:
                     "propagation_absorber_width_px": cfg.propagation_absorber_width_px,
                     "propagation_absorber_strength": cfg.propagation_absorber_strength,
                     "propagation_absorber_profile": cfg.propagation_absorber_profile,
+                    "multislice_propagation_roi": cfg.multislice_propagation_roi,
                 },
             )
             propagator_config.setup()
@@ -1119,6 +1126,9 @@ class HologramPipeline:
 
         metadata.update(propagator_config.get_metadata())
         metadata.update(xray_config.get_metadata(prefix="xray/"))
+        metadata["propagation/multislice_roi"] = bool(
+            cfg.multislice_propagation_roi
+        )
         metadata["detector/save_detected_no_beamstop"] = bool(
             cfg.save_detected_hologram_without_beamstop
         )
@@ -1343,6 +1353,10 @@ class HologramPipeline:
         grp.create_dataset(
             "propagation_absorber_profile",
             data=np.bytes_(str(cfg.propagation_absorber_profile)),
+        )
+        grp.create_dataset(
+            "multislice_propagation_roi",
+            data=bool(cfg.multislice_propagation_roi),
         )
         grp.create_dataset("aperture_method", data=np.bytes_(str(cfg.aperture_method)))
         grp.create_dataset(

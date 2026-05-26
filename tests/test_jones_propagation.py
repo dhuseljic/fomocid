@@ -105,6 +105,52 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
 
         self.assertTrue(np.allclose(compact_out, dense_out))
 
+    def test_roi_free_space_propagation_keeps_plane_phase_outside_roi(self) -> None:
+        field = np.ones((16, 18, 2), dtype=complex)
+        field[7:9, 8:10, 0] = 5.0
+        field[7:9, 8:10, 1] = -2.0j
+        region = (slice(6, 11), slice(7, 12))
+
+        wf = object.__new__(wavefronts)
+        out = wf.propagate_free_space_jones_roi(
+            field,
+            wavelength=1e-9,
+            dz=4e-9,
+            pixel_size=1e-9,
+            aperture_support_regions=(region,),
+            padding_px=2,
+            padding_mode="edge",
+        )
+
+        expected_outside = field * np.exp(-1j * 2 * np.pi / 1e-9 * 4e-9)
+        outside = np.ones(field.shape[:2], dtype=bool)
+        outside[region] = False
+
+        self.assertEqual(out.shape, field.shape)
+        self.assertTrue(np.allclose(out[outside], expected_outside[outside]))
+        self.assertTrue(np.all(np.isfinite(out)))
+
+    def test_roi_free_space_propagation_falls_back_without_regions(self) -> None:
+        field = np.zeros((8, 9, 2), dtype=complex)
+        field[4, 4, 0] = 1.0
+
+        wf = object.__new__(wavefronts)
+        roi_out = wf.propagate_free_space_jones_roi(
+            field,
+            wavelength=1e-9,
+            dz=3e-9,
+            pixel_size=1e-9,
+            aperture_support_regions=None,
+        )
+        full_out = wf.propagate_free_space_jones(
+            field,
+            wavelength=1e-9,
+            dz=3e-9,
+            pixel_size=1e-9,
+        )
+
+        self.assertTrue(np.allclose(roi_out, full_out))
+
 
 if __name__ == "__main__":
     unittest.main()

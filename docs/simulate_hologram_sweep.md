@@ -80,10 +80,17 @@ regions that matter:
 ```python
 use_roi = True
 dielectric_tensor_use_roi = True
+dielectric_tensor_compact = True
 ```
 
 `use_roi=True` enables OH-local magnetic patterns and local aperture/dielectric
 optimizations. Turn it off to compute on the full slab.
+
+`dielectric_tensor_compact=True` avoids allocating the full dense
+`(Nz, Ny, Nx, 2, 2)` tensor stack. The simulator stores constant per-layer
+diagonal terms plus aperture ROI patches, then evaluates those patches during
+Jones propagation. Set it to `False` if you need `final_dielectric_tensor` to be
+a materialized dense array for debugging or downstream inspection.
 
 ### Multislice Propagation
 
@@ -92,6 +99,7 @@ the script:
 
 ```python
 propagate = True
+multislice_propagation_roi = False
 propagation_padding_px = 128
 propagation_padding_mode = "edge"
 propagation_absorber_width_px = 64
@@ -105,6 +113,14 @@ sample pixel size and each layer thickness. This is more physical for thick
 or strongly structured aperture stacks, but it is slower because it adds FFTs
 between layers. When `propagate=False`, the simulator applies only the local
 Jones transmission for each layer, which is the faster historical mode.
+
+`multislice_propagation_roi=False` keeps the current full-field free-space
+propagation. If set to `True`, the free-space FFT between slices is evaluated
+only inside the aperture ROI boxes. Outside those boxes, the field is advanced
+with the zero-spatial-frequency plane-wave phase. This can be much faster for
+large grids with small apertures, but it is approximate because true free-space
+propagation is nonlocal and diffracted light can move between ROI and non-ROI
+pixels.
 
 The free-space propagator damps evanescent spatial frequencies to avoid
 unphysical exponential growth and caches repeated propagation kernels for
@@ -201,6 +217,19 @@ beamstop_config = {
 detector pixels. Values above `1` reduce stair-step artifacts for thin or
 diagonal wires and produce fractional mask values at edges. Use `1` for the
 historical binary rasterization.
+
+The normal detected hologram applies the beamstop before readout noise,
+rounding, thresholding, and frame averaging. To additionally save a detected
+hologram as if no beamstop were present, enable:
+
+```python
+save_detected_hologram_without_beamstop = True
+```
+
+This writes `CR/detected_no_beamstop` and `CL/detected_no_beamstop`. The optional
+arrays are generated from the same photon and readout-noise realization as
+`CR/detected` and `CL/detected`, but skip both the beamstop mask and detector
+threshold cap.
 
 ### Skyrmion Parameters
 
@@ -321,11 +350,13 @@ Each sample group contains:
 ├── CR/
 │   ├── exit_wave
 │   ├── ideal
-│   └── detected
+│   ├── detected
+│   └── detected_no_beamstop  # optional
 ├── CL/
 │   ├── exit_wave
 │   ├── ideal
-│   └── detected
+│   ├── detected
+│   └── detected_no_beamstop  # optional
 ├── beamstop_mask
 ├── supportmask
 ├── magnetic_pattern_oh
@@ -336,6 +367,9 @@ Polarization groups:
 
 - `CR/ideal`, `CL/ideal`: ideal detector holograms before detector noise.
 - `CR/detected`, `CL/detected`: detector holograms after noise/artifacts.
+- `CR/detected_no_beamstop`, `CL/detected_no_beamstop`: optional detected
+  holograms from the same noise realization as `detected`, but without beamstop
+  masking or detector threshold capping.
 - `CR/exit_wave`, `CL/exit_wave`: complex exit wavefields.
 
 Other arrays:
@@ -351,7 +385,9 @@ propagation parameters.
 The `_pipeline_config/` group stores fixed top-level settings such as `recipe`,
 `oversampling`, detector shape, `propagate`, `propagation_padding_px`,
 `propagation_padding_mode`, `propagation_absorber_width_px`,
-`propagation_absorber_strength`, and `propagation_absorber_profile`.
+`propagation_absorber_strength`, `propagation_absorber_profile`, and
+`multislice_propagation_roi`, and
+`save_detected_hologram_without_beamstop`.
 
 ## Reading The HDF5 File
 
@@ -378,6 +414,11 @@ with h5py.File(path, "r") as h5:
 
     cr_ideal = g["CR/ideal"][()]
     cr_detected = g["CR/detected"][()]
+    cr_detected_no_beamstop = (
+        g["CR/detected_no_beamstop"][()]
+        if "detected_no_beamstop" in g["CR"]
+        else None
+    )
     cl_detected = g["CL/detected"][()]
     exit_wave = g["CR/exit_wave"][()]
 
@@ -430,6 +471,13 @@ with h5py.File(path, "r") as h5:
 print(meta["xray/energy"])
 print(meta["magnetic_pattern/pattern_type_method"])
 ```
+
+## Inspecting The Output
+
+The final inspection section in `tutorials/simulate_hologram_sweep.py` opens
+screen-friendly Matplotlib figures and uses `interpolation="none"` for every
+`imshow` call so detector pixels and aperture cuts are shown without display
+smoothing.
 
 ## FTH Reconstruction
 
