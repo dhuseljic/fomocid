@@ -25,12 +25,9 @@ from scattering_calculator.sample_generator import structures
 #################################################################
 nr_simulations = 2  # increase to e.g. 1000 for a full training dataset
 
-# --- Material stack ---
-# Slash-separated terms are separate propagated layers. Adjacent terms without
-# a slash are one thickness-weighted effective-medium layer, e.g.
-# Pt(4)/Co(6) -> two layers, Pt(4)Co(6) -> one 10 nm layer.
-recipe = "[Au(140)/Cr(60)]x5/SiN(200)/[Pt(4)/Al(4)/Co(4)]x5"
-oversampling = 2
+# --- Material stack --- 
+recipe = "[Au(140)Cr(60)]x5/SiN(200)/Pt(20)Al(20)Co(20)"
+oversampling=2
 
 # %%
 # ===================

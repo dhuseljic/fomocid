@@ -41,6 +41,23 @@ class RecipeParserTests(unittest.TestCase):
         self.assertFalse(recipe.layers[1].is_composite)
         self.assertEqual([layer.material for layer in recipe.layers], ["Pt", "Co"])
 
+    def test_composite_layer_accepts_any_number_of_material_terms(self) -> None:
+        recipe = parse_recipe("Pt(1)Co(4)Ta(3)Au(2)")
+        layer = recipe.layers[0]
+
+        self.assertEqual(len(recipe.layers), 1)
+        self.assertTrue(layer.is_composite)
+        self.assertEqual(layer.material, "Pt(1)Co(4)Ta(3)Au(2)")
+        self.assertAlmostEqual(layer.thickness, 10e-9)
+        self.assertEqual(
+            [component[0] for component in layer.components],
+            ["Pt", "Co", "Ta", "Au"],
+        )
+        np.testing.assert_allclose(
+            [component[1] for component in layer.components],
+            [1e-9, 4e-9, 3e-9, 2e-9],
+        )
+
     def test_composite_layer_uses_thickness_weighted_dielectric_tensor(self) -> None:
         params = material_params(
             refractive_indices={
