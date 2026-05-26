@@ -33,6 +33,20 @@ class Layer:
 
     material: str
     thickness: float
+    components: Tuple[Tuple[str, float], ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.components is None:
+            object.__setattr__(
+                self,
+                "components",
+                ((self.material, self.thickness),),
+            )
+
+    @property
+    def is_composite(self) -> bool:
+        """Return ``True`` when this layer combines multiple materials."""
+        return len(self.components or ()) > 1
 
     # @property
     # def thickness(self) -> float:
@@ -135,12 +149,14 @@ class RecipeParser:
     Supported syntax:
         Pt(5)
         Pt(5)/Co(1)
+        Pt(4)Co(6)
         Pt(5)/[Pt(2)/Co(1)]x10/Ta(5)
         [Pt(2)/[Co(1)/Ni(0.5)]x3]x5
 
     Conventions:
     - Thickness is assumed to be in nm
     - Layers are separated by '/'
+    - Adjacent material terms without '/' form one effective-medium layer
     - Repeated blocks use [ ... ]xN
     - Nested repeated blocks are supported
     """
@@ -188,7 +204,7 @@ class RecipeParser:
                 layers.extend(block_layers)
                 continue
 
-            layer = self._parse_layer()
+            layer = self._parse_composite_layer()
             layers.append(layer)
 
         return layers
@@ -202,6 +218,33 @@ class RecipeParser:
         repeat = self._parse_integer()
 
         return inner_layers * repeat
+
+    def _parse_composite_layer(self) -> Layer:
+        components: list[Layer] = [self._parse_layer()]
+        while self.pos < len(self.text):
+            char = self.text[self.pos]
+            if char in "/]":
+                break
+            if char == "[":
+                break
+            components.append(self._parse_layer())
+
+        if len(components) == 1:
+            return components[0]
+
+        total_thickness = sum(component.thickness for component in components)
+        label = "".join(
+            f"{component.material}({component.thickness * 1e9:g})"
+            for component in components
+        )
+        return Layer(
+            material=label,
+            thickness=total_thickness,
+            components=tuple(
+                (component.material, component.thickness)
+                for component in components
+            ),
+        )
 
     def _parse_layer(self) -> Layer:
         material = self._parse_material()
@@ -295,6 +338,9 @@ def parse_recipe(
     recipe : str
         Recipe string, e.g. ``"Pt(5)/[Co(2)/Pt(1)]x10/Ta(3)"``.
         Thicknesses are in nanometres; brackets with ``xN`` denote repetitions.
+        Adjacent material terms without a slash, e.g. ``"Pt(4)Co(6)"``, are
+        parsed as one effective-medium layer with thickness-weighted material
+        properties.
     sample_name : str or None, optional
         Human-readable label attached to the returned recipe.
     comments : list of str or None, optional
@@ -480,6 +526,57 @@ class Structure:
 
         self.layer_names.append(element)
         self.layer_thicknesses.append(thickness)
+        self.layer_refractive_indices.append(refractive_index)
+        self.dielectric_tensors.append(dielectric_tensor)
+        self.effective_refractive_indices.append(effective_index)
+        self.sample_shape[0] = len(self.layer_names)
+
+    def add_effective_layer(
+        self,
+        label: str,
+        components: tuple[tuple[str, float], ...],
+    ) -> None:
+        """Append one effective-medium layer from material/thickness components.
+
+        The layer thickness is the sum of component thicknesses. Refractive
+        indices and dielectric tensor channels are averaged by physical
+        thickness, which preserves the existing isotropic, XMCD, and XMLD tensor
+        representation while reducing the number of propagated slices.
+        """
+        if not components:
+            raise ValueError("Composite layer must contain at least one component.")
+
+        total_thickness = sum(thickness for _, thickness in components)
+        if total_thickness <= 0:
+            raise ValueError(
+                f"Composite layer {label!r} must have positive total thickness."
+            )
+
+        refractive_index = np.zeros(3, dtype=complex)
+        dielectric_tensor = None
+        for element, thickness in components:
+            weight = thickness / total_thickness
+            component_index = np.asarray(
+                self.material_params.get_refractive_index(element),
+                dtype=complex,
+            )
+            component_tensor = self.dielectric_tensor_mixed(
+                n=component_index,
+                theta=0.0,
+            )
+            refractive_index += weight * component_index
+            if dielectric_tensor is None:
+                dielectric_tensor = weight * component_tensor
+            else:
+                dielectric_tensor += weight * component_tensor
+
+        effective_index = self.calc_effective_refractive_indices(
+            refractive_index,
+            total_thickness,
+        )
+
+        self.layer_names.append(label)
+        self.layer_thicknesses.append(total_thickness)
         self.layer_refractive_indices.append(refractive_index)
         self.dielectric_tensors.append(dielectric_tensor)
         self.effective_refractive_indices.append(effective_index)

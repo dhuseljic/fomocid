@@ -144,7 +144,13 @@ class SetupSimulationExperiment:
             comments=self.sample_config.comments,
         )
         material_params = structures.material_params(
-            materials=set([element.material for element in stack.layers]),
+            materials=set(
+                material
+                for layer in stack.layers
+                for material, _ in (
+                    layer.components or ((layer.material, layer.thickness),)
+                )
+            ),
             x_ray_energy=self.xray_config.x_ray_energy,
         )
         self.sample = structures.Structure(
@@ -154,7 +160,10 @@ class SetupSimulationExperiment:
             real_space_pixel_size=self.real_space_pixel_size,
         )
         for layer in stack.layers:
-            self.sample.add_layer(layer.material, thickness=layer.thickness)
+            if layer.is_composite:
+                self.sample.add_effective_layer(layer.material, layer.components)
+            else:
+                self.sample.add_layer(layer.material, thickness=layer.thickness)
 
     def _setup_front_aperture(self):
         self.front_aperture = structures.Apertures3D(

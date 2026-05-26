@@ -51,6 +51,27 @@ Timing for each stage is printed when `verbose=True`.
 
 ## Important Controls
 
+### Material Recipe
+
+Recipe numbers are nanometres and layers are ordered top-to-bottom:
+
+```python
+recipe = "[Au(70)/Cr(30)]x10/SiN(200)/Co(90)/Pt(120)/Al(60)"
+```
+
+Slash-separated terms are propagated as separate layers. Adjacent terms without
+a slash are combined into one effective-medium layer:
+
+```python
+Pt(4)/Co(6)   # two propagated layers
+Pt(4)Co(6)   # one effective layer, 10 nm thick
+```
+
+For composite layers, the simulator averages the component dielectric tensor
+channels by physical thickness. This preserves the existing isotropic, XMCD,
+and XMLD tensor representation while reducing the number of free-space
+propagation steps in multislice mode.
+
 ### ROI Mode
 
 These flags reduce work by only generating or computing expensive quantities in

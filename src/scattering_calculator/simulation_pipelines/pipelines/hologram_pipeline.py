@@ -80,6 +80,9 @@ class HologramPipelineConfig:
     recipe : str
         Multilayer thin-film recipe, e.g. ``"Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)"``.
         Thicknesses are in nanometres, ordered top-to-bottom.
+        Slash-separated terms are separate layers; adjacent terms such as
+        ``"Pt(4)Co(6)"`` are combined into one thickness-weighted
+        effective-medium layer.
     sample_name : str or None
         Optional label stored in the HDF5 metadata.
     xray_energy : float

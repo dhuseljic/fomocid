@@ -466,6 +466,9 @@ class SampleConfig(_ConfigMixin):
     recipe : str
         Layer stack recipe string, e.g. ``"Au(700)/Cr(300)/SiN(200)/Co(90)"``.
         Thicknesses are in nanometres.
+        Slash-separated terms are separate layers; adjacent terms such as
+        ``"Pt(4)Co(6)"`` are combined into one thickness-weighted
+        effective-medium layer.
     sample_shape : tuple of int
         Sample array shape ``(Nz, Ny, Nx)`` in pixels. ``Nz = 0`` is a
         sentinel that gets updated to the number of layers after ``setup()``.
@@ -506,7 +509,11 @@ class SampleConfig(_ConfigMixin):
 
         self.material_params = structures.material_params(
             materials=set(
-                [element.material for element in self.multilayer_recipe.layers]
+                material
+                for layer in self.multilayer_recipe.layers
+                for material, _ in (
+                    layer.components or ((layer.material, layer.thickness),)
+                )
             ),
             x_ray_energy=self.xray_config.energy,
         )
@@ -518,7 +525,13 @@ class SampleConfig(_ConfigMixin):
             real_space_pixel_size=self.real_space_pixel_size,
         )
         for layer in self.multilayer_recipe.layers:
-            self.sample_structure.add_layer(layer.material, thickness=layer.thickness)
+            if layer.is_composite:
+                self.sample_structure.add_effective_layer(
+                    layer.material,
+                    layer.components,
+                )
+            else:
+                self.sample_structure.add_layer(layer.material, thickness=layer.thickness)
 
     def assign_magnetic_pattern(self, magnetic_vector_field: np.ndarray) -> None:
         """Map a 2-D scalar magnetization pattern onto the 3-D sample stack.
