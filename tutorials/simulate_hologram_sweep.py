@@ -23,10 +23,11 @@ from scattering_calculator.sample_generator import structures
 #################################################################
 #### HOW MANY SIMULATIONS TO RUN? ####
 #################################################################
-nr_simulations = 2  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 10  # increase to e.g. 1000 for a full training dataset
 
 # --- Material stack ---
-recipe = "[Au(700)/Cr(300)]x4/SiN(200)/Co(90)/Pt(120)/Al(60)"
+recipe = "[Au(140)/Cr(60)]x5/SiN(200)/[Pt(2)/Al(2)/Co(2)]x10"
+oversampling=1
 
 # %%
 # ===================
@@ -34,7 +35,7 @@ recipe = "[Au(700)/Cr(300)]x4/SiN(200)/Co(90)/Pt(120)/Al(60)"
 # ===================
 output_folder = DATA_ROOT / "Data" / "hologram_sweep"
 output_path = output_folder / "simulation_sweep.h5"
-pipeline_random_seed = 3  # set to None for non-reproducible random sweeps
+pipeline_random_seed = None  # set to None for non-reproducible random sweeps
 use_roi = True
 dielectric_tensor_use_roi = True
 propagate = True  # set True for multislice free-space propagation between layers
@@ -257,7 +258,7 @@ config = HologramPipelineConfig(
     propagation_absorber_strength=propagation_absorber_strength,
     propagation_absorber_profile=propagation_absorber_profile,
     # Simulation grid: sample_shape = oversampling * detector_shape
-    oversampling=2,
+    oversampling=oversampling,
     random_seed=pipeline_random_seed,
 )
 
@@ -366,7 +367,7 @@ def random_aperture_config(params):
     aperture_angles = [0.0]
     aperture_ellipticities = [1.0]
     aperture_seeds = [int(np.random.randint(0, 2**31 - 1))]
-    aperture_top_radius_factors = [2.0]
+    aperture_top_radius_factors = [Uniform(1.0, 2.0).sample()]
 
     # Object hole radius: larger than the sampled texture period and 100 nm,
     # but smaller than one quarter of the mask FOV and 5 um.
@@ -508,7 +509,6 @@ ranges = HologramPipelineRanges(
     # Pattern-type mix: 40% labyrinth, 40% skyrmion lattice, 20% saturated.
     pattern_type=Choice(
         (
-            "binary_labyrinth_pattern",
             "binary_labyrinth_pattern",
             "binary_labyrinth_pattern",
             "binary_labyrinth_pattern",
