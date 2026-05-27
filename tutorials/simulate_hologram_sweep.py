@@ -109,12 +109,17 @@ beamstop_config = {
 
 
 # --- Magnetic domain pattern ---
-pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", or "saturated_pattern"
+pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", "saturated_pattern", or "image_pattern"
 stripe_width = 300e-9  # m
 sigma = 30e-9  # m
 angle_stripes = np.pi / 4
 waviness_amplitude = 0e-9  # ms
 waviness_scale = 0e-9  # m
+experimental_pattern_path = None  # e.g. DATA_ROOT / "Data" / "reconstruction_domains.png"
+experimental_pattern_pixel_size = None  # real-space pixel size of that reconstruction, in m
+experimental_pattern_threshold = 0.5
+experimental_pattern_invert = False
+experimental_pattern_pad_mode = "edge"
 saturated_config = {
     "saturation": 1,
 }
@@ -158,6 +163,21 @@ elif pattern_type == "disordered_skyrmion_lattice_pattern":
     pattern_config.update(skyrmion_lattice_config)
 elif pattern_type == "saturated_pattern":
     pattern_config.update(saturated_config)
+elif pattern_type == "image_pattern":
+    if experimental_pattern_path is None or experimental_pattern_pixel_size is None:
+        raise ValueError(
+            "image_pattern requires experimental_pattern_path and "
+            "experimental_pattern_pixel_size."
+        )
+    pattern_config.update(
+        {
+            "image_path": str(experimental_pattern_path),
+            "image_pixel_size": experimental_pattern_pixel_size,
+            "threshold": experimental_pattern_threshold,
+            "invert": experimental_pattern_invert,
+            "pad_mode": experimental_pattern_pad_mode,
+        }
+    )
 else:
     raise ValueError(f"Unknown pattern_type: {pattern_type}")
 

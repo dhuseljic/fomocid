@@ -13,6 +13,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from scattering_calculator.sample_generator import pattern_generator
+from scattering_calculator.simulation_pipelines import simulation_configuration
 
 
 class BinaryLabyrinthAutoSizeTests(unittest.TestCase):
@@ -73,6 +74,50 @@ class BinaryLabyrinthAutoSizeTests(unittest.TestCase):
             )
 
         self.assertEqual(calls, [(100, 100)])
+
+
+class ImagePatternTests(unittest.TestCase):
+    def test_image_pattern_rescales_thresholded_domains(self) -> None:
+        image = np.zeros((4, 4), dtype=float)
+        image[:, 2:] = 1.0
+
+        pattern, meta = pattern_generator.create_image_pattern(
+            (8, 8),
+            image_array=image,
+            image_pixel_size=2.0,
+            real_space_pixel_size=1.0,
+            sigma=0.0,
+            threshold=0.5,
+        )
+
+        self.assertEqual(pattern.shape, (8, 8))
+        np.testing.assert_array_equal(pattern[:, :4], -1.0)
+        np.testing.assert_array_equal(pattern[:, 4:], 1.0)
+        self.assertEqual(meta["rescale_factor"], 2.0)
+        self.assertEqual(meta["source"], "image_array")
+
+    def test_image_pattern_sigma_is_converted_by_config(self) -> None:
+        image = np.zeros((6, 6), dtype=float)
+        image[:, 3:] = 1.0
+
+        config = simulation_configuration.MagneticPatternConfig(
+            pattern_type_method="image_pattern",
+            shape=(12, 12),
+            real_space_pixel_size=1e-9,
+            pattern_config={
+                "image_array": image,
+                "image_pixel_size": 2e-9,
+                "sigma": 1e-9,
+                "threshold": 0.5,
+            },
+        )
+        pattern, meta = config.create_pattern()
+
+        self.assertEqual(pattern.shape, (12, 12))
+        self.assertAlmostEqual(meta["sigma_px"], 1.0)
+        self.assertAlmostEqual(meta["rescale_factor"], 2.0)
+        self.assertLess(np.min(np.abs(pattern)), 1.0)
+        self.assertLessEqual(np.max(np.abs(pattern)), 1.0)
 
 
 if __name__ == "__main__":

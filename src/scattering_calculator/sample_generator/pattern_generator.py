@@ -897,6 +897,134 @@ def _center_crop(pattern: NDArray[np.float64], shape: tuple[int, int]) -> NDArra
     return pattern[y0 : y0 + rows, x0 : x0 + cols]
 
 
+def _center_crop_or_pad(
+    pattern: NDArray[np.float64],
+    shape: tuple[int, int],
+    pad_mode: str = "edge",
+    constant_values: float = 1.0,
+) -> NDArray[np.float64]:
+    """Return a centered array with ``shape``, padding if needed."""
+    rows, cols = shape
+    src_rows, src_cols = pattern.shape
+
+    if src_rows > rows:
+        y0 = (src_rows - rows) // 2
+        pattern = pattern[y0 : y0 + rows, :]
+    if src_cols > cols:
+        x0 = (src_cols - cols) // 2
+        pattern = pattern[:, x0 : x0 + cols]
+
+    pad_y = max(0, rows - pattern.shape[0])
+    pad_x = max(0, cols - pattern.shape[1])
+    if pad_y == 0 and pad_x == 0:
+        return pattern
+
+    pad_width = (
+        (pad_y // 2, pad_y - pad_y // 2),
+        (pad_x // 2, pad_x - pad_x // 2),
+    )
+    if pad_mode == "constant":
+        return np.pad(
+            pattern,
+            pad_width,
+            mode=pad_mode,
+            constant_values=constant_values,
+        )
+    return np.pad(pattern, pad_width, mode=pad_mode)
+
+
+def create_image_pattern(
+    sz_array: list[int] | tuple[int, int],
+    image_pixel_size: float,
+    image_path: str | None = None,
+    image_array: NDArray[np.float64] | None = None,
+    sigma: float | None = None,
+    threshold: float = 0.5,
+    invert: bool = False,
+    pad_mode: str = "edge",
+    constant_domain: float = 1.0,
+    real_space_pixel_size: float = 1,
+    **_,
+) -> tuple[NDArray[np.float64], dict]:
+    """Create a magnetic domain pattern from an experimental binary image.
+
+    The input image is interpreted at ``image_pixel_size`` and resampled to the
+    simulation ``real_space_pixel_size``. It is binarized before resampling so
+    the domain topology comes from the experimental reconstruction, while
+    ``sigma`` controls the simulated domain-wall width afterward.
+    """
+    rows, cols = tuple(sz_array)
+    if image_array is None:
+        if image_path is None:
+            raise ValueError("image_pattern requires either image_path or image_array.")
+        image = plt.imread(str(image_path))
+    else:
+        image = np.asarray(image_array)
+
+    if image.ndim == 3:
+        image = image[..., :3].mean(axis=-1)
+    if image.ndim != 2:
+        raise ValueError(
+            "image pattern must be 2-D after grayscale conversion, got "
+            f"{image.shape}"
+        )
+
+    image = np.asarray(image, dtype=float)
+    finite = np.isfinite(image)
+    if not np.any(finite):
+        raise ValueError("image pattern contains no finite pixels.")
+    fill_value = float(np.nanmedian(image[finite]))
+    image = np.where(finite, image, fill_value)
+
+    image_min = float(np.min(image))
+    image_max = float(np.max(image))
+    if image_max > image_min:
+        image = (image - image_min) / (image_max - image_min)
+
+    domains = image >= float(threshold)
+    if invert:
+        domains = ~domains
+    pattern = np.where(domains, 1.0, -1.0)
+
+    image_pixel_size = float(image_pixel_size)
+    real_space_pixel_size = float(real_space_pixel_size)
+    if image_pixel_size <= 0 or real_space_pixel_size <= 0:
+        raise ValueError(
+            "image_pixel_size and real_space_pixel_size must be positive, got "
+            f"{image_pixel_size} and {real_space_pixel_size}."
+        )
+    scale = image_pixel_size / real_space_pixel_size
+    if scale != 1.0:
+        pattern = zoom(pattern, scale, order=0)
+        if pattern.size == 0:
+            raise ValueError("rescaled image pattern is empty.")
+
+    pattern = _center_crop_or_pad(
+        pattern,
+        (rows, cols),
+        pad_mode=str(pad_mode),
+        constant_values=float(constant_domain),
+    )
+
+    if sigma is not None and sigma > 0:
+        pattern = gaussian_filter(pattern, float(sigma))
+        max_val = np.max(np.abs(pattern))
+        if max_val > 0:
+            pattern = pattern / max_val
+
+    meta = {
+        "source": "image_array" if image_array is not None else str(image_path),
+        "image_pixel_size_m": image_pixel_size,
+        "simulation_pixel_size_m": real_space_pixel_size,
+        "rescale_factor": scale,
+        "threshold": float(threshold),
+        "invert": bool(invert),
+        "pad_mode": str(pad_mode),
+        "sigma_px": 0.0 if sigma is None else float(sigma),
+    }
+    return pattern, meta
+
+
 def create_binary_labyrinth_pattern(
     sz_array: list[int] | tuple[int, int],
     stripe_width: float,

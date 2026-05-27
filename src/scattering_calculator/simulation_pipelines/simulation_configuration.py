@@ -579,7 +579,7 @@ class MagneticPatternConfig(_ConfigMixin):
 
     Parameters
     ----------
-    pattern_type_method : {"skyrmion_pattern", "disordered_skyrmion_lattice_pattern", "wavy_stripe_pattern", "binary_labyrinth_pattern", "saturated_pattern"}
+    pattern_type_method : {"skyrmion_pattern", "disordered_skyrmion_lattice_pattern", "wavy_stripe_pattern", "binary_labyrinth_pattern", "saturated_pattern", "image_pattern"}
         Which pattern generator function to use.
     shape : tuple of int or None
         2-D array shape ``(Ny, Nx)`` in pixels.
@@ -611,6 +611,7 @@ class MagneticPatternConfig(_ConfigMixin):
         "wavy_stripe_pattern",
         "binary_labyrinth_pattern",
         "saturated_pattern",
+        "image_pattern",
     ] = "skyrmion_pattern"
     shape: tuple[int, int] | None = None
     real_space_pixel_size: float | None = None
@@ -625,6 +626,7 @@ class MagneticPatternConfig(_ConfigMixin):
             "wavy_stripe_pattern": pattern_generator.create_wavy_stripe_pattern,
             "binary_labyrinth_pattern": pattern_generator.create_binary_labyrinth_pattern,
             "saturated_pattern": pattern_generator.create_saturated_pattern,
+            "image_pattern": pattern_generator.create_image_pattern,
         }
         method = _methods.get(self.pattern_type_method)
         if method is None:
@@ -669,6 +671,9 @@ class MagneticPatternConfig(_ConfigMixin):
             },
             "binary_labyrinth_pattern": {
                 "stripe_width",
+                "sigma",
+            },
+            "image_pattern": {
                 "sigma",
             },
         }

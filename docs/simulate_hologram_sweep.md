@@ -163,6 +163,7 @@ Supported options:
 
 - `binary_labyrinth_pattern`: labyrinth domains generated from the binary Gray-Scott helper, rescaled to the requested stripe width.
 - `disordered_skyrmion_lattice_pattern`: random non-overlapping irregular skyrmions; `stripe_width` is the average skyrmion diameter.
+- `image_pattern`: magnetic domains loaded from a binary experimental reconstruction.
 - `saturated_pattern`: uniform `mz = +1` or `mz = -1`.
 - `wavy_stripe_pattern`: analytic wavy stripe domains.
 
@@ -206,6 +207,28 @@ generated labyrinth image will be rescaled to reach the requested stripe width.
 Large final stripes therefore use a smaller generated source field when
 possible, while still regenerating a larger field if the measured FFT stripe
 width would make the scaled image too small to crop safely.
+
+### Experimental Image Patterns
+
+The notebook and sweep script can use a binary experimental FTH reconstruction
+as the base domain topology:
+
+```python
+pattern_type = "image_pattern"
+experimental_pattern_path = DATA_ROOT / "Data" / "reconstruction_domains.png"
+experimental_pattern_pixel_size = 5e-9  # metres per image pixel
+experimental_pattern_threshold = 0.5
+experimental_pattern_invert = False
+experimental_pattern_pad_mode = "edge"
+sigma = 30e-9
+```
+
+The loader converts RGB/RGBA images to grayscale, normalizes finite pixels to
+`[0, 1]`, thresholds the result into `+1/-1` domains, rescales from
+`experimental_pattern_pixel_size` to the simulation pixel size with
+nearest-neighbour interpolation, then crops or pads to the simulated field of
+view. The domain-wall width still comes from `sigma`, so the experimental image
+sets the domain layout while the simulation controls the wall smoothing.
 
 ### Beamstop And Wire Mask
 

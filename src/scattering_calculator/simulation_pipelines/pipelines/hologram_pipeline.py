@@ -145,7 +145,7 @@ class HologramPipelineConfig:
         Propagation distance from the Gaussian waist to the sample plane, in metres.
     illumination_fwhm : float
         Gaussian beam FWHM at the waist in metres.
-    pattern_type : {"wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", "saturated_pattern", "skyrmion_pattern"}
+    pattern_type : {"wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", "saturated_pattern", "skyrmion_pattern", "image_pattern"}
         Which magnetic domain pattern generator to use.
     pattern_config : dict
         Pattern parameters forwarded to the generator. Physical-length entries
