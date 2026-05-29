@@ -1,3 +1,5 @@
+"""Jones-matrix propagation utilities for polarized wavefront simulations."""
+
 import numpy as np
 import scipy as scp
 from scattering_calculator.utils import physics, image_transformator
@@ -38,6 +40,44 @@ class wavefronts:
         multislice_propagation_roi=False,
         multislice_propagation_roi_padding_px=0,
     ):
+        """Initialize a wavefronts instance.
+
+        Parameters
+        ----------
+        beam_parameters : Any
+            Input value for ``beam_parameters``.
+        eps_stack : Any
+            Input value for ``eps_stack``.
+        layer_thicknesses : Any
+            Input value for ``layer_thicknesses``.
+        real_space_pixel_size : Any
+            Input value for ``real_space_pixel_size``.
+        E_in : Any
+            Input value for ``E_in``.
+        aperture_support_regions : Any
+            Input value for ``aperture_support_regions``.
+        propagate : Any
+            Input value for ``propagate``.
+        propagation_padding_px : Any
+            Input value for ``propagation_padding_px``.
+        propagation_padding_mode : Any
+            Input value for ``propagation_padding_mode``.
+        propagation_absorber_width_px : Any
+            Input value for ``propagation_absorber_width_px``.
+        propagation_absorber_strength : Any
+            Input value for ``propagation_absorber_strength``.
+        propagation_absorber_profile : Any
+            Input value for ``propagation_absorber_profile``.
+        multislice_propagation_roi : Any
+            Input value for ``multislice_propagation_roi``.
+        multislice_propagation_roi_padding_px : Any
+            Input value for ``multislice_propagation_roi_padding_px``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.E_in=E_in
         self.aperture_support_regions = aperture_support_regions
         self.propagation_padding_px = max(0, int(propagation_padding_px))
@@ -171,6 +211,18 @@ class wavefronts:
 
     @staticmethod
     def _is_compact_eps_stack(eps_stack):
+        """Handle the internal is compact eps stack operation.
+
+        Parameters
+        ----------
+        eps_stack : Any
+            Input value for ``eps_stack``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         return (
             hasattr(eps_stack, "base_diagonal")
             and hasattr(eps_stack, "patches")
@@ -237,6 +289,24 @@ class wavefronts:
         applied. This path avoids building a full ``(Ny, Nx, 2, 2)`` Jones
         matrix field and only evaluates the 2x2 matrix function on pixels with
         non-zero off-diagonal tensor terms.
+
+        Parameters
+        ----------
+        E : Any
+            Input value for ``E``.
+        eps_slice : Any
+            Input value for ``eps_slice``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        thickness : Any
+            Input value for ``thickness``.
+        aperture_support_regions : Any
+            Input value for ``aperture_support_regions``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         phase = -1j * (2 * np.pi / wavelength) * thickness
         tol = 1e-14
@@ -353,8 +423,7 @@ class wavefronts:
         absorber_strength=0.0,
         absorber_profile="cosine",
     ):
-        """
-        Free-space propagation of a Jones wavefield by angular spectrum.
+        """Free-space propagation of a Jones wavefield by angular spectrum.
 
         E_in: (Ny, Nx, 2)
         wavelength: scalar
@@ -363,6 +432,32 @@ class wavefronts:
 
         returns:
             E_out: (Ny, Nx, 2)
+
+        Parameters
+        ----------
+        E_in : Any
+            Input value for ``E_in``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        dz : Any
+            Input value for ``dz``.
+        pixel_size : Any
+            Input value for ``pixel_size``.
+        padding_px : Any
+            Input value for ``padding_px``.
+        padding_mode : Any
+            Input value for ``padding_mode``.
+        absorber_width_px : Any
+            Input value for ``absorber_width_px``.
+        absorber_strength : Any
+            Input value for ``absorber_strength``.
+        absorber_profile : Any
+            Input value for ``absorber_profile``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         E_in = np.asarray(E_in, dtype=complex)
         wavelength = float(wavelength)
@@ -446,6 +541,36 @@ class wavefronts:
         receives only the zero-spatial-frequency angular-spectrum phase. This is
         faster than a global FFT but intentionally approximate because true
         free-space propagation couples all pixels.
+
+        Parameters
+        ----------
+        E_in : Any
+            Input value for ``E_in``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        dz : Any
+            Input value for ``dz``.
+        pixel_size : Any
+            Input value for ``pixel_size``.
+        aperture_support_regions : Any
+            Input value for ``aperture_support_regions``.
+        roi_padding_px : Any
+            Input value for ``roi_padding_px``.
+        padding_px : Any
+            Input value for ``padding_px``.
+        padding_mode : Any
+            Input value for ``padding_mode``.
+        absorber_width_px : Any
+            Input value for ``absorber_width_px``.
+        absorber_strength : Any
+            Input value for ``absorber_strength``.
+        absorber_profile : Any
+            Input value for ``absorber_profile``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         E_in = np.asarray(E_in, dtype=complex)
         wavelength = float(wavelength)
@@ -491,7 +616,22 @@ class wavefronts:
 
     @staticmethod
     def _pad_regions(regions, shape, padding_px):
-        """Return y/x slice regions padded and clipped to ``shape``."""
+        """Return y/x slice regions padded and clipped to ``shape``.
+
+        Parameters
+        ----------
+        regions : Any
+            Input value for ``regions``.
+        shape : Any
+            Input value for ``shape``.
+        padding_px : Any
+            Input value for ``padding_px``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         pad = max(0, int(padding_px))
         if pad == 0:
             return tuple(regions)
@@ -509,7 +649,18 @@ class wavefronts:
 
     @classmethod
     def _normalize_padding_mode(cls, padding_mode):
-        """Return a NumPy padding mode for free-space propagation margins."""
+        """Return a NumPy padding mode for free-space propagation margins.
+
+        Parameters
+        ----------
+        padding_mode : Any
+            Input value for ``padding_mode``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         mode = str(padding_mode).lower()
         aliases = {
             "zero": "constant",
@@ -528,7 +679,26 @@ class wavefronts:
 
     @classmethod
     def _edge_absorber(cls, Ny, Nx, width_px, strength, profile="cosine"):
-        """Return a smooth edge absorber equal to one away from the border."""
+        """Return a smooth edge absorber equal to one away from the border.
+
+        Parameters
+        ----------
+        Ny : Any
+            Input value for ``Ny``.
+        Nx : Any
+            Input value for ``Nx``.
+        width_px : Any
+            Input value for ``width_px``.
+        strength : Any
+            Input value for ``strength``.
+        profile : Any
+            Input value for ``profile``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         width_px = max(0, int(width_px))
         strength = max(0.0, float(strength))
         if width_px <= 0 or strength <= 0:
@@ -546,7 +716,20 @@ class wavefronts:
 
     @classmethod
     def _absorber_edge_weight(cls, ramp, profile):
-        """Return a smooth 0-to-1 absorption profile from interior to edge."""
+        """Return a smooth 0-to-1 absorption profile from interior to edge.
+
+        Parameters
+        ----------
+        ramp : Any
+            Input value for ``ramp``.
+        profile : Any
+            Input value for ``profile``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         profile = str(profile).lower()
         t = 1.0 - np.clip(ramp, 0.0, 1.0)
         if profile == "linear":
@@ -564,7 +747,26 @@ class wavefronts:
 
     @classmethod
     def _free_space_kernel(cls, Ny, Nx, wavelength, dz, pixel_size):
-        """Return a cached angular-spectrum propagator for one free-space step."""
+        """Return a cached angular-spectrum propagator for one free-space step.
+
+        Parameters
+        ----------
+        Ny : Any
+            Input value for ``Ny``.
+        Nx : Any
+            Input value for ``Nx``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        dz : Any
+            Input value for ``dz``.
+        pixel_size : Any
+            Input value for ``pixel_size``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         key = (int(Ny), int(Nx), float(wavelength), float(dz), float(pixel_size))
         H = cls._free_space_kernel_cache.get(key)
         if H is not None:
@@ -592,10 +794,25 @@ class wavefronts:
         return H
 
     def propagate_free_space_jones_260526(self,E_in, wavelength, dz, pixel_size):
-        """
-        Previous per-polarization free-space propagation implementation kept
+        """Previous per-polarization free-space propagation implementation kept
         for comparison/debugging. New code should use
         ``propagate_free_space_jones``.
+
+        Parameters
+        ----------
+        E_in : Any
+            Input value for ``E_in``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        dz : Any
+            Input value for ``dz``.
+        pixel_size : Any
+            Input value for ``pixel_size``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         E_in = np.asarray(E_in, dtype=complex)
         wavelength = float(wavelength)
@@ -635,7 +852,26 @@ class wavefronts:
         return E_out
 
     def apply_compact_eps_slice(self, E, eps_stack, layer_idx, wavelength, thickness):
-        """Apply one compact dielectric layer without materializing the full slice."""
+        """Apply one compact dielectric layer without materializing the full slice.
+
+        Parameters
+        ----------
+        E : Any
+            Input value for ``E``.
+        eps_stack : Any
+            Input value for ``eps_stack``.
+        layer_idx : Any
+            Input value for ``layer_idx``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        thickness : Any
+            Input value for ``thickness``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         phase = -1j * (2 * np.pi / wavelength) * thickness
         base_a, base_d = eps_stack.base_diagonal[layer_idx]
 
@@ -659,36 +895,57 @@ class wavefronts:
     # Utility: apply a Jones matrix field to a Jones wavefield
     # ============================================================
     def apply_jones_field(self,E_in, J_field):
-        """
-        E_in:   (Ny, Nx, 2)
+        """E_in:   (Ny, Nx, 2)
         J_field:(Ny, Nx, 2, 2)
 
         returns:
             E_out: (Ny, Nx, 2)
+
+        Parameters
+        ----------
+        E_in : Any
+            Input value for ``E_in``.
+        J_field : Any
+            Input value for ``J_field``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         return np.einsum("yxab,yxb->yxa", J_field, E_in)
 
 
 def E_j(E,pol):
-    '''
-    Calculate Jones wavefield for given polarization.
-    
+    """Calculate Jones wavefield for given polarization.
+
     Parameters
     ----------
     E : ndarray of shape (Ny, Nx, 2)
         Input Jones wavefield.
     pol : int or str
-        Polarization index (0 for Ex, 1 for Ey) or polarization type ("CR'''
+        Polarization index (0 for Ex, 1 for Ey) or polarization type ("CR
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
 
     return np.einsum("yxs,s->yxs", E, light_beam.polarization_vector(pol))
 
 def E_I(E):
-    '''Calculate intensity of Jones wavefield for given polarization.
-    
+    """Calculate intensity of Jones wavefield for given polarization.
+
     Parameters
     ----------
     E : ndarray of shape (Ny, Nx, 2)
-        Input Jones wavefield.       
-    '''
+        Input Jones wavefield.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     I= (np.sum(np.abs(E)**2, axis=(2)))
     return I

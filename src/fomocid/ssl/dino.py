@@ -31,6 +31,16 @@ class DINOModule(pl.LightningModule):
                 ``dataset.image_size`` plus DINO-specific ``ssl`` keys such as
                 ``backbone``, crop parameters, projection-head sizes, teacher
                 temperatures, and EMA momentum bounds.
+
+        Parameters
+        ----------
+        config : RootConfig
+            Input value for ``config``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         super().__init__()
         self.config = config
@@ -82,6 +92,16 @@ class DINOModule(pl.LightningModule):
 
         Returns:
             Image-level embeddings from the student backbone.
+
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            Input value for ``inputs``.
+
+        Returns
+        -------
+        result : torch.Tensor
+            Return value produced by the function.
         """
         return self.embed(inputs)
 
@@ -93,6 +113,16 @@ class DINOModule(pl.LightningModule):
 
         Returns:
             Feature matrix with one embedding vector per image.
+
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            Input value for ``inputs``.
+
+        Returns
+        -------
+        result : torch.Tensor
+            Return value produced by the function.
         """
         return self.student_backbone(inputs)
 
@@ -104,6 +134,16 @@ class DINOModule(pl.LightningModule):
 
         Returns:
             The module instance for chaining.
+
+        Parameters
+        ----------
+        mode : bool
+            Input value for ``mode``.
+
+        Returns
+        -------
+        result : "DINOModule"
+            Return value produced by the function.
         """
         super().train(mode)
         self.teacher_backbone.eval()
@@ -119,6 +159,18 @@ class DINOModule(pl.LightningModule):
 
         Returns:
             Scalar DINO loss tensor for the current optimization step.
+
+        Parameters
+        ----------
+        batch : Any
+            Input value for ``batch``.
+        batch_idx : int
+            Input value for ``batch_idx``.
+
+        Returns
+        -------
+        result : torch.Tensor
+            Return value produced by the function.
         """
         views, _targets = batch
         student_outputs = [self.student_head(self.student_backbone(view)) for view in views]
@@ -129,7 +181,18 @@ class DINOModule(pl.LightningModule):
         return loss
 
     def on_after_backward(self) -> None:
-        """Apply DINO's last-layer gradient cancellation schedule."""
+        """Apply DINO's last-layer gradient cancellation schedule.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.student_head.cancel_last_layer_gradients(self.current_epoch)
 
     def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int) -> None:
@@ -139,6 +202,20 @@ class DINOModule(pl.LightningModule):
             outputs: Output returned by :meth:`training_step`.
             batch: Current training batch.
             batch_idx: Zero-based batch index inside the current epoch.
+
+        Parameters
+        ----------
+        outputs : Any
+            Input value for ``outputs``.
+        batch : Any
+            Input value for ``batch``.
+        batch_idx : int
+            Input value for ``batch_idx``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         total_steps = max(int(self.trainer.estimated_stepping_batches), 1)
         progress = min(float(self.global_step) / float(total_steps), 1.0)
@@ -149,5 +226,16 @@ class DINOModule(pl.LightningModule):
         self.log("teacher_momentum", momentum, on_step=True, on_epoch=False, prog_bar=False, batch_size=views[0].size(0))
 
     def configure_optimizers(self) -> Any:
-        """Build the AdamW optimizer and optional LR scheduler."""
+        """Build the AdamW optimizer and optional LR scheduler.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         return configure_pretraining_optimizers(self, self.optimizer_config)

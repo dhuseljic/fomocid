@@ -31,6 +31,16 @@ class MAEModule(pl.LightningModule):
 
         Raises:
             ValueError: If the image size is incompatible with the patch size.
+
+        Parameters
+        ----------
+        config : RootConfig
+            Input value for ``config``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         super().__init__()
         self.config = config
@@ -83,6 +93,16 @@ class MAEModule(pl.LightningModule):
 
         Returns:
             Image-level embeddings derived from MAE encoder tokens.
+
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            Input value for ``inputs``.
+
+        Returns
+        -------
+        result : torch.Tensor
+            Return value produced by the function.
         """
         return self.embed(inputs)
 
@@ -94,6 +114,16 @@ class MAEModule(pl.LightningModule):
 
         Returns:
             Feature matrix with one pooled embedding per image.
+
+        Parameters
+        ----------
+        inputs : torch.Tensor
+            Input value for ``inputs``.
+
+        Returns
+        -------
+        result : torch.Tensor
+            Return value produced by the function.
         """
         encoded = self.backbone.encode(inputs)
         return self._pool_tokens(encoded)
@@ -107,6 +137,18 @@ class MAEModule(pl.LightningModule):
 
         Returns:
             Scalar masked-reconstruction loss tensor for the current step.
+
+        Parameters
+        ----------
+        batch : Any
+            Input value for ``batch``.
+        _batch_idx : int
+            Input value for ``_batch_idx``.
+
+        Returns
+        -------
+        result : torch.Tensor
+            Return value produced by the function.
         """
         views, _targets = batch
         images = views[0]
@@ -133,11 +175,33 @@ class MAEModule(pl.LightningModule):
         return loss
 
     def configure_optimizers(self) -> Any:
-        """Build the AdamW optimizer and optional LR scheduler."""
+        """Build the AdamW optimizer and optional LR scheduler.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         return configure_pretraining_optimizers(self, self.optimizer_config)
 
     def _pool_tokens(self, encoded_tokens: torch.Tensor) -> torch.Tensor:
-        """Reduce MAE token sequences to image-level embeddings for evaluation."""
+        """Reduce MAE token sequences to image-level embeddings for evaluation.
+
+        Parameters
+        ----------
+        encoded_tokens : torch.Tensor
+            Input value for ``encoded_tokens``.
+
+        Returns
+        -------
+        result : torch.Tensor
+            Return value produced by the function.
+        """
         if encoded_tokens.ndim != 3:
             return encoded_tokens
 

@@ -22,6 +22,16 @@ def load_config(config_path: str | Path) -> RootConfig:
 
     Raises:
         ValueError: If the YAML document does not deserialize to a mapping.
+
+    Parameters
+    ----------
+    config_path : str | Path
+        Input value for ``config_path``.
+
+    Returns
+    -------
+    result : RootConfig
+        Return value produced by the function.
     """
     config_path = Path(config_path)
     with config_path.open("r", encoding="utf-8") as handle:

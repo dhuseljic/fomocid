@@ -1,3 +1,5 @@
+"""Test magnetic pattern generator behavior and configuration wiring."""
+
 from __future__ import annotations
 
 import sys
@@ -18,9 +20,33 @@ from scattering_calculator.simulation_pipelines import simulation_configuration
 
 class BinaryLabyrinthAutoSizeTests(unittest.TestCase):
     def test_auto_size_shrinks_generated_field_for_large_target_stripes(self) -> None:
+        """Test that auto size shrinks generated field for large target stripes.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         calls: list[tuple[int, int]] = []
 
         def fake_generate_binary(**kwargs):
+            """Run the fake generate binary operation.
+
+            Parameters
+            ----------
+            **kwargs : Any
+                Input value for ``kwargs``.
+
+            Returns
+            -------
+            result : Any
+                Return value produced by the function.
+            """
             height = int(kwargs["H"])
             width = int(kwargs["W"])
             calls.append((height, width))
@@ -50,9 +76,33 @@ class BinaryLabyrinthAutoSizeTests(unittest.TestCase):
         self.assertGreaterEqual(meta["scaled_W"], 300)
 
     def test_auto_size_false_respects_requested_field_size(self) -> None:
+        """Test that auto size false respects requested field size.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         calls: list[tuple[int, int]] = []
 
         def fake_generate_binary(**kwargs):
+            """Run the fake generate binary operation.
+
+            Parameters
+            ----------
+            **kwargs : Any
+                Input value for ``kwargs``.
+
+            Returns
+            -------
+            result : Any
+                Return value produced by the function.
+            """
             height = int(kwargs["H"])
             width = int(kwargs["W"])
             calls.append((height, width))
@@ -78,6 +128,18 @@ class BinaryLabyrinthAutoSizeTests(unittest.TestCase):
 
 class ImagePatternTests(unittest.TestCase):
     def test_image_pattern_rescales_thresholded_domains(self) -> None:
+        """Test that image pattern rescales thresholded domains.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         image = np.zeros((4, 4), dtype=float)
         image[:, 2:] = 1.0
 
@@ -97,6 +159,18 @@ class ImagePatternTests(unittest.TestCase):
         self.assertEqual(meta["source"], "image_array")
 
     def test_image_pattern_sigma_is_converted_by_config(self) -> None:
+        """Test that image pattern sigma is converted by config.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         image = np.zeros((6, 6), dtype=float)
         image[:, 3:] = 1.0
 

@@ -1,3 +1,5 @@
+"""X-ray beam and illumination models for scattering simulations."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -159,6 +161,24 @@ class beam_parameters:
         photon_flux: float,
         coherence_length: tuple[float, float],
     ) -> None:
+        """Initialize a beam_parameters instance.
+
+        Parameters
+        ----------
+        photon_energy : float
+            Input value for ``photon_energy``.
+        pol : str
+            Input value for ``pol``.
+        photon_flux : float
+            Input value for ``photon_flux``.
+        coherence_length : tuple[float, float]
+            Input value for ``coherence_length``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.energy: float = photon_energy  # in eV
         self.wavelength: float = physics.photon_energy_wavelength(photon_energy)
         self.wavevector: float = (
@@ -169,10 +189,33 @@ class beam_parameters:
         self.coherence_length: tuple[float, float] = coherence_length  # in m, (y, x)
 
     def calc_wavevector(self):
+        """Run the calc wavevector operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         self.wavevector = 2 * np.pi / self.wavelength
 
     def return_params(self) -> beam_parameters:
-        """Return the beam parameters object."""
+        """Return the beam parameters object.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : beam_parameters
+            Return value produced by the function.
+        """
         return self.asdict(self)
 
 
@@ -212,6 +255,22 @@ class illumination:
         sample_shape: tuple[int, int],
         real_space_pixel_size: float,
     ) -> None:
+        """Initialize a illumination instance.
+
+        Parameters
+        ----------
+        beam_parameters : beam_parameters
+            Input value for ``beam_parameters``.
+        sample_shape : tuple[int, int]
+            Input value for ``sample_shape``.
+        real_space_pixel_size : float
+            Input value for ``real_space_pixel_size``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.beam_parameters = beam_parameters
         self.shape = sample_shape
         self.pixel_size = real_space_pixel_size
@@ -241,6 +300,11 @@ class illumination:
             Propagation distance from the beam waist in metres.
         fwhm : float
             Full-width at half-maximum of the beam at the waist in metres.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.illumination = gauss_beam(
             self.shape,
@@ -252,6 +316,18 @@ class illumination:
         )
 
     def get_illumination_jones(self) -> None:
+        """Run the get illumination jones operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.illumination_jones = scalar_to_jones(
             self.illumination, self.beam_parameters.pol
         )
@@ -261,6 +337,16 @@ class illumination:
 
         Sets ``self.x`` and ``self.y`` as 2-D arrays of physical
         coordinates in metres, centred on the optical axis.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
 
         x = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.pixel_size
@@ -276,6 +362,11 @@ class illumination:
         -------
         extent : tuple of float
             Physical size of the detector plane in metres as (min_x, max_x, min_y, max_y).
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
 
         self.extent_real = np.array(
@@ -289,15 +380,49 @@ class illumination:
         return self.extent_real
 
     def plane_wave(self, shape: tuple[int, int]) -> None:
-        """Set the beam cross-section to a plane wave with uniform amplitude and zero phase."""
+        """Set the beam cross-section to a plane wave with uniform amplitude and zero phase.
+
+        Parameters
+        ----------
+        shape : tuple[int, int]
+            Input value for ``shape``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.illumination = np.ones(shape, dtype=complex)
 
     def return_illumination(self) -> NDArray[np.complex128] | None:
-        """Return the current beam cross-section array."""
+        """Return the current beam cross-section array.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : NDArray[np.complex128] | None
+            Return value produced by the function.
+        """
         return self.illumination
 
     def visualize_illumination(self) -> None:
         # Plot Gaussian beam
+        """Run the visualize illumination operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         fig, ax = plt.subplots(1, 2, figsize=(10, 5), sharex=True, sharey=True)
         ma = np.max(np.abs(self.illumination) ** 2)
         ax[0].imshow(

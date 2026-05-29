@@ -51,14 +51,36 @@ except ImportError:  # pragma: no cover
 
 
 def _xp(use_gpu: bool):
-    """Return the active array module (cupy or numpy)."""
+    """Return the active array module (cupy or numpy).
+
+    Parameters
+    ----------
+    use_gpu : bool
+        Input value for ``use_gpu``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     if use_gpu and _HAS_CUPY:
         return _cp
     return _np
 
 
 def _to_numpy(arr):
-    """Move a cupy array to numpy; no-op for numpy arrays."""
+    """Move a cupy array to numpy; no-op for numpy arrays.
+
+    Parameters
+    ----------
+    arr : Any
+        Input value for ``arr``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     if _HAS_CUPY and isinstance(arr, _cp.ndarray):
         return _cp.asnumpy(arr)
     return _np.asarray(arr)
@@ -161,6 +183,26 @@ def _grf_2d(batch, H, W, correlation_length, xp, rng_seed=None):
     Uses Fourier-domain filtering with a Gaussian spectral envelope, which
     matches Perlin-like smooth noise well enough for our purposes and is
     cheap on GPU.
+
+    Parameters
+    ----------
+    batch : Any
+        Input value for ``batch``.
+    H : Any
+        Input value for ``H``.
+    W : Any
+        Input value for ``W``.
+    correlation_length : Any
+        Input value for ``correlation_length``.
+    xp : Any
+        Input value for ``xp``.
+    rng_seed : Any
+        Input value for ``rng_seed``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
     """
     if rng_seed is not None:
         if xp is _np:
@@ -203,6 +245,18 @@ def _laplacian_iso(u, xp):
               - 1.0  * u[i,j]
 
     Vectorized via xp.roll (works for any batch shape (..., H, W)).
+
+    Parameters
+    ----------
+    u : Any
+        Input value for ``u``.
+    xp : Any
+        Input value for ``xp``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
     """
     up    = xp.roll(u, -1, axis=-2)
     down  = xp.roll(u,  1, axis=-2)
@@ -233,6 +287,22 @@ def _laplacian_aniso(u, theta, alpha, xp):
     where L_xx, L_yy, L_xy are normalized second-derivative operators with
     the same characteristic magnitude as the Sims stencil. This adds only
     a direction-dependent correction; when alpha = 1 it reduces to L_iso.
+
+    Parameters
+    ----------
+    u : Any
+        Input value for ``u``.
+    theta : Any
+        Input value for ``theta``.
+    alpha : Any
+        Input value for ``alpha``.
+    xp : Any
+        Input value for ``xp``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
     """
     # Base isotropic Laplacian (Sims stencil, same magnitude calibration).
     L_iso = _laplacian_iso(u, xp)
@@ -268,6 +338,28 @@ def _make_seeds(batch, H, W, n_seeds_range, radius_range, xp, rng_seed=None):
     """Create initial B field: zeros with a few round patches set to ~1.
 
     Returns shape (batch, H, W), float32.
+
+    Parameters
+    ----------
+    batch : Any
+        Input value for ``batch``.
+    H : Any
+        Input value for ``H``.
+    W : Any
+        Input value for ``W``.
+    n_seeds_range : Any
+        Input value for ``n_seeds_range``.
+    radius_range : Any
+        Input value for ``radius_range``.
+    xp : Any
+        Input value for ``xp``.
+    rng_seed : Any
+        Input value for ``rng_seed``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
     """
     B0 = xp.zeros((batch, H, W), dtype=xp.float32)
     # We use CPU numpy RNG for indices (cheap, avoids per-sample CuPy RNG
@@ -363,6 +455,11 @@ class GrayScottBatch:
         ----------
         cfg : GrayScottConfig
             Full simulation configuration.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.cfg = cfg
         self.xp = _xp(cfg.use_gpu)
@@ -448,6 +545,18 @@ class GrayScottBatch:
 
     # -- core step -----------------------------------------------------------
     def _laplacian(self, u):
+        """Handle the internal laplacian operation.
+
+        Parameters
+        ----------
+        u : Any
+            Input value for ``u``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         if self.cfg.anisotropic:
             return _laplacian_aniso(u, self.theta, self.alpha, self.xp)
         return _laplacian_iso(u, self.xp)
@@ -463,6 +572,11 @@ class GrayScottBatch:
         ----------
         n : int, optional
             Number of time steps to perform. Default is ``1``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         xp = self.xp
         A, B = self.A, self.B
@@ -502,7 +616,18 @@ class GrayScottBatch:
         self.A, self.B = A, B
 
     def run(self) -> Tuple[_np.ndarray, _np.ndarray]:
-        """Run the full schedule and return (A, B) as numpy arrays."""
+        """Run the full schedule and return (A, B) as numpy arrays.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Tuple[_np.ndarray, _np.ndarray]
+            Return value produced by the function.
+        """
         self.step(self.cfg.n_steps)
         if self.stop_steps is not None:
             # Use frozen states for stopped samples, current for the rest

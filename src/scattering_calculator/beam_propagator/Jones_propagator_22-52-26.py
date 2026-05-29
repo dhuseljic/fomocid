@@ -1,3 +1,5 @@
+"""Archived Jones-matrix propagation utilities kept for comparison."""
+
 import numpy as np
 import scipy as scp
 from scattering_calculator.utils import physics, image_transformator
@@ -20,6 +22,28 @@ def reconstruct(holo):
 
 class wavefronts:
     def __init__(self, beam_parameters,eps_stack,layer_thicknesses,real_space_pixel_size,E_in, propagate=False):
+        """Initialize a wavefronts instance.
+
+        Parameters
+        ----------
+        beam_parameters : Any
+            Input value for ``beam_parameters``.
+        eps_stack : Any
+            Input value for ``eps_stack``.
+        layer_thicknesses : Any
+            Input value for ``layer_thicknesses``.
+        real_space_pixel_size : Any
+            Input value for ``real_space_pixel_size``.
+        E_in : Any
+            Input value for ``E_in``.
+        propagate : Any
+            Input value for ``propagate``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.E_in=E_in
         self.exit_wave = self.propagate_jones_multislice(
             E_in=self.E_in,
@@ -121,6 +145,22 @@ class wavefronts:
         applied. This path avoids building a full ``(Ny, Nx, 2, 2)`` Jones
         matrix field and only evaluates the 2x2 matrix function on pixels with
         non-zero off-diagonal tensor terms.
+
+        Parameters
+        ----------
+        E : Any
+            Input value for ``E``.
+        eps_slice : Any
+            Input value for ``eps_slice``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        thickness : Any
+            Input value for ``thickness``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         phase = -1j * (2 * np.pi / wavelength) * thickness
         tol = 1e-14
@@ -206,8 +246,7 @@ class wavefronts:
     # ============================================================
 
     def jones_from_eps_slice(self, eps_slice, wavelength, thickness):
-        """
-        Fast vectorized Jones propagator for a field of 2x2 dielectric tensors.
+        """Fast vectorized Jones propagator for a field of 2x2 dielectric tensors.
 
         eps_slice: (Ny, Nx, 2, 2)
         returns:   (Ny, Nx, 2, 2)
@@ -216,6 +255,20 @@ class wavefronts:
             J = exp(-i k0 thickness sqrt(eps))
         using the 2x2 matrix-function identity:
             f(eps) = alpha I + beta eps
+
+        Parameters
+        ----------
+        eps_slice : Any
+            Input value for ``eps_slice``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        thickness : Any
+            Input value for ``thickness``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         phase = -1j * (2 * np.pi / wavelength) * thickness
         tol = 1e-14
@@ -246,7 +299,7 @@ class wavefronts:
             J[..., 0, 0] = np.exp(phase * np.sqrt(a))
             J[..., 1, 1] = np.exp(phase * np.sqrt(d))
             return J
-        
+
 
         # Fallback: your original mixed-case logic
         J = np.zeros_like(eps_slice, dtype=complex)
@@ -306,13 +359,12 @@ class wavefronts:
             J[mask] = J_sub
 
         return J
-    
+
 
 
 
     def jones_from_eps_slice_new(self, eps_slice, wavelength, thickness):
-        """
-        Fast vectorized Jones propagator for a field of 2x2 dielectric tensors.
+        """Fast vectorized Jones propagator for a field of 2x2 dielectric tensors.
 
         eps_slice: (Ny, Nx, 2, 2)
         returns:   (Ny, Nx, 2, 2)
@@ -321,6 +373,20 @@ class wavefronts:
             J = exp(-i k0 thickness sqrt(eps))
         using the 2x2 matrix-function identity:
             f(eps) = alpha I + beta eps
+
+        Parameters
+        ----------
+        eps_slice : Any
+            Input value for ``eps_slice``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        thickness : Any
+            Input value for ``thickness``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         k0 = 2 * np.pi / wavelength
         a = eps_slice[..., 0, 0]
@@ -381,85 +447,111 @@ class wavefronts:
 
 
     def jones_from_eps_slice_old(self,eps_slice, wavelength, thickness):
-        """
-        eps_slice: (Ny, Nx, 2, 2)
+        """eps_slice: (Ny, Nx, 2, 2)
         wavelength: scalar
         thickness: scalar
 
         returns:
             J_field: (Ny, Nx, 2, 2)
-        
+
         Optimized: Detects isotropic pixels (diagonal with equal elements)
         and computes their Jones matrix directly without eigendecomposition.
         Uses eig for general complex matrices and avoids explicit inversion.
+
+        Parameters
+        ----------
+        eps_slice : Any
+            Input value for ``eps_slice``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        thickness : Any
+            Input value for ``thickness``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         k0 = 2 * np.pi / wavelength
         Ny, Nx = eps_slice.shape[:2]
-        
+
         # Extract diagonal and off-diagonal elements
         diag_00 = eps_slice[..., 0, 0]  # (Ny, Nx)
         diag_11 = eps_slice[..., 1, 1]  # (Ny, Nx)
         off_01 = eps_slice[..., 0, 1]   # (Ny, Nx)
         off_10 = eps_slice[..., 1, 0]   # (Ny, Nx)
-        
+
         # Check which pixels are isotropic: diagonal with equal elements
         tol = 1e-10
         is_isotropic = (
-            (np.abs(off_01) < tol) & 
-            (np.abs(off_10) < tol) & 
+            (np.abs(off_01) < tol) &
+            (np.abs(off_10) < tol) &
             (np.abs(diag_00 - diag_11) < tol * np.abs(diag_00) + tol)
         )
-        
+
         # Initialize Jones field
         J_field = np.zeros((Ny, Nx, 2, 2), dtype=complex)
-        
+
         # Handle isotropic pixels directly (no eigendecomposition needed)
         if np.any(is_isotropic):
             n_iso = np.sqrt(diag_00[is_isotropic])
             phase_iso = np.exp(-1j * k0 * n_iso * thickness)
-            
+
             # For isotropic: J = diag(phase, phase)
             J_field[is_isotropic, 0, 0] = phase_iso
             J_field[is_isotropic, 1, 1] = phase_iso
-        
+
         # Handle anisotropic pixels with eigendecomposition
         if np.any(~is_isotropic):
             eps_aniso = eps_slice[~is_isotropic]
             N_aniso = len(eps_aniso)
-            
+
             # Use eig for general complex matrices (handles non-Hermitian case with complex diagonals)
             vals, vecs = np.linalg.eig(eps_aniso)  # vals: (N_aniso, 2), vecs: (N_aniso, 2, 2)
             print(vals[0], vecs[0])
 
             # Refractive indices
             n = np.sqrt(vals)  # (N_aniso, 2)
-            
+
             # Propagation phases
             phase = np.exp(-1j * k0 * n * thickness)  # (N_aniso, 2)
-            
+
             # Compute J = V @ diag(phase) @ V^{-1} efficiently
             # Use solve instead of explicit inversion (much faster)
             eye = np.eye(2, dtype=complex)
             vecs_inv = np.linalg.solve(vecs, np.tile(eye[np.newaxis, :, :], (N_aniso, 1, 1)))
-            
+
             # Efficient computation using einsum: J[i,a,b] = sum_c V[i,a,c] * phase[i,c] * V_inv[i,c,b]
             J_aniso = np.einsum('ijk,ik,ikl->ijl', vecs, phase, vecs_inv)
-            
+
             # Place anisotropic results in output
             J_field[~is_isotropic] = J_aniso
-        
+
         return J_field
 
 
 
     def jones_from_eps_slice_oldold(self,eps_slice, wavelength, thickness):
-        """
-        eps_slice: (Ny, Nx, 2, 2)
+        """eps_slice: (Ny, Nx, 2, 2)
         wavelength: scalar
         thickness: scalar
 
         returns:
             J_field: (Ny, Nx, 2, 2)
+
+        Parameters
+        ----------
+        eps_slice : Any
+            Input value for ``eps_slice``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        thickness : Any
+            Input value for ``thickness``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         k0 = 2 * np.pi / wavelength
 
@@ -489,8 +581,7 @@ class wavefronts:
     # ============================================================
 
     def propagate_free_space_jones(self,E_in, wavelength, dz, pixel_size):
-        """
-        Free-space propagation of a Jones wavefield by angular spectrum.
+        """Free-space propagation of a Jones wavefield by angular spectrum.
 
         E_in: (Ny, Nx, 2)
         wavelength: scalar
@@ -499,6 +590,22 @@ class wavefronts:
 
         returns:
             E_out: (Ny, Nx, 2)
+
+        Parameters
+        ----------
+        E_in : Any
+            Input value for ``E_in``.
+        wavelength : Any
+            Input value for ``wavelength``.
+        dz : Any
+            Input value for ``dz``.
+        pixel_size : Any
+            Input value for ``pixel_size``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         E_in = np.asarray(E_in, dtype=complex)
         Ny, Nx, _ = E_in.shape
@@ -529,36 +636,57 @@ class wavefronts:
     # Utility: apply a Jones matrix field to a Jones wavefield
     # ============================================================
     def apply_jones_field(self,E_in, J_field):
-        """
-        E_in:   (Ny, Nx, 2)
+        """E_in:   (Ny, Nx, 2)
         J_field:(Ny, Nx, 2, 2)
 
         returns:
             E_out: (Ny, Nx, 2)
+
+        Parameters
+        ----------
+        E_in : Any
+            Input value for ``E_in``.
+        J_field : Any
+            Input value for ``J_field``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
         """
         return np.einsum("yxab,yxb->yxa", J_field, E_in)
 
 
 def E_j(E,pol):
-    '''
-    Calculate Jones wavefield for given polarization.
-    
+    """Calculate Jones wavefield for given polarization.
+
     Parameters
     ----------
     E : ndarray of shape (Ny, Nx, 2)
         Input Jones wavefield.
     pol : int or str
-        Polarization index (0 for Ex, 1 for Ey) or polarization type ("CR'''
+        Polarization index (0 for Ex, 1 for Ey) or polarization type ("CR
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
 
     return np.einsum("yxs,s->yxs", E, light_beam.polarization_vector(pol))
 
 def E_I(E):
-    '''Calculate intensity of Jones wavefield for given polarization.
-    
+    """Calculate intensity of Jones wavefield for given polarization.
+
     Parameters
     ----------
     E : ndarray of shape (Ny, Nx, 2)
-        Input Jones wavefield.       
-    '''
+        Input Jones wavefield.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     I= (np.sum(np.abs(E)**2, axis=(2)))
     return I

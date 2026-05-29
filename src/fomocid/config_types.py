@@ -194,6 +194,16 @@ def normalize_root_config(raw_config: Mapping[str, Any]) -> RootConfig:
 
     Raises:
         ValueError: If required sections or supported values are invalid.
+
+    Parameters
+    ----------
+    raw_config : Mapping[str, Any]
+        Input value for ``raw_config``.
+
+    Returns
+    -------
+    result : RootConfig
+        Return value produced by the function.
     """
     seed = int(raw_config.get("seed", 7))
     dataset = _normalize_dataset_config(raw_config.get("dataset"))
@@ -214,6 +224,18 @@ def normalize_root_config(raw_config: Mapping[str, Any]) -> RootConfig:
 
 
 def _normalize_dataset_config(raw_dataset_config: Any) -> DatasetConfig:
+    """Handle the internal normalize dataset config operation.
+
+    Parameters
+    ----------
+    raw_dataset_config : Any
+        Input value for ``raw_dataset_config``.
+
+    Returns
+    -------
+    result : DatasetConfig
+        Return value produced by the function.
+    """
     dataset_config = _as_mapping(raw_dataset_config, section_name="dataset")
     dataset_name = str(dataset_config.get("name", "")).strip().lower()
     if dataset_name not in _SUPPORTED_DATASETS:
@@ -240,6 +262,20 @@ def _normalize_dataset_config(raw_dataset_config: Any) -> DatasetConfig:
 
 
 def _normalize_ssl_config(raw_ssl_config: Any, dataset_config: DatasetConfig) -> SSLConfig:
+    """Handle the internal normalize ssl config operation.
+
+    Parameters
+    ----------
+    raw_ssl_config : Any
+        Input value for ``raw_ssl_config``.
+    dataset_config : DatasetConfig
+        Input value for ``dataset_config``.
+
+    Returns
+    -------
+    result : SSLConfig
+        Return value produced by the function.
+    """
     ssl_config = _as_mapping(raw_ssl_config, section_name="ssl")
     method_name = str(ssl_config.get("method", "")).strip().lower()
     image_size = dataset_config["image_size"]
@@ -300,6 +336,18 @@ def _normalize_ssl_config(raw_ssl_config: Any, dataset_config: DatasetConfig) ->
 
 
 def _normalize_optimizer_config(raw_optimizer_config: Any) -> OptimizerConfig:
+    """Handle the internal normalize optimizer config operation.
+
+    Parameters
+    ----------
+    raw_optimizer_config : Any
+        Input value for ``raw_optimizer_config``.
+
+    Returns
+    -------
+    result : OptimizerConfig
+        Return value produced by the function.
+    """
     optimizer_config = _as_mapping(raw_optimizer_config, section_name="optimizer", allow_empty=True)
     learning_rate = float(optimizer_config.get("lr", 1e-3))
     weight_decay = float(optimizer_config.get("weight_decay", 1e-4))
@@ -312,6 +360,18 @@ def _normalize_optimizer_config(raw_optimizer_config: Any) -> OptimizerConfig:
 
 
 def _normalize_scheduler_config(raw_scheduler_config: Any) -> SchedulerConfig | None:
+    """Handle the internal normalize scheduler config operation.
+
+    Parameters
+    ----------
+    raw_scheduler_config : Any
+        Input value for ``raw_scheduler_config``.
+
+    Returns
+    -------
+    result : SchedulerConfig | None
+        Return value produced by the function.
+    """
     if raw_scheduler_config is None:
         return None
 
@@ -337,6 +397,18 @@ def _normalize_scheduler_config(raw_scheduler_config: Any) -> SchedulerConfig | 
 
 
 def _normalize_trainer_config(raw_trainer_config: Any) -> TrainerConfig:
+    """Handle the internal normalize trainer config operation.
+
+    Parameters
+    ----------
+    raw_trainer_config : Any
+        Input value for ``raw_trainer_config``.
+
+    Returns
+    -------
+    result : TrainerConfig
+        Return value produced by the function.
+    """
     trainer_config = _as_mapping(raw_trainer_config, section_name="trainer", allow_empty=True)
     progress_bar = str(trainer_config.get("progress_bar", "auto")).strip().lower()
     if progress_bar not in {"auto", "rich", "tqdm"}:
@@ -357,6 +429,18 @@ def _normalize_trainer_config(raw_trainer_config: Any) -> TrainerConfig:
 
 
 def _normalize_evaluation_config(raw_evaluation_config: Any) -> EvaluationConfig:
+    """Handle the internal normalize evaluation config operation.
+
+    Parameters
+    ----------
+    raw_evaluation_config : Any
+        Input value for ``raw_evaluation_config``.
+
+    Returns
+    -------
+    result : EvaluationConfig
+        Return value produced by the function.
+    """
     evaluation_config = _as_mapping(raw_evaluation_config, section_name="evaluation", allow_empty=True)
     raw_max_batches = evaluation_config.get("max_feature_batches")
     max_feature_batches = None if raw_max_batches is None else int(raw_max_batches)
@@ -378,6 +462,18 @@ def _normalize_evaluation_config(raw_evaluation_config: Any) -> EvaluationConfig
 
 
 def _normalize_analysis_config(raw_analysis_config: Any) -> AnalysisConfig:
+    """Handle the internal normalize analysis config operation.
+
+    Parameters
+    ----------
+    raw_analysis_config : Any
+        Input value for ``raw_analysis_config``.
+
+    Returns
+    -------
+    result : AnalysisConfig
+        Return value produced by the function.
+    """
     analysis_config = _as_mapping(raw_analysis_config, section_name="analysis", allow_empty=True)
     projection_method = str(analysis_config.get("projection_method", "pca")).strip().lower()
     if projection_method not in {"pca", "tsne"}:
@@ -390,6 +486,22 @@ def _normalize_analysis_config(raw_analysis_config: Any) -> AnalysisConfig:
 
 
 def _as_mapping(value: Any, *, section_name: str, allow_empty: bool = False) -> Mapping[str, Any]:
+    """Handle the internal as mapping operation.
+
+    Parameters
+    ----------
+    value : Any
+        Input value for ``value``.
+    section_name : str
+        Input value for ``section_name``.
+    allow_empty : bool
+        Input value for ``allow_empty``.
+
+    Returns
+    -------
+    result : Mapping[str, Any]
+        Return value produced by the function.
+    """
     if value is None and allow_empty:
         return {}
     if not isinstance(value, Mapping):

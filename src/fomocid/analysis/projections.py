@@ -29,6 +29,20 @@ def project_embeddings(
 
     Returns:
         Tuple of ``(projected_embeddings, resolved_method)``.
+
+    Parameters
+    ----------
+    embeddings : torch.Tensor
+        Input value for ``embeddings``.
+    method : str
+        Input value for ``method``.
+    n_components : int
+        Input value for ``n_components``.
+
+    Returns
+    -------
+    result : tuple[torch.Tensor, str]
+        Return value produced by the function.
     """
     normalized_method = method.strip().lower().replace("-", "")
     if normalized_method == "pca":
@@ -41,7 +55,20 @@ def project_embeddings(
 
 
 def _project_embeddings_pca(embeddings: torch.Tensor, *, n_components: int) -> torch.Tensor:
-    """Project embeddings with PCA."""
+    """Project embeddings with PCA.
+
+    Parameters
+    ----------
+    embeddings : torch.Tensor
+        Input value for ``embeddings``.
+    n_components : int
+        Input value for ``n_components``.
+
+    Returns
+    -------
+    result : torch.Tensor
+        Return value produced by the function.
+    """
     centered = embeddings - embeddings.mean(dim=0, keepdim=True)
     _u, _s, v = torch.pca_lowrank(centered, q=max(n_components, 2))
     projection = centered @ v[:, :n_components]
@@ -49,7 +76,20 @@ def _project_embeddings_pca(embeddings: torch.Tensor, *, n_components: int) -> t
 
 
 def _project_embeddings_tsne(embeddings: torch.Tensor, *, n_components: int) -> torch.Tensor:
-    """Project embeddings with t-SNE."""
+    """Project embeddings with t-SNE.
+
+    Parameters
+    ----------
+    embeddings : torch.Tensor
+        Input value for ``embeddings``.
+    n_components : int
+        Input value for ``n_components``.
+
+    Returns
+    -------
+    result : torch.Tensor
+        Return value produced by the function.
+    """
     try:
         from sklearn.manifold import TSNE
     except ModuleNotFoundError as exc:
@@ -75,7 +115,18 @@ def _project_embeddings_tsne(embeddings: torch.Tensor, *, n_components: int) -> 
 
 
 def _color_palette() -> list[tuple[int, int, int]]:
-    """Return a small categorical color palette for class visualizations."""
+    """Return a small categorical color palette for class visualizations.
+
+    Parameters
+    ----------
+    None
+        This function takes no explicit input parameters.
+
+    Returns
+    -------
+    result : list[tuple[int, int, int]]
+        Return value produced by the function.
+    """
     return [
         (31, 119, 180),
         (255, 127, 14),
@@ -108,6 +159,24 @@ def save_projection_figure(
 
     Returns:
         Path to the saved figure.
+
+    Parameters
+    ----------
+    projected_embeddings : torch.Tensor
+        Input value for ``projected_embeddings``.
+    labels : torch.Tensor
+        Input value for ``labels``.
+    output_path : str | Path
+        Input value for ``output_path``.
+    title : str
+        Input value for ``title``.
+    size : tuple[int, int]
+        Input value for ``size``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,6 +193,22 @@ def save_projection_figure(
     y_values = coords[:, 1]
 
     def scale(values: np.ndarray, lower: int, upper: int) -> np.ndarray:
+        """Run the scale operation.
+
+        Parameters
+        ----------
+        values : np.ndarray
+            Input value for ``values``.
+        lower : int
+            Input value for ``lower``.
+        upper : int
+            Input value for ``upper``.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
+        """
         min_value = float(values.min())
         max_value = float(values.max())
         if math.isclose(min_value, max_value):
@@ -158,6 +243,20 @@ def retrieve_nearest_neighbors(
 
     Returns:
         Tuple of ``(indices, scores)`` on CPU.
+
+    Parameters
+    ----------
+    reference_embeddings : torch.Tensor
+        Input value for ``reference_embeddings``.
+    query_embeddings : torch.Tensor
+        Input value for ``query_embeddings``.
+    k : int
+        Input value for ``k``.
+
+    Returns
+    -------
+    result : tuple[torch.Tensor, torch.Tensor]
+        Return value produced by the function.
     """
     normalized_reference = F.normalize(reference_embeddings, dim=1)
     normalized_query = F.normalize(query_embeddings, dim=1)
@@ -176,6 +275,20 @@ def _unnormalize_image(image_tensor: torch.Tensor, mean: Iterable[float], std: I
 
     Returns:
         Image tensor clamped to display range on CPU.
+
+    Parameters
+    ----------
+    image_tensor : torch.Tensor
+        Input value for ``image_tensor``.
+    mean : Iterable[float]
+        Input value for ``mean``.
+    std : Iterable[float]
+        Input value for ``std``.
+
+    Returns
+    -------
+    result : torch.Tensor
+        Return value produced by the function.
     """
     mean_tensor = torch.tensor(list(mean)).view(3, 1, 1)
     std_tensor = torch.tensor(list(std)).view(3, 1, 1)
@@ -213,6 +326,34 @@ def build_nearest_neighbor_figure(
 
     Returns:
         Path to the saved figure.
+
+    Parameters
+    ----------
+    reference_images : torch.Tensor
+        Input value for ``reference_images``.
+    query_images : torch.Tensor
+        Input value for ``query_images``.
+    neighbor_indices : torch.Tensor
+        Input value for ``neighbor_indices``.
+    output_path : str | Path
+        Input value for ``output_path``.
+    mean : Iterable[float]
+        Input value for ``mean``.
+    std : Iterable[float]
+        Input value for ``std``.
+    query_labels : torch.Tensor | None
+        Input value for ``query_labels``.
+    reference_labels : torch.Tensor | None
+        Input value for ``reference_labels``.
+    label_names : Iterable[str] | None
+        Input value for ``label_names``.
+    cell_size : int
+        Input value for ``cell_size``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,6 +370,20 @@ def build_nearest_neighbor_figure(
     resolved_label_names = list(label_names) if label_names is not None else None
 
     def format_label(prefix: str, label: int) -> str:
+        """Run the format label operation.
+
+        Parameters
+        ----------
+        prefix : str
+            Input value for ``prefix``.
+        label : int
+            Input value for ``label``.
+
+        Returns
+        -------
+        result : str
+            Return value produced by the function.
+        """
         if resolved_label_names is None or label < 0 or label >= len(resolved_label_names):
             return f"{prefix}={label}"
         return f"{prefix}={resolved_label_names[label]}"

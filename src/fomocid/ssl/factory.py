@@ -28,6 +28,16 @@ def get_ssl_method_name(config: RootConfig) -> str:
 
     Raises:
         ValueError: If the method is not supported.
+
+    Parameters
+    ----------
+    config : RootConfig
+        Input value for ``config``.
+
+    Returns
+    -------
+    result : str
+        Return value produced by the function.
     """
     method_name = config["ssl"].get("method")
     if method_name not in METHOD_REGISTRY:
@@ -45,6 +55,16 @@ def build_ssl_module(config: RootConfig) -> Any:
 
     Returns:
         Configured Lightning module for the selected SSL method.
+
+    Parameters
+    ----------
+    config : RootConfig
+        Input value for ``config``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
     """
     method_name = get_ssl_method_name(config)
     return METHOD_REGISTRY[method_name](config)
@@ -60,6 +80,18 @@ def load_ssl_module(checkpoint_path: str, config: RootConfig) -> Any:
 
     Returns:
         Loaded Lightning module ready for evaluation or feature extraction.
+
+    Parameters
+    ----------
+    checkpoint_path : str
+        Input value for ``checkpoint_path``.
+    config : RootConfig
+        Input value for ``config``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
     """
     method_name = get_ssl_method_name(config)
     module_cls = METHOD_REGISTRY[method_name]

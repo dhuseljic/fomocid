@@ -1,3 +1,5 @@
+"""Interactive plotting widgets for simulation arrays."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -46,6 +48,18 @@ def cimshow(
 
     @ipywidgets.interact(contrast=sl_contrast)
     def update(contrast):
+        """Run the update operation.
+
+        Parameters
+        ----------
+        contrast : Any
+            Input value for ``contrast``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         mm.set_clim(contrast)
 
     if len(im.shape) == 3:
@@ -53,6 +67,18 @@ def cimshow(
 
         @ipywidgets.interact(nr=w_image)
         def set_image(nr):
+            """Run the set image operation.
+
+            Parameters
+            ----------
+            nr : Any
+                Input value for ``nr``.
+
+            Returns
+            -------
+            result : Any
+                Return value produced by the function.
+            """
             mm.set_data(im[nr])
 
     return fig, ax

@@ -1,3 +1,5 @@
+"""Magnetic-pattern generation helpers for simulated samples."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -488,7 +490,28 @@ def _rough_ellipse_mask(
     roughness_modes: tuple[int, int] = (0, 0),
     rng: np.random.Generator | None = None,
 ) -> NDArray[np.float64]:
-    """Return a local binary mask for one elliptical, rough skyrmion core."""
+    """Return a local binary mask for one elliptical, rough skyrmion core.
+
+    Parameters
+    ----------
+    radius_y : float
+        Input value for ``radius_y``.
+    radius_x : float
+        Input value for ``radius_x``.
+    angle : float
+        Input value for ``angle``.
+    roughness : float
+        Input value for ``roughness``.
+    roughness_modes : tuple[int, int]
+        Input value for ``roughness_modes``.
+    rng : np.random.Generator | None
+        Input value for ``rng``.
+
+    Returns
+    -------
+    result : NDArray[np.float64]
+        Return value produced by the function.
+    """
     rng = np.random.default_rng() if rng is None else rng
     radius_y = max(float(radius_y), 0.5)
     radius_x = max(float(radius_x), 0.5)
@@ -553,6 +576,44 @@ def create_disordered_skyrmion_lattice_pattern(
     the OH radius plus one skyrmion diameter. Candidate centers are accepted
     greedily only when their conservative bounding radii do not overlap any
     previously accepted skyrmion.
+
+    Parameters
+    ----------
+    sz_array : list[int] | tuple[int, int]
+        Input value for ``sz_array``.
+    stripe_width : float
+        Input value for ``stripe_width``.
+    sigma : float | None
+        Input value for ``sigma``.
+    skyrmion_density : float
+        Input value for ``skyrmion_density``.
+    diameter_spread : float
+        Input value for ``diameter_spread``.
+    ellipticity : tuple[float, float]
+        Input value for ``ellipticity``.
+    roughness : float
+        Input value for ``roughness``.
+    roughness_modes : tuple[int, int]
+        Input value for ``roughness_modes``.
+    positional_disorder : float
+        Input value for ``positional_disorder``.
+    placement_center : tuple[float, float] | None
+        Input value for ``placement_center``.
+    placement_radius : float | None
+        Input value for ``placement_radius``.
+    seed : int | None
+        Input value for ``seed``.
+    plot : bool
+        Input value for ``plot``.
+    real_space_pixel_size : float
+        Input value for ``real_space_pixel_size``.
+    **_ : Any
+        Input value for ``_``.
+
+    Returns
+    -------
+    result : tuple[NDArray[np.float64], NDArray[np.float64]]
+        Return value produced by the function.
     """
     rng = np.random.default_rng(seed)
     rows, cols = tuple(int(v) for v in sz_array)
@@ -710,6 +771,28 @@ def create_saturated_pattern(
 
     ``stripe_width`` and ``sigma`` are accepted for compatibility with sweep
     code that uses a common magnetic-pattern parameter dictionary.
+
+    Parameters
+    ----------
+    sz_array : list[int] | tuple[int, int]
+        Input value for ``sz_array``.
+    saturation : float | int | str
+        Input value for ``saturation``.
+    stripe_width : float | None
+        Input value for ``stripe_width``.
+    sigma : float | None
+        Input value for ``sigma``.
+    plot : bool
+        Input value for ``plot``.
+    real_space_pixel_size : float
+        Input value for ``real_space_pixel_size``.
+    **_ : Any
+        Input value for ``_``.
+
+    Returns
+    -------
+    result : tuple[NDArray[np.float64], NDArray[np.float64]]
+        Return value produced by the function.
     """
     rows, cols = tuple(int(v) for v in sz_array)
     if isinstance(saturation, str):
@@ -854,6 +937,16 @@ def _estimate_labyrinth_stripe_width_fft(
     The dominant FFT peak gives the wavelength of a full +/- domain repeat. A
     single stripe is one half of that repeat, matching the ``stripe_width``
     convention used by the stripe generators.
+
+    Parameters
+    ----------
+    pattern : NDArray[np.float64]
+        Input value for ``pattern``.
+
+    Returns
+    -------
+    result : tuple[float, float]
+        Return value produced by the function.
     """
     field = np.asarray(pattern, dtype=float)
     field = field - np.mean(field)
@@ -885,6 +978,18 @@ def _center_crop(pattern: NDArray[np.float64], shape: tuple[int, int]) -> NDArra
     The labyrinth generator intentionally does not tile images: the generated
     pattern is not periodic, so tiling can create artificial horizontal or
     vertical domain boundaries.
+
+    Parameters
+    ----------
+    pattern : NDArray[np.float64]
+        Input value for ``pattern``.
+    shape : tuple[int, int]
+        Input value for ``shape``.
+
+    Returns
+    -------
+    result : NDArray[np.float64]
+        Return value produced by the function.
     """
     rows, cols = shape
     if pattern.shape[0] < rows or pattern.shape[1] < cols:
@@ -903,7 +1008,24 @@ def _center_crop_or_pad(
     pad_mode: str = "edge",
     constant_values: float = 1.0,
 ) -> NDArray[np.float64]:
-    """Return a centered array with ``shape``, padding if needed."""
+    """Return a centered array with ``shape``, padding if needed.
+
+    Parameters
+    ----------
+    pattern : NDArray[np.float64]
+        Input value for ``pattern``.
+    shape : tuple[int, int]
+        Input value for ``shape``.
+    pad_mode : str
+        Input value for ``pad_mode``.
+    constant_values : float
+        Input value for ``constant_values``.
+
+    Returns
+    -------
+    result : NDArray[np.float64]
+        Return value produced by the function.
+    """
     rows, cols = shape
     src_rows, src_cols = pattern.shape
 
@@ -952,6 +1074,36 @@ def create_image_pattern(
     simulation ``real_space_pixel_size``. It is binarized before resampling so
     the domain topology comes from the experimental reconstruction, while
     ``sigma`` controls the simulated domain-wall width afterward.
+
+    Parameters
+    ----------
+    sz_array : list[int] | tuple[int, int]
+        Input value for ``sz_array``.
+    image_pixel_size : float
+        Input value for ``image_pixel_size``.
+    image_path : str | None
+        Input value for ``image_path``.
+    image_array : NDArray[np.float64] | None
+        Input value for ``image_array``.
+    sigma : float | None
+        Input value for ``sigma``.
+    threshold : float
+        Input value for ``threshold``.
+    invert : bool
+        Input value for ``invert``.
+    pad_mode : str
+        Input value for ``pad_mode``.
+    constant_domain : float
+        Input value for ``constant_domain``.
+    real_space_pixel_size : float
+        Input value for ``real_space_pixel_size``.
+    **_ : Any
+        Input value for ``_``.
+
+    Returns
+    -------
+    result : tuple[NDArray[np.float64], dict]
+        Return value produced by the function.
     """
     rows, cols = tuple(sz_array)
     if image_array is None:
@@ -1063,6 +1215,58 @@ def create_binary_labyrinth_pattern(
     after the optional Gaussian blur, which avoids interpolation and
     thresholding artifacts for small stripes. Set ``domain_conversion="hard"``
     to recover exact +/-1 binarisation.
+
+    Parameters
+    ----------
+    sz_array : list[int] | tuple[int, int]
+        Input value for ``sz_array``.
+    stripe_width : float
+        Input value for ``stripe_width``.
+    sigma : float | None
+        Input value for ``sigma``.
+    domain_conversion : str
+        Input value for ``domain_conversion``.
+    softness : float
+        Input value for ``softness``.
+    auto_size : bool
+        Input value for ``auto_size``.
+    crop_margin : float | None
+        Input value for ``crop_margin``.
+    min_auto_size : int
+        Input value for ``min_auto_size``.
+    auto_size_overshoot : float
+        Input value for ``auto_size_overshoot``.
+    plot : bool
+        Input value for ``plot``.
+    real_space_pixel_size : float
+        Input value for ``real_space_pixel_size``.
+    batch : int
+        Input value for ``batch``.
+    H : int
+        Input value for ``H``.
+    W : int
+        Input value for ``W``.
+    n_steps : int
+        Input value for ``n_steps``.
+    region : str | None
+        Input value for ``region``.
+    use_gpu : bool
+        Input value for ``use_gpu``.
+    seed : int | None
+        Input value for ``seed``.
+    k0 : float
+        Input value for ``k0``.
+    eps : float
+        Input value for ``eps``.
+    noise_amp : float
+        Input value for ``noise_amp``.
+    **generator_overrides : Any
+        Input value for ``generator_overrides``.
+
+    Returns
+    -------
+    result : tuple[NDArray[np.float64], dict]
+        Return value produced by the function.
     """
     generator_overrides.pop("coordinate_offset", None)
     rows, cols = tuple(sz_array)

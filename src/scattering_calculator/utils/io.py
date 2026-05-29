@@ -10,7 +10,18 @@ import numpy as np
 
 
 def _coerce_object_array(arr: np.ndarray) -> np.ndarray:
-    """Cast an object-dtype array to the most specific numeric dtype possible."""
+    """Cast an object-dtype array to the most specific numeric dtype possible.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input value for ``arr``.
+
+    Returns
+    -------
+    result : np.ndarray
+        Return value produced by the function.
+    """
     for dtype in (np.complex128, np.float64):
         try:
             return arr.astype(dtype)
@@ -39,6 +50,22 @@ def save_simulation_arrays_hdf5(
 
     Returns:
         Path to the saved file.
+
+    Parameters
+    ----------
+    file_path : str | Path
+        Input value for ``file_path``.
+    arrays : dict[str, np.ndarray]
+        Input value for ``arrays``.
+    metadata : dict[str, Any] | None
+        Input value for ``metadata``.
+    overwrite : bool
+        Input value for ``overwrite``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     file_path = Path(file_path)
     file_path.parent.mkdir(parents=True, exist_ok=True)

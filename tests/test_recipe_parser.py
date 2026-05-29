@@ -1,3 +1,5 @@
+"""Test multilayer recipe parsing and effective-medium layers."""
+
 from __future__ import annotations
 
 import sys
@@ -17,6 +19,18 @@ from scattering_calculator.sample_generator.structures import Structure, parse_r
 
 class RecipeParserTests(unittest.TestCase):
     def test_adjacent_material_terms_create_composite_layer(self) -> None:
+        """Test that adjacent material terms create composite layer.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         recipe = parse_recipe("Pt(4)Co(6)/SiN(20)")
 
         self.assertEqual(len(recipe.layers), 2)
@@ -34,6 +48,18 @@ class RecipeParserTests(unittest.TestCase):
         self.assertFalse(recipe.layers[1].is_composite)
 
     def test_slash_separated_material_terms_remain_separate_layers(self) -> None:
+        """Test that slash separated material terms remain separate layers.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         recipe = parse_recipe("Pt(4)/Co(6)")
 
         self.assertEqual(len(recipe.layers), 2)
@@ -42,6 +68,18 @@ class RecipeParserTests(unittest.TestCase):
         self.assertEqual([layer.material for layer in recipe.layers], ["Pt", "Co"])
 
     def test_composite_layer_accepts_any_number_of_material_terms(self) -> None:
+        """Test that composite layer accepts any number of material terms.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         recipe = parse_recipe("Pt(1)Co(4)Ta(3)Au(2)")
         layer = recipe.layers[0]
 
@@ -59,6 +97,18 @@ class RecipeParserTests(unittest.TestCase):
         )
 
     def test_composite_layer_uses_thickness_weighted_dielectric_tensor(self) -> None:
+        """Test that composite layer uses thickness weighted dielectric tensor.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         params = material_params(
             refractive_indices={
                 "Pt": np.array([2.0 + 0.0j, 0.2 + 0.0j, 0.02 + 0.0j]),

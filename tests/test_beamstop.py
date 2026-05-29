@@ -1,3 +1,5 @@
+"""Test anti-aliased beamstop and support-wire masks."""
+
 from __future__ import annotations
 
 import sys
@@ -16,6 +18,18 @@ from scattering_calculator.experimental_conditions.detector import beamstop, det
 
 class BeamstopAntialiasTests(unittest.TestCase):
     def test_antialias_creates_fractional_wire_edges(self) -> None:
+        """Test that antialias creates fractional wire edges.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         layout = detector_layout(
             pixel_size=1.0,
             detector_shape=(64, 64),

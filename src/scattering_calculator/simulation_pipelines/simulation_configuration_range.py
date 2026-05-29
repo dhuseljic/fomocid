@@ -1,3 +1,5 @@
+"""Sampling ranges for simulation-configuration sweeps."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -34,13 +36,36 @@ class Uniform:
     high: float
 
     def __post_init__(self) -> None:
+        """Handle the internal post init operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if self.low >= self.high:
             raise ValueError(
                 f"low must be less than high, got [{self.low}, {self.high}]"
             )
 
     def sample(self) -> float:
-        """Draw one sample uniformly from [low, high]."""
+        """Draw one sample uniformly from [low, high].
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : float
+            Return value produced by the function.
+        """
         return float(np.random.uniform(self.low, self.high))
 
 
@@ -57,23 +82,68 @@ class Choice:
     options: tuple
 
     def __post_init__(self) -> None:
+        """Handle the internal post init operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if len(self.options) == 0:
             raise ValueError("options must not be empty")
 
     def sample(self) -> Any:
-        """Draw one value uniformly from options."""
+        """Draw one value uniformly from options.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         return self.options[int(np.random.randint(len(self.options)))]
 
 
 def _s(v: Any) -> Any:
-    """Return v.sample() if v is a sampler, otherwise return v unchanged."""
+    """Return v.sample() if v is a sampler, otherwise return v unchanged.
+
+    Parameters
+    ----------
+    v : Any
+        Input value for ``v``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     if isinstance(v, (Uniform, Choice)):
         return v.sample()
     return v
 
 
 def _sample_dict(d: dict) -> dict:
-    """Apply _s() to every value in *d*, recursively for nested dicts."""
+    """Apply _s() to every value in *d*, recursively for nested dicts.
+
+    Parameters
+    ----------
+    d : dict
+        Input value for ``d``.
+
+    Returns
+    -------
+    result : dict
+        Return value produced by the function.
+    """
     return {k: _sample_dict(v) if isinstance(v, dict) else _s(v) for k, v in d.items()}
 
 
@@ -99,7 +169,18 @@ class XRayConfigRange:
     )  # m, (y, x)
 
     def sample(self) -> XRayConfig:
-        """Sample one :class:`XRayConfig` from the defined ranges."""
+        """Sample one :class:`XRayConfig` from the defined ranges.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : XRayConfig
+            Return value produced by the function.
+        """
         return XRayConfig(
             energy=_s(self.energy),
             photon_flux=_s(self.photon_flux),
@@ -121,7 +202,18 @@ class SimulationConfigRange:
     other_config: dict = field(default_factory=dict)
 
     def sample(self) -> SimulationConfig:
-        """Sample one :class:`SimulationConfig` from the defined ranges."""
+        """Sample one :class:`SimulationConfig` from the defined ranges.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : SimulationConfig
+            Return value produced by the function.
+        """
         return SimulationConfig(
             shape=_s(self.shape),
             real_space_pixel_size=_s(self.real_space_pixel_size),
@@ -139,7 +231,18 @@ class FrontApertureConfigRange:
     aperture_config: dict = field(default_factory=dict)
 
     def sample(self) -> FrontApertureConfig:
-        """Sample one :class:`FrontApertureConfig` from the defined ranges."""
+        """Sample one :class:`FrontApertureConfig` from the defined ranges.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : FrontApertureConfig
+            Return value produced by the function.
+        """
         return FrontApertureConfig(
             aperture_method=_s(self.aperture_method),
             aperture_thickness=_s(self.aperture_thickness),
@@ -157,7 +260,18 @@ class IlluminationConfigRange:
     illumination_config: dict = field(default_factory=dict)
 
     def sample(self) -> IlluminationConfig:
-        """Sample one :class:`IlluminationConfig` from the defined ranges."""
+        """Sample one :class:`IlluminationConfig` from the defined ranges.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : IlluminationConfig
+            Return value produced by the function.
+        """
         return IlluminationConfig(
             illumination_function=_s(self.illumination_function),
             illumination_center=_s(self.illumination_center),
@@ -173,7 +287,18 @@ class SampleConfigRange:
     other_config: dict = field(default_factory=dict)
 
     def sample(self) -> SampleConfig:
-        """Sample one :class:`SampleConfig` from the defined ranges."""
+        """Sample one :class:`SampleConfig` from the defined ranges.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : SampleConfig
+            Return value produced by the function.
+        """
         return SampleConfig(
             recipe=_s(self.recipe),
             other_config=self.other_config,
@@ -202,7 +327,18 @@ class MagneticPatternConfigRange:
     pattern_config_length: dict = field(default_factory=dict)
 
     def sample(self) -> MagneticPatternConfig:
-        """Sample one :class:`MagneticPatternConfig` from the defined ranges."""
+        """Sample one :class:`MagneticPatternConfig` from the defined ranges.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : MagneticPatternConfig
+            Return value produced by the function.
+        """
         return MagneticPatternConfig(
             pattern_type_method=_s(self.pattern_type_method),
             pattern_config=_sample_dict(self.pattern_config),
@@ -234,7 +370,18 @@ class DetectorConfigRange:
     artifacts_config: dict = field(default_factory=dict)
 
     def sample(self) -> DetectorConfig:
-        """Sample one :class:`DetectorConfig` from the defined ranges."""
+        """Sample one :class:`DetectorConfig` from the defined ranges.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : DetectorConfig
+            Return value produced by the function.
+        """
         return DetectorConfig(
             shape=_s(self.shape),
             pixel_size=_s(self.pixel_size),
@@ -257,7 +404,18 @@ class BeamstopConfigRange:
     bs_config: dict = field(default_factory=dict)
 
     def sample(self) -> BeamstopConfig:
-        """Sample one :class:`BeamstopConfig` from the defined ranges."""
+        """Sample one :class:`BeamstopConfig` from the defined ranges.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : BeamstopConfig
+            Return value produced by the function.
+        """
         return BeamstopConfig(
             bs_method=_s(self.bs_method),
             bs_detector_distance=_s(self.bs_detector_distance),

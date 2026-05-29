@@ -1,3 +1,5 @@
+"""Sample, multilayer, aperture, and recipe data structures."""
+
 from __future__ import annotations
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -30,17 +32,64 @@ class CompactDielectricTensorStack:
 
     @property
     def ndim(self) -> int:
+        """Run the ndim operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : int
+            Return value produced by the function.
+        """
         return 5
 
     @property
     def dtype(self) -> np.dtype:
+        """Run the dtype operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : np.dtype
+            Return value produced by the function.
+        """
         return self.base_diagonal.dtype
 
     def __len__(self) -> int:
+        """Handle the internal len operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : int
+            Return value produced by the function.
+        """
         return self.shape[0]
 
     def materialize_layer(self, layer_idx: int) -> NDArray[np.complex128]:
-        """Return one dense ``(Ny, Nx, 2, 2)`` dielectric tensor slice."""
+        """Return one dense ``(Ny, Nx, 2, 2)`` dielectric tensor slice.
+
+        Parameters
+        ----------
+        layer_idx : int
+            Input value for ``layer_idx``.
+
+        Returns
+        -------
+        result : NDArray[np.complex128]
+            Return value produced by the function.
+        """
         _, ny, nx, _, _ = self.shape
         out = np.zeros((ny, nx, 2, 2), dtype=self.dtype)
         out[..., 0, 0] = self.base_diagonal[layer_idx, 0]
@@ -50,7 +99,18 @@ class CompactDielectricTensorStack:
         return out
 
     def materialize(self) -> NDArray[np.complex128]:
-        """Return the full dense ``(Nz, Ny, Nx, 2, 2)`` tensor stack."""
+        """Return the full dense ``(Nz, Ny, Nx, 2, 2)`` tensor stack.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : NDArray[np.complex128]
+            Return value produced by the function.
+        """
         return np.stack([self.materialize_layer(iz) for iz in range(len(self))])
 
 
@@ -71,6 +131,18 @@ class Layer:
     components: Tuple[Tuple[str, float], ...] | None = None
 
     def __post_init__(self) -> None:
+        """Handle the internal post init operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if self.components is None:
             object.__setattr__(
                 self,
@@ -80,7 +152,18 @@ class Layer:
 
     @property
     def is_composite(self) -> bool:
-        """Return ``True`` when this layer combines multiple materials."""
+        """Return ``True`` when this layer combines multiple materials.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : bool
+            Return value produced by the function.
+        """
         return len(self.components or ()) > 1
 
     # @property
@@ -88,6 +171,18 @@ class Layer:
     #    return self.thickness_nm * 1e-9
 
     def to_txt_line(self) -> str:
+        """Run the to txt line operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : str
+            Return value produced by the function.
+        """
         return f"{self.material} {format_nm_as_meter_string(self.thickness_)}"
 
 
@@ -118,7 +213,18 @@ class MultilayerRecipe:
 
     @property
     def total_thickness(self) -> float:
-        """Total physical thickness of the stack in metres."""
+        """Total physical thickness of the stack in metres.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : float
+            Return value produced by the function.
+        """
         return sum(layer.thickness for layer in self.layers)
 
     def add_comment(self, text: str) -> None:
@@ -128,6 +234,11 @@ class MultilayerRecipe:
         ----------
         text : str
             Comment string to append.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.comments.append(text)
 
@@ -139,6 +250,11 @@ class MultilayerRecipe:
         str
             Multi-line string listing sample name, recipe, layer count,
             total thickness, and any attached comments.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         lines = []
         if self.sample_name:
@@ -160,12 +276,21 @@ class MultilayerRecipe:
 
 
 def format_nm_as_meter_string(value_nm: float) -> str:
-    """
-    Convert thickness in nm to a compact string in meters.
+    """Convert thickness in nm to a compact string in meters.
     Examples:
         5    -> '5e-9'
         1.5  -> '1.5e-9'
         0.25 -> '0.25e-9'
+
+    Parameters
+    ----------
+    value_nm : float
+        Input value for ``value_nm``.
+
+    Returns
+    -------
+    result : str
+        Return value produced by the function.
     """
     if float(value_nm).is_integer():
         return f"{int(value_nm)}e-9"
@@ -197,6 +322,18 @@ class RecipeParser:
     """
 
     def __init__(self, text: str):
+        """Initialize a RecipeParser instance.
+
+        Parameters
+        ----------
+        text : str
+            Input value for ``text``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.text = text.replace(" ", "")
         self.pos = 0
 
@@ -212,6 +349,11 @@ class RecipeParser:
         ------
         ValueError
             If the recipe string contains invalid syntax.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         layers = self._parse_sequence(stop_char=None)
         if self.pos != len(self.text):
@@ -222,6 +364,18 @@ class RecipeParser:
         return layers
 
     def _parse_sequence(self, stop_char: str | None) -> List[Layer]:
+        """Handle the internal parse sequence operation.
+
+        Parameters
+        ----------
+        stop_char : str | None
+            Input value for ``stop_char``.
+
+        Returns
+        -------
+        result : List[Layer]
+            Return value produced by the function.
+        """
         layers: List[Layer] = []
 
         while self.pos < len(self.text):
@@ -245,6 +399,18 @@ class RecipeParser:
         return layers
 
     def _parse_block(self) -> List[Layer]:
+        """Handle the internal parse block operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : List[Layer]
+            Return value produced by the function.
+        """
         self._expect("[")
         inner_layers = self._parse_sequence(stop_char="]")
         self._expect("]")
@@ -255,6 +421,18 @@ class RecipeParser:
         return inner_layers * repeat
 
     def _parse_composite_layer(self) -> Layer:
+        """Handle the internal parse composite layer operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Layer
+            Return value produced by the function.
+        """
         components: list[Layer] = [self._parse_layer()]
         while self.pos < len(self.text):
             char = self.text[self.pos]
@@ -282,6 +460,18 @@ class RecipeParser:
         )
 
     def _parse_layer(self) -> Layer:
+        """Handle the internal parse layer operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Layer
+            Return value produced by the function.
+        """
         material = self._parse_material()
         self._expect("(")
         thickness_nm = self._parse_number()
@@ -296,6 +486,18 @@ class RecipeParser:
         return Layer(material=material, thickness=thickness_nm * 1e-9)
 
     def _parse_material(self) -> str:
+        """Handle the internal parse material operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : str
+            Return value produced by the function.
+        """
         start = self.pos
         while self.pos < len(self.text):
             char = self.text[self.pos]
@@ -310,6 +512,18 @@ class RecipeParser:
         return self.text[start : self.pos]
 
     def _parse_number(self) -> float:
+        """Handle the internal parse number operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : float
+            Return value produced by the function.
+        """
         start = self.pos
         dot_count = 0
 
@@ -335,6 +549,18 @@ class RecipeParser:
             raise ValueError(f"Invalid number '{value_str}'") from exc
 
     def _parse_integer(self) -> int:
+        """Handle the internal parse integer operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : int
+            Return value produced by the function.
+        """
         start = self.pos
         while self.pos < len(self.text) and self.text[self.pos].isdigit():
             self.pos += 1
@@ -348,6 +574,18 @@ class RecipeParser:
         return value
 
     def _expect(self, token: str) -> None:
+        """Handle the internal expect operation.
+
+        Parameters
+        ----------
+        token : str
+            Input value for ``token``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if self.pos >= len(self.text) or self.text[self.pos] != token:
             found = self.text[self.pos] if self.pos < len(self.text) else "EOF"
             raise ValueError(
@@ -446,6 +684,24 @@ class Structure:
         sample_shape: list[int, int, int],
         real_space_pixel_size: float,
     ) -> None:
+        """Initialize a Structure instance.
+
+        Parameters
+        ----------
+        name : str
+            Input value for ``name``.
+        material_params : material_params
+            Input value for ``material_params``.
+        sample_shape : list[int, int, int]
+            Input value for ``sample_shape``.
+        real_space_pixel_size : float
+            Input value for ``real_space_pixel_size``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.name = name
         self.material_params = material_params
         self.sample_shape = sample_shape
@@ -550,6 +806,11 @@ class Structure:
             Physical thickness of the layer in metres.
         thickness_nm : float
             Physical thickness of the layer in nanometres.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         refractive_index = self.material_params.get_refractive_index(element)
         dielectric_tensor = self.dielectric_tensor_mixed(n=refractive_index, theta=0.0)
@@ -577,6 +838,18 @@ class Structure:
         indices and dielectric tensor channels are averaged by physical
         thickness, which preserves the existing isotropic, XMCD, and XMLD tensor
         representation while reducing the number of propagated slices.
+
+        Parameters
+        ----------
+        label : str
+            Input value for ``label``.
+        components : tuple[tuple[str, float], ...]
+            Input value for ``components``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         if not components:
             raise ValueError("Composite layer must contain at least one component.")
@@ -625,6 +898,11 @@ class Structure:
         NDArray[np.complex128]
             Array of shape ``(N,)`` with the complex refractive index of
             each layer in deposition order.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         return np.array(self.layer_refractive_indices)
 
@@ -636,6 +914,11 @@ class Structure:
         NDArray[np.complex128]
             Array of shape ``(N,)`` with the complex dielectric tensors of
             each layer in deposition order.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         return np.array(self.dielectric_tensors)
 
@@ -652,6 +935,11 @@ class Structure:
         ------
         IndexError
             If ``index`` is out of range.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         n = len(self.layer_names)
         if index < -n or index >= n:
@@ -700,6 +988,11 @@ class Structure:
         -------
         complex
             Sum of ``n * thickness`` over all layers.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         self.effective_refractive_index = sum(self.effective_refractive_indices)
 
@@ -712,6 +1005,11 @@ class Structure:
         -------
         float
             Sum of layer thicknesses in metres.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         return sum(self.layer_thicknesses)
 
@@ -726,6 +1024,11 @@ class Structure:
         ----------
         shape : tuple of int
             Desired array shape ``(rows, cols)`` in pixels.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         n_layers = len(self.layer_refractive_indices)
         if n_layers == 0:
@@ -738,8 +1041,7 @@ class Structure:
         )
 
     def return_total_effective_dielectric_tensor(self):
-        """
-        Return the thickness-weighted effective transverse dielectric tensor.
+        """Return the thickness-weighted effective transverse dielectric tensor.
 
         Averages ``self.dielectric_tensors`` weighted by ``self.layer_thicknesses``.
 
@@ -747,6 +1049,11 @@ class Structure:
         -------
         ndarray of shape (3, 2, 2)
             Thickness-weighted mean dielectric tensor across all layers.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
 
         D = np.sum(self.layer_thicknesses)
@@ -808,7 +1115,18 @@ class Structure:
         self,
         use_aperture_roi: bool = True,
     ) -> CompactDielectricTensorStack:
-        """Build a compact dielectric tensor stack for lazy propagation."""
+        """Build a compact dielectric tensor stack for lazy propagation.
+
+        Parameters
+        ----------
+        use_aperture_roi : bool
+            Input value for ``use_aperture_roi``.
+
+        Returns
+        -------
+        result : CompactDielectricTensorStack
+            Return value produced by the function.
+        """
 
         mask = self.mask
         m = self.magnetization
@@ -850,6 +1168,20 @@ class Structure:
         )
 
         def _region_active(layer_idx: int, region: tuple[slice, slice]) -> np.ndarray:
+            """Handle the internal region active operation.
+
+            Parameters
+            ----------
+            layer_idx : int
+                Input value for ``layer_idx``.
+            region : tuple[slice, slice]
+                Input value for ``region``.
+
+            Returns
+            -------
+            result : np.ndarray
+                Return value produced by the function.
+            """
             return aperture_support[region] & (mask[(layer_idx, *region)] > tol)
 
         patches: list[list[tuple[tuple[slice, slice], NDArray[np.complex128]]]] = [
@@ -908,8 +1240,7 @@ class Structure:
 
 
     def calculate_final_dielectric_tensor_22052026(self) -> None:
-        """
-        Return the spatial-dependent dielectric tensor including XMCD and XMLD components
+        """Return the spatial-dependent dielectric tensor including XMCD and XMLD components
         multiplies the correct elements of the dielectric tensors with the correct components of the magnetization,
         to produce the magnetization dependent dielctric tensor.
 
@@ -919,6 +1250,11 @@ class Structure:
         -------
         ndarray of shape (Nz,Ny,Nx, 2, 2)
             Thickness-weighted mean dielectric tensor.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
 
         mask = self.mask
@@ -960,6 +1296,18 @@ class Structure:
         self.final_dielectric_tensor = out
 
     def calculate_final_dielectric_tensor_old(self) -> None:
+        """Run the calculate final dielectric tensor old operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         mask = self.mask
         m = self.magnetization
         dt = self.dielectric_tensors
@@ -993,6 +1341,16 @@ class Structure:
         real part (refraction) and the right panel shows the imaginary part
         (absorption). Colour limits are normalised to the min/max across all
         layers. Each bar is labelled with the material name.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         eps = 1e-12
         reals = [n.real for n in self.layer_refractive_indices]
@@ -1052,6 +1410,16 @@ class Structure:
 
         Sets ``self.x`` and ``self.y`` as 2-D arrays of physical
         coordinates in metres, centred on the optical axis.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
 
         x = (
@@ -1071,6 +1439,11 @@ class Structure:
         -------
         extent : tuple of float
             Physical size of the detector plane in metres as (min_x, max_x, min_y, max_y).
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
 
         self.extent_real = np.array(
@@ -1109,6 +1482,20 @@ class Apertures2D:
     """
 
     def __init__(self, shape, real_space_pixel_size) -> None:
+        """Initialize a Apertures2D instance.
+
+        Parameters
+        ----------
+        shape : Any
+            Input value for ``shape``.
+        real_space_pixel_size : Any
+            Input value for ``real_space_pixel_size``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.shape = shape
         self.aperture_design = np.ones(shape)
         self.pixel_size = real_space_pixel_size
@@ -1121,6 +1508,16 @@ class Apertures2D:
 
         Sets ``self.x`` and ``self.y`` as 2-D arrays of physical
         coordinates in metres, centred on the optical axis.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
 
         x = (
@@ -1140,6 +1537,11 @@ class Apertures2D:
         -------
         extent : tuple of float
             Physical size of the detector plane in metres as (min_x, max_x, min_y, max_y).
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
 
         self.extent_real = np.array(
@@ -1174,6 +1576,11 @@ class Apertures2D:
         sigma : float or None, optional
             Standard deviation of the Gaussian smoothing filter in pixels.
             No smoothing when ``None`` or ``0``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         if use_real_space_coordinates:
             # Convert radius from metres to pixels using the real-space grid
@@ -1191,11 +1598,27 @@ class Apertures2D:
         NDArray[np.float64]
             2-D array of shape ``self.shape`` with values in [0, 1] representing
             the aperture mask.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         return self.aperture_design
 
     def visualize_aperture(self) -> None:
-        """Display the current aperture design as an image."""
+        """Display the current aperture design as an image.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         fig, ax = plt.subplots(1, 2, figsize=(8, 4))
         ax[0].imshow(self.aperture_design)
         ax[0].set_title("Beamstop in px")
@@ -1234,6 +1657,22 @@ class Apertures3D:
     """
 
     def __init__(self, shape, real_space_pixel_size, layer_thicknesses) -> None:
+        """Initialize a Apertures3D instance.
+
+        Parameters
+        ----------
+        shape : Any
+            Input value for ``shape``.
+        real_space_pixel_size : Any
+            Input value for ``real_space_pixel_size``.
+        layer_thicknesses : Any
+            Input value for ``layer_thicknesses``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.shape = shape
         self.aperture_design = np.ones(shape)
         self.pixel_size = real_space_pixel_size
@@ -1247,6 +1686,16 @@ class Apertures3D:
 
         The sparse grids keep the old ``self.x[0, 1, 0]`` style indexing and
         extent calculations without allocating full ``(Ny, Nx, Nz)`` arrays.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
 
         x = (np.arange(self.shape[2]) - self.shape[2] / 2) * self.pixel_size
@@ -1264,6 +1713,11 @@ class Apertures3D:
         -------
         extent : tuple of float
             Physical size of the detector plane in metres as (min_x, max_x, min_y, max_y).
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
 
         self.extent_real = np.array(
@@ -1325,6 +1779,11 @@ class Apertures3D:
             Physical depth over which the aperture tapers from the top radius
             to the base radius. If ``None``, the taper spans the full drilled
             depth, matching the original conical behaviour.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         top_radius_factor = float(top_radius_factor)
         if top_radius_factor <= 0:
@@ -1431,7 +1890,30 @@ class Apertures3D:
         ellipticity: float = 1.0,
         roughness: float = 0.0,
     ) -> tuple[slice, slice]:
-        """Return a tight y/x bounding box for an aperture hole."""
+        """Return a tight y/x bounding box for an aperture hole.
+
+        Parameters
+        ----------
+        shape : Any
+            Input value for ``shape``.
+        center : Any
+            Input value for ``center``.
+        radius : Any
+            Input value for ``radius``.
+        sigma : Any
+            Input value for ``sigma``.
+        angle : float
+            Input value for ``angle``.
+        ellipticity : float
+            Input value for ``ellipticity``.
+        roughness : float
+            Input value for ``roughness``.
+
+        Returns
+        -------
+        result : tuple[slice, slice]
+            Return value produced by the function.
+        """
         _, ny, nx = shape
         ellipticity = float(ellipticity)
         if ellipticity <= 0:
@@ -1466,7 +1948,34 @@ class Apertures3D:
         roughness_modes: tuple[int, int] = (0, 0),
         seed: int | None = None,
     ) -> NDArray[np.float64]:
-        """Create a possibly elliptical and rough aperture-hole mask."""
+        """Create a possibly elliptical and rough aperture-hole mask.
+
+        Parameters
+        ----------
+        shape : Any
+            Input value for ``shape``.
+        center : Any
+            Input value for ``center``.
+        radius : Any
+            Input value for ``radius``.
+        sigma : Any
+            Input value for ``sigma``.
+        angle : float
+            Input value for ``angle``.
+        ellipticity : float
+            Input value for ``ellipticity``.
+        roughness : float
+            Input value for ``roughness``.
+        roughness_modes : tuple[int, int]
+            Input value for ``roughness_modes``.
+        seed : int | None
+            Input value for ``seed``.
+
+        Returns
+        -------
+        result : NDArray[np.float64]
+            Return value produced by the function.
+        """
         _, ny, nx = shape
         dy = np.arange(ny, dtype=float)[:, None] - center[0]
         dx = np.arange(nx, dtype=float)[None, :] - center[1]
@@ -1504,7 +2013,18 @@ class Apertures3D:
         return mask
 
     def create_empty_aperture(self) -> None:
-        """Create an empty aperture mask (all zeros) and store it in ``self.aperture_design``."""
+        """Create an empty aperture mask (all zeros) and store it in ``self.aperture_design``.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.aperture_design = np.zeros(self.shape)
 
     def return_aperture_mask(self) -> NDArray[np.float64]:
@@ -1515,11 +2035,27 @@ class Apertures3D:
         NDArray[np.float64]
             2-D array of shape ``self.shape`` with values in [0, 1] representing
             the aperture mask.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         return self.aperture_design
 
     def visualize_aperture(self) -> None:
-        """Display the current aperture design as an image."""
+        """Display the current aperture design as an image.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         fig, ax = plt.subplots(1, 2, figsize=(8, 4))
         ax[0].imshow(np.average(self.aperture_design, axis=0))
         ax[0].set_title("Beamstop in px")
@@ -1560,8 +2096,7 @@ class Magnetic_Structure:
     """
 
     def __init__(self, magnetic_structure, magnetic_pattern) -> None:
-        """
-        Parameters
+        """Parameters
         ----------
         magnetic_structure : Structure
             Fully assembled :class:`Structure` whose
@@ -1569,6 +2104,11 @@ class Magnetic_Structure:
         magnetic_pattern : ndarray
             2-D (or 3-D) magnetisation pattern with values in ``[-1, 1]``.
             A 3-D array is interpreted as ``(depth, rows, cols)``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.magnetic_structure = magnetic_structure
         self.magnetic_refractive_index = magnetic_structure.effective_refractive_index
@@ -1580,6 +2120,16 @@ class Magnetic_Structure:
         For a 3-D pattern ``(depth, rows, cols)``, sums along the depth axis
         to obtain a 2-D projected map. For a 2-D pattern the input is used
         directly. The result is stored in ``self.magnetic_projection``.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         if self.magnetic_pattern.ndim > 2:
             self.magnetic_projection = np.sum(self.magnetic_pattern, axis=0)
@@ -1587,7 +2137,18 @@ class Magnetic_Structure:
             self.magnetic_projection = self.magnetic_pattern
 
     def visualize_magnetic_projection(self) -> None:
-        """Visualize the magnetic projection approximation."""
+        """Visualize the magnetic projection approximation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if hasattr(self, "magnetic_projection"):
             _, ax = plt.subplots()
             m = ax.imshow(self.magnetic_projection, cmap="gray")
@@ -1611,6 +2172,16 @@ class Magnetic_Structure:
         - ``self.magnetic_dichroism``
         - ``self.magnetic_birefringence``
         - ``self.magnetic_refractive_index_map``
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.magnetic_dichroism = (
             self.magnetic_refractive_index.imag * self.magnetic_pattern
@@ -1623,7 +2194,18 @@ class Magnetic_Structure:
         )
 
     def visualize_magnetic_contributions(self):
-        """Visualize the magnetic dichroism and birefringence contributions."""
+        """Visualize the magnetic dichroism and birefringence contributions.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         if hasattr(self, "magnetic_dichroism") and hasattr(
             self, "magnetic_birefringence"
         ):

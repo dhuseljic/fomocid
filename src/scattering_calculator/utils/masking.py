@@ -1,3 +1,5 @@
+"""Mask generation and smoothing utilities."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -76,9 +78,22 @@ def create_set_of_circle_masks(
 
 
 def smooth_box_1d(r: NDArray[np.float64], radius: float, sigma: float) -> NDArray[np.float64]:
-    """
-    Smooth radial box:
+    """Smooth radial box:
     ~1 inside radius, ~0 outside radius, with edge width controlled by sigma.
+
+    Parameters
+    ----------
+    r : NDArray[np.float64]
+        Input value for ``r``.
+    radius : float
+        Input value for ``radius``.
+    sigma : float
+        Input value for ``sigma``.
+
+    Returns
+    -------
+    result : NDArray[np.float64]
+        Return value produced by the function.
     """
     return 0.5 * (1.0 - erf((r - radius) / (np.sqrt(2.0) * sigma)))
 

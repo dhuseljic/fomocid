@@ -48,6 +48,18 @@ except ImportError:
 
 def _xp(use_gpu=True):
 
+    """Handle the internal xp operation.
+
+    Parameters
+    ----------
+    use_gpu : Any
+        Input value for ``use_gpu``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     if use_gpu and _HAS_CUPY:
         return _cp
 
@@ -56,6 +68,18 @@ def _xp(use_gpu=True):
 
 def _to_numpy(x):
 
+    """Handle the internal to numpy operation.
+
+    Parameters
+    ----------
+    x : Any
+        Input value for ``x``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     if _HAS_CUPY and isinstance(x, _cp.ndarray):
         return _cp.asnumpy(x)
 
@@ -127,6 +151,18 @@ class GrayScottBatch:
 
     def __init__(self, cfg):
 
+        """Initialize a GrayScottBatch instance.
+
+        Parameters
+        ----------
+        cfg : Any
+            Input value for ``cfg``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.cfg = cfg
         self.k0 = cfg.k0
         self.eps = cfg.eps
@@ -199,6 +235,18 @@ class GrayScottBatch:
 
     def step(self, n=1):
 
+        """Run the step operation.
+
+        Parameters
+        ----------
+        n : Any
+            Input value for ``n``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         xp = self.xp
 
         u = self.u
@@ -237,6 +285,18 @@ class GrayScottBatch:
 
     def run(self):
 
+        """Run the run operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         self.step(self.cfg.n_steps)
 
         xp = self.xp
@@ -268,8 +328,7 @@ def generate(
     noise_amp: float = 0.02,
     **overrides,
 ):
-    """
-    API-compatible binary magnetic-domain generator.
+    """API-compatible binary magnetic-domain generator.
 
     Returns
     -------
@@ -281,6 +340,37 @@ def generate(
 
     meta : dict
         Metadata dictionary compatible with original API
+
+    Parameters
+    ----------
+    batch : int
+        Input value for ``batch``.
+    H : int
+        Input value for ``H``.
+    W : int
+        Input value for ``W``.
+    n_steps : int
+        Input value for ``n_steps``.
+    region : Optional[Union[str, list]]
+        Input value for ``region``.
+    anisotropic : bool
+        Input value for ``anisotropic``.
+    fk_spatial : bool
+        Input value for ``fk_spatial``.
+    random_stop : bool
+        Input value for ``random_stop``.
+    seed : Optional[int]
+        Input value for ``seed``.
+    use_gpu : bool
+        Input value for ``use_gpu``.
+    k0 : float
+        Input value for ``k0``.
+    eps : float
+        Input value for ``eps``.
+    noise_amp : float
+        Input value for ``noise_amp``.
+    **overrides : Any
+        Input value for ``overrides``.
     """
 
     cfg = GrayScottConfig(

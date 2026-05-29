@@ -36,12 +36,36 @@ except ImportError:
 
 
 def _xp(use_gpu: bool):
+    """Handle the internal xp operation.
+
+    Parameters
+    ----------
+    use_gpu : bool
+        Input value for ``use_gpu``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     if use_gpu and _HAS_CUPY:
         return _cp
     return _np
 
 
 def _to_numpy(arr):
+    """Handle the internal to numpy operation.
+
+    Parameters
+    ----------
+    arr : Any
+        Input value for ``arr``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     if _HAS_CUPY and isinstance(arr, _cp.ndarray):
         return _cp.asnumpy(arr)
     return _np.asarray(arr)
@@ -63,6 +87,22 @@ def sample_fk(
     regions: Optional[Union[str, list]] = None,
     rng: Optional[_np.random.Generator] = None,
 ):
+    """Run the sample fk operation.
+
+    Parameters
+    ----------
+    n : int
+        Input value for ``n``.
+    regions : Optional[Union[str, list]]
+        Input value for ``regions``.
+    rng : Optional[_np.random.Generator]
+        Input value for ``rng``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     rng = rng if rng is not None else _np.random.default_rng()
 
     if regions is None:
@@ -91,6 +131,20 @@ def sample_fk(
 
 def _laplacian_iso(u, xp):
 
+    """Handle the internal laplacian iso operation.
+
+    Parameters
+    ----------
+    u : Any
+        Input value for ``u``.
+    xp : Any
+        Input value for ``xp``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     up = xp.roll(u, -1, axis=-2)
     down = xp.roll(u, 1, axis=-2)
 
@@ -112,6 +166,24 @@ def _laplacian_iso(u, xp):
 
 def _laplacian_aniso(u, theta, alpha, xp):
 
+    """Handle the internal laplacian aniso operation.
+
+    Parameters
+    ----------
+    u : Any
+        Input value for ``u``.
+    theta : Any
+        Input value for ``theta``.
+    alpha : Any
+        Input value for ``alpha``.
+    xp : Any
+        Input value for ``xp``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     L = _laplacian_iso(u, xp)
 
     uxx = xp.roll(u, -1, axis=-1) - 2.0 * u + xp.roll(u, 1, axis=-1)
@@ -144,6 +216,30 @@ def _make_seeds(
     rng_seed=None,
 ):
 
+    """Handle the internal make seeds operation.
+
+    Parameters
+    ----------
+    batch : Any
+        Input value for ``batch``.
+    H : Any
+        Input value for ``H``.
+    W : Any
+        Input value for ``W``.
+    n_seeds_range : Any
+        Input value for ``n_seeds_range``.
+    radius_range : Any
+        Input value for ``radius_range``.
+    xp : Any
+        Input value for ``xp``.
+    rng_seed : Any
+        Input value for ``rng_seed``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     rng = _np.random.default_rng(rng_seed)
 
     B0 = xp.zeros((batch, H, W), dtype=xp.float32)
@@ -228,6 +324,18 @@ class GrayScottBatch:
 
     def __init__(self, cfg):
 
+        """Initialize a GrayScottBatch instance.
+
+        Parameters
+        ----------
+        cfg : Any
+            Input value for ``cfg``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.cfg = cfg
 
         self.xp = _xp(cfg.use_gpu)
@@ -297,6 +405,18 @@ class GrayScottBatch:
 
     def _laplacian(self, u):
 
+        """Handle the internal laplacian operation.
+
+        Parameters
+        ----------
+        u : Any
+            Input value for ``u``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         if self.cfg.anisotropic:
             return _laplacian_aniso(
                 u,
@@ -309,6 +429,18 @@ class GrayScottBatch:
 
     def step(self, n=1):
 
+        """Run the step operation.
+
+        Parameters
+        ----------
+        n : Any
+            Input value for ``n``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         xp = self.xp
 
         A = self.A
@@ -343,6 +475,18 @@ class GrayScottBatch:
 
     def run(self):
 
+        """Run the run operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         self.step(self.cfg.n_steps)
 
         return _to_numpy(self.A), _to_numpy(self.B)
@@ -362,6 +506,38 @@ def generate(
     **overrides,
 ):
 
+    """Run the generate operation.
+
+    Parameters
+    ----------
+    batch : int
+        Input value for ``batch``.
+    H : int
+        Input value for ``H``.
+    W : int
+        Input value for ``W``.
+    n_steps : int
+        Input value for ``n_steps``.
+    region : Optional[Union[str, list]]
+        Input value for ``region``.
+    anisotropic : bool
+        Input value for ``anisotropic``.
+    fk_spatial : bool
+        Input value for ``fk_spatial``.
+    random_stop : bool
+        Input value for ``random_stop``.
+    seed : Optional[int]
+        Input value for ``seed``.
+    use_gpu : bool
+        Input value for ``use_gpu``.
+    **overrides : Any
+        Input value for ``overrides``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     cfg = GrayScottConfig(
         H=H,
         W=W,

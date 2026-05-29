@@ -1,11 +1,12 @@
+"""Legacy multislice exit-wave simulation helpers."""
+
 import numpy as np
 from scipy.ndimage import distance_transform_edt, gaussian_filter
 
 
 
 def Multislice(material=np.zeros((1000,1000,100),dtype=complex),field=np.ones((1000,1000),dtype=complex), l=1.59e-9, z=2050e-9, px_size=5e-9):
-    '''
-    Multislice simulations, computes transmission functions of a complex refractive index material matrix "material"
+    """Multislice simulations, computes transmission functions of a complex refractive index material matrix "material"
     of thickness "z" for a plane wave of wavelenght l
     can be used to compute transmittance of reference holes and object holes
     for object holes, field should be specified using the transmittance of the magnetized cobalt
@@ -13,7 +14,25 @@ def Multislice(material=np.zeros((1000,1000,100),dtype=complex),field=np.ones((1
     OUTPUT: field values at the end of the membrane
     (http://dx.doi.org/10.1364/OE.25.001831)
     RB_2020
-    '''
+
+    Parameters
+    ----------
+    material : Any
+        Input value for ``material``.
+    field : Any
+        Input value for ``field``.
+    l : Any
+        Input value for ``l``.
+    z : Any
+        Input value for ``z``.
+    px_size : Any
+        Input value for ``px_size``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     #first of all we wanna use an appropriate number of pixels, so that l**2*(ux**2+uy**2)) < 1 e quindi 2ux**-2<l**2 e quindi px_size>l/sqrt(2)
     # px size=hole_diam/npx e quindi hole_diam/npx>l/sqrt(2) e quindi npx<hole_diam*sqrt(2)/l
     #we have to reduce the resolution of the material matrix if it is too detailed. No
@@ -43,15 +62,30 @@ def Multislice(material=np.zeros((1000,1000,100),dtype=complex),field=np.ones((1
     return field
 
 def Multislice_vacuum(field=np.ones((1000,1000),dtype=complex), l=1.59e-9, z=2050e-9, px_size=5e-9):
-    '''
-    Multislice simulations, plane wave field of l wavelengthis propagated in a space z
+    """Multislice simulations, plane wave field of l wavelengthis propagated in a space z
     can be used to compute transmittance of reference holes and object holes
     for object holes, field should be specified using the transmittance of the magnetized cobalt
 
     OUTPUT: field values at the end of the membrane
     (http://dx.doi.org/10.1364/OE.25.001831)
     RB_2020
-    '''
+
+    Parameters
+    ----------
+    field : Any
+        Input value for ``field``.
+    l : Any
+        Input value for ``l``.
+    z : Any
+        Input value for ``z``.
+    px_size : Any
+        Input value for ``px_size``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     #first of all we wanna use an appropriate number of pixels, so that l**2*(ux**2+uy**2)) < 1 e quindi 2ux**-2<l**2 e quindi px_size>l/sqrt(2)
     # px size=hole_diam/npx e quindi hole_diam/npx>l/sqrt(2) e quindi npx<hole_diam*sqrt(2)/l
     #we have to reduce the resolution of the material matrix if it is too detailed. No
@@ -99,6 +133,22 @@ def Multislice_vacuum(field=np.ones((1000,1000),dtype=complex), l=1.59e-9, z=205
 
 def ellipse_coeffs(a, b,  A):
     # A in radians
+    """Run the ellipse coeffs operation.
+
+    Parameters
+    ----------
+    a : Any
+        Input value for ``a``.
+    b : Any
+        Input value for ``b``.
+    A : Any
+        Input value for ``A``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     c0 = (np.cos(A)**2)/a**2 + (np.sin(A)**2)/b**2
 
     c1 = (np.sin(A)**2)/a**2 + (np.cos(A)**2)/b**2
@@ -111,12 +161,29 @@ def ellipse_coeffs(a, b,  A):
 
 def randomify_binary(A, sigma_noise=5., alpha=555, lpx=1e-9, dz=1e-9):
 
-    '''
-    takes a binary volume and adds randomness to it. only works with binary volumes
+    """takes a binary volume and adds randomness to it. only works with binary volumes
     A:  binary volume defining the material: 1 = Au/Cr gold, 0 :hole
     sigma_noise: controls smoothness of bumps (larger = smoother, bigger features)
     alpha: controls how strong the surface deformation is
-    '''
+
+    Parameters
+    ----------
+    A : Any
+        Input value for ``A``.
+    sigma_noise : Any
+        Input value for ``sigma_noise``.
+    alpha : Any
+        Input value for ``alpha``.
+    lpx : Any
+        Input value for ``lpx``.
+    dz : Any
+        Input value for ``dz``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
 
     mask = A.astype(bool)
     if A.ndim==3:
@@ -171,8 +238,7 @@ def material_hole(hole_type     = 'RH',
                   xh=0,yh=0,
 
                  ):
-    '''
-    fabricates obj/reference hole matrix
+    """fabricates obj/reference hole matrix
     the hole is always as big as the matrix, will be accomodated later
     keeps into account if it is an obj. hole or a ref. hole
     magnetic pattern should be ones for ref holes
@@ -180,7 +246,61 @@ def material_hole(hole_type     = 'RH',
 
     OUTPUT: the size of the pixel for the material + a complex 3D numpy array, containing the material refractive indexes in each voxel
     RB_2020
-    '''
+
+    Parameters
+    ----------
+    hole_type : Any
+        Input value for ``hole_type``.
+    lpx : Any
+        Input value for ``lpx``.
+    Au_z : Any
+        Input value for ``Au_z``.
+    dz : Any
+        Input value for ``dz``.
+    SiN_z : Any
+        Input value for ``SiN_z``.
+    rx : Any
+        Input value for ``rx``.
+    ry : Any
+        Input value for ``ry``.
+    l : Any
+        Input value for ``l``.
+    funnel_r : Any
+        Input value for ``funnel_r``.
+    Df : Any
+        Input value for ``Df``.
+    funnel_start : Any
+        Input value for ``funnel_start``.
+    ax : Any
+        Input value for ``ax``.
+    ay : Any
+        Input value for ``ay``.
+    az : Any
+        Input value for ``az``.
+    rotation : Any
+        Input value for ``rotation``.
+    sigma_noise : Any
+        Input value for ``sigma_noise``.
+    alpha_noise : Any
+        Input value for ``alpha_noise``.
+    beta_mask : Any
+        Input value for ``beta_mask``.
+    delta_mask : Any
+        Input value for ``delta_mask``.
+    delta_SiN : Any
+        Input value for ``delta_SiN``.
+    beta_SiN : Any
+        Input value for ``beta_SiN``.
+    xh : Any
+        Input value for ``xh``.
+    yh : Any
+        Input value for ``yh``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     #first of all we wanna use an appropriate number of pixels, so that l**2*(ux**2+uy**2)) < 1 e quindi 0.5*ux**-2<l**2 e quindi px_size>l/sqrt(0.5)
     # px size=hole_diam/npx e quindi hole_diam/npx>l/sqrt(0.5) e quindi npx<hole_diam*sqrt(0.5)/l
 
@@ -322,8 +442,7 @@ def hole_multislice(
                     yh=0,
     plot_every=10
                     ):
-    '''
-    fabricates obj/reference hole matrix
+    """fabricates obj/reference hole matrix
     the hole is always as big as the matrix, will be accomodated later
     keeps into account if it is an obj. hole or a ref. hole
     magnetic pattern should be ones for ref holes
@@ -331,7 +450,63 @@ def hole_multislice(
 
     OUTPUT: the size of the pixel for the material + a complex 3D numpy array, containing the material refractive indexes in each voxel
     RB_2020
-    '''
+
+    Parameters
+    ----------
+    hole_type : Any
+        Input value for ``hole_type``.
+    lpx : Any
+        Input value for ``lpx``.
+    Au_z : Any
+        Input value for ``Au_z``.
+    dz : Any
+        Input value for ``dz``.
+    SiN_z : Any
+        Input value for ``SiN_z``.
+    rx : Any
+        Input value for ``rx``.
+    ry : Any
+        Input value for ``ry``.
+    l : Any
+        Input value for ``l``.
+    funnel_r : Any
+        Input value for ``funnel_r``.
+    Df : Any
+        Input value for ``Df``.
+    funnel_start : Any
+        Input value for ``funnel_start``.
+    ax : Any
+        Input value for ``ax``.
+    ay : Any
+        Input value for ``ay``.
+    az : Any
+        Input value for ``az``.
+    rotation : Any
+        Input value for ``rotation``.
+    sigma_noise : Any
+        Input value for ``sigma_noise``.
+    alpha_noise : Any
+        Input value for ``alpha_noise``.
+    beta_mask : Any
+        Input value for ``beta_mask``.
+    delta_mask : Any
+        Input value for ``delta_mask``.
+    delta_SiN : Any
+        Input value for ``delta_SiN``.
+    beta_SiN : Any
+        Input value for ``beta_SiN``.
+    xh : Any
+        Input value for ``xh``.
+    yh : Any
+        Input value for ``yh``.
+    plot_every : Any
+        Input value for ``plot_every``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     #first of all we wanna use an appropriate number of pixels, so that l**2*(ux**2+uy**2)) < 1 e quindi 0.5*ux**-2<l**2 e quindi px_size>l/sqrt(0.5)
     # px size=hole_diam/npx e quindi hole_diam/npx>l/sqrt(0.5) e quindi npx<hole_diam*sqrt(0.5)/l
 

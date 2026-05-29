@@ -1,3 +1,5 @@
+"""Image-coordinate and rotation utilities."""
+
 from __future__ import annotations
 
 import scipy as scp
@@ -165,6 +167,22 @@ def hls_to_rgb(hls_array: NDArray[np.float64]) -> NDArray[np.float64]:
     ONE_SIXTH = 1 / 6
 
     def _v(m1, m2, h):
+        """Handle the internal v operation.
+
+        Parameters
+        ----------
+        m1 : Any
+            Input value for ``m1``.
+        m2 : Any
+            Input value for ``m2``.
+        h : Any
+            Input value for ``h``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         h = h % 1.0
         return np.where(
             h < ONE_SIXTH,

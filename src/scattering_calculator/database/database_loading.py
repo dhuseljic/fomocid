@@ -1,3 +1,5 @@
+"""Material-parameter database loading helpers."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -39,6 +41,22 @@ class material_params:
     ) -> None:
 
         # If both refractive_indices and materials are provided, use refractive_indices (backward compatible)
+        """Initialize a material_params instance.
+
+        Parameters
+        ----------
+        refractive_indices : dict[str, complex]
+            Input value for ``refractive_indices``.
+        materials : list[str]
+            Input value for ``materials``.
+        x_ray_energy : float
+            Input value for ``x_ray_energy``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if refractive_indices is not None:
             self.database = refractive_indices
             self.x_ray_energy = None

@@ -1,3 +1,5 @@
+"""Test detector hologram beamstop and threshold variants."""
+
 from __future__ import annotations
 
 import sys
@@ -18,6 +20,18 @@ from scattering_calculator.simulation_pipelines.simulation_configuration import 
 
 class DetectorBeamstopTests(unittest.TestCase):
     def _hologram(self) -> detector_hologram:
+        """Handle the internal hologram operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : detector_hologram
+            Return value produced by the function.
+        """
         holo = object.__new__(detector_hologram)
         holo.hologram_detector = np.ones((5, 5), dtype=float) * 100.0
         holo.beamstop = SimpleNamespace(beamstop=np.zeros((5, 5), dtype=float))
@@ -37,6 +51,18 @@ class DetectorBeamstopTests(unittest.TestCase):
         return holo
 
     def test_detected_hologram_can_skip_beamstop_mask(self) -> None:
+        """Test that detected hologram can skip beamstop mask.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         masked = self._hologram()
         masked.add_noise(apply_beamstop_mask=True)
 
@@ -47,6 +73,18 @@ class DetectorBeamstopTests(unittest.TestCase):
         self.assertGreater(unmasked.hologram_exp[2, 2], 0.0)
 
     def test_detected_hologram_can_skip_detector_threshold(self) -> None:
+        """Test that detected hologram can skip detector threshold.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         thresholded = self._hologram()
         thresholded.hologram_detector[:] = 100.0
         thresholded.detector_threshold = 10.0
@@ -67,6 +105,18 @@ class DetectorBeamstopTests(unittest.TestCase):
         self.assertGreater(np.max(unthresholded.hologram_exp), 10.0)
 
     def test_no_beamstop_variant_reuses_same_noise_realization(self) -> None:
+        """Test that no beamstop variant reuses same noise realization.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         holo = self._hologram()
         holo.readout_noise_average = 10.0
         holo.readout_noise_sigma = 2.0
@@ -80,6 +130,18 @@ class DetectorBeamstopTests(unittest.TestCase):
         self.assertGreater(holo.hologram_exp_no_beamstop[2, 2], holo.hologram_exp[2, 2])
 
     def test_hologram_config_stores_no_beamstop_source(self) -> None:
+        """Test that hologram config stores no beamstop source.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         config = HologramConfig()
         arr = np.ones((3, 3), dtype=float)
         config.add_holograms({"CR": arr}, source="detected_no_beamstop")

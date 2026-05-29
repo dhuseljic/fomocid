@@ -1,3 +1,5 @@
+"""Step-by-step experiment simulation pipeline helpers."""
+
 import numpy as np
 
 from scattering_calculator.experimental_conditions import detector, light_beam
@@ -18,6 +20,32 @@ class SetupSimulationExperiment:
         detector_config,
         beamstop_config,
     ):
+        """Initialize a SetupSimulationExperiment instance.
+
+        Parameters
+        ----------
+        xray_config : Any
+            Input value for ``xray_config``.
+        simulation_config : Any
+            Input value for ``simulation_config``.
+        front_aperture_config : Any
+            Input value for ``front_aperture_config``.
+        illumination_config : Any
+            Input value for ``illumination_config``.
+        sample_config : Any
+            Input value for ``sample_config``.
+        magnetic_pattern_config : Any
+            Input value for ``magnetic_pattern_config``.
+        detector_config : Any
+            Input value for ``detector_config``.
+        beamstop_config : Any
+            Input value for ``beamstop_config``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.xray_config = xray_config
         self.simulation_config = simulation_config
         self.front_aperture_config = front_aperture_config
@@ -28,6 +56,18 @@ class SetupSimulationExperiment:
         self.beamstop_config = beamstop_config
 
     def setup(self):
+        """Run the setup operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         self._setup_beam_params()
         self._setup_detector()
         self._setup_beamstop()
@@ -37,6 +77,18 @@ class SetupSimulationExperiment:
         self._setup_magnetization()
 
     def run(self):
+        """Run the run operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         self.sample.calculate_final_dielectric_tensor()
         self.holos = [None, None]
         for ii, pol in enumerate(["CR", "CL"]):
@@ -80,6 +132,18 @@ class SetupSimulationExperiment:
             self.holos[ii] = hologram_exp.hologram_exp.copy()
 
     def _setup_beam_params(self):
+        """Handle the internal setup beam params operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         self.beam_params = light_beam.beam_parameters(
             getattr(
                 self.xray_config,
@@ -97,6 +161,18 @@ class SetupSimulationExperiment:
         self.beam_params.calc_wavevector()
 
     def _setup_detector(self):
+        """Handle the internal setup detector operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         self.exp_detector = detector.detector_layout(
             pixel_size=self.detector_config.detector_pixel_size,
             detector_shape=self.detector_config.detector_pixel_shape,
@@ -107,6 +183,18 @@ class SetupSimulationExperiment:
         self.exp_detector.calc_q_space_coordinates(self.beam_params)
 
     def _setup_beamstop(self):
+        """Handle the internal setup beamstop operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         if hasattr(self.beamstop_config, "setup"):
             self.beamstop = self.beamstop_config.setup(self.exp_detector)
             self.exp_detector.assign_beamstop(self.beamstop.return_beamstop())
@@ -126,6 +214,18 @@ class SetupSimulationExperiment:
         self.exp_detector.assign_beamstop(self.beamstop.return_beamstop())
 
     def _setup_sample_geometry(self):
+        """Handle the internal setup sample geometry operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         res_from_detector = np.pi / np.maximum(
             np.amax(np.abs(self.exp_detector.detqx)),
             np.amax(np.abs(self.exp_detector.detqy)),
@@ -138,6 +238,18 @@ class SetupSimulationExperiment:
         self.real_space_pixel_size = res_from_detector / 4
 
     def _setup_sample_structure(self):
+        """Handle the internal setup sample structure operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         stack = structures.parse_recipe(
             self.sample_config.recipe,
             sample_name=self.sample_config.sample_name,
@@ -166,6 +278,18 @@ class SetupSimulationExperiment:
                 self.sample.add_layer(layer.material, thickness=layer.thickness)
 
     def _setup_front_aperture(self):
+        """Handle the internal setup front aperture operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         self.front_aperture = structures.Apertures3D(
             self.sample_shape,
             self.real_space_pixel_size,
@@ -190,6 +314,18 @@ class SetupSimulationExperiment:
         self.sample.mask = self.front_aperture.aperture_design
 
     def _setup_magnetization(self):
+        """Handle the internal setup magnetization operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         magnetic_pattern, _ = pattern_generator.create_wavy_stripe_pattern(
             self.sample.sample_shape[1:],
             self.magnetic_pattern_config.stripe_width / self.real_space_pixel_size,

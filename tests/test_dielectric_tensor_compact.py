@@ -1,3 +1,5 @@
+"""Test compact dielectric tensor construction against dense tensors."""
+
 from __future__ import annotations
 
 import sys
@@ -19,6 +21,18 @@ from scattering_calculator.sample_generator.structures import (
 
 class CompactDielectricTensorTests(unittest.TestCase):
     def test_compact_builder_materializes_like_dense_builder(self) -> None:
+        """Test that compact builder materializes like dense builder.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         structure = object.__new__(Structure)
         structure.mask = np.ones((2, 6, 7), dtype=float)
         structure.mask[0, 2:4, 3:5] = 0.0

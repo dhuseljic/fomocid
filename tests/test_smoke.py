@@ -1,3 +1,5 @@
+"""Run smoke tests for SSL configuration, training, and notebook helpers."""
+
 from __future__ import annotations
 
 import tempfile
@@ -31,6 +33,18 @@ from tutorials.train_ssl import run_training
 
 class SmokeTests(unittest.TestCase):
     def test_cifar10_mae_config_builds_datamodule(self) -> None:
+        """Test that cifar10 mae config builds datamodule.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         config = load_config(Path("configs/smoke_cifar10_mae.yaml"))
         datamodule = create_datamodule(config)
         datamodule.setup()
@@ -44,6 +58,18 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(eval_batch[0].shape[0], config["dataset"]["eval_batch_size"])
 
     def test_stl10_dino_config_builds_datamodule(self) -> None:
+        """Test that stl10 dino config builds datamodule.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         config = load_config(Path("configs/smoke_stl10_dino.yaml"))
         datamodule = create_datamodule(config)
         datamodule.setup()
@@ -55,6 +81,18 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(ssl_batch[0][0].shape[0], config["dataset"]["batch_size"])
 
     def test_mnist_mae_config_builds_datamodule(self) -> None:
+        """Test that mnist mae config builds datamodule.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         config = load_config(Path("configs/smoke_mnist_mae.yaml"))
         datamodule = create_datamodule(config)
         datamodule.setup()
@@ -68,6 +106,18 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(eval_batch[0].shape[1], 3)
 
     def test_cifar10_mae_training_and_evaluation_smoke(self) -> None:
+        """Test that cifar10 mae training and evaluation smoke.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         config_path = Path("configs/smoke_cifar10_mae.yaml")
         with tempfile.TemporaryDirectory() as tmp_dir:
             run_dir = run_training(config_path, tmp_dir)
@@ -86,6 +136,18 @@ class SmokeTests(unittest.TestCase):
             self.assertTrue((eval_dir / "evaluation_summary.json").exists())
 
     def test_optimizer_config_without_scheduler_uses_plain_adamw(self) -> None:
+        """Test that optimizer config without scheduler uses plain adamw.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         base_config = load_config(Path("configs/smoke_cifar10_mae.yaml"))
         config = copy.deepcopy(base_config)
         config["optimizer"].pop("scheduler")
@@ -99,6 +161,18 @@ class SmokeTests(unittest.TestCase):
         self.assertIsNone(scheduler)
 
     def test_cosine_scheduler_reaches_peak_and_min_lr(self) -> None:
+        """Test that cosine scheduler reaches peak and min lr.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         config = load_config(Path("configs/smoke_cifar10_mae.yaml"))
         config = copy.deepcopy(config)
         config["optimizer"]["scheduler"]["warmup_epochs"] = 1.0
@@ -119,11 +193,35 @@ class SmokeTests(unittest.TestCase):
         self.assertAlmostEqual(learning_rates[-1], optimizer_config["scheduler"]["min_lr"], places=7)
 
     def test_warmup_cosine_factor_edge_cases(self) -> None:
+        """Test that warmup cosine factor edge cases.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.assertAlmostEqual(warmup_cosine_factor(0, total_steps=4, warmup_steps=0, min_lr_scale=1.0), 1.0)
         self.assertAlmostEqual(warmup_cosine_factor(1, total_steps=2, warmup_steps=4, min_lr_scale=0.2), 1.0)
         self.assertAlmostEqual(warmup_cosine_factor(3, total_steps=4, warmup_steps=1, min_lr_scale=0.1), 0.1)
 
     def test_cifar10_mae_training_without_logging(self) -> None:
+        """Test that cifar10 mae training without logging.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         base_config = load_config(Path("configs/smoke_cifar10_mae.yaml"))
         config = copy.deepcopy(base_config)
         config["trainer"]["enable_logging"] = False
@@ -138,6 +236,18 @@ class SmokeTests(unittest.TestCase):
             self.assertFalse((run_dir / "logs").exists())
 
     def test_cifar10_mae_training_without_progress_bar(self) -> None:
+        """Test that cifar10 mae training without progress bar.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         base_config = load_config(Path("configs/smoke_cifar10_mae.yaml"))
         config = copy.deepcopy(base_config)
         config["trainer"]["enable_progress_bar"] = False
@@ -151,6 +261,18 @@ class SmokeTests(unittest.TestCase):
             self.assertTrue((run_dir / "train_summary.json").exists())
 
     def test_stl10_dino_training_and_evaluation_smoke(self) -> None:
+        """Test that stl10 dino training and evaluation smoke.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         config_path = Path("configs/smoke_stl10_dino.yaml")
         with tempfile.TemporaryDirectory() as tmp_dir:
             run_dir = run_training(config_path, tmp_dir)
@@ -165,6 +287,18 @@ class SmokeTests(unittest.TestCase):
             self.assertTrue((eval_dir / "nearest_neighbors.png").exists())
 
     def test_notebook_helpers_for_cifar10_mae(self) -> None:
+        """Test that notebook helpers for cifar10 mae.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         config_path = Path("configs/smoke_cifar10_mae.yaml")
         dataset_preview = build_dataset_preview(config_path, split="train", limit=8, samples_per_class=1)
         mask_preview = build_mae_mask_preview(config_path, split="train", index=0)
@@ -180,6 +314,18 @@ class SmokeTests(unittest.TestCase):
         self.assertGreaterEqual(dataset_preview.size[0], 4 * 192)
 
     def test_notebook_helpers_for_stl10_dino(self) -> None:
+        """Test that notebook helpers for stl10 dino.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         config_path = Path("configs/smoke_stl10_dino.yaml")
         dataset_preview = build_dataset_preview(config_path, split="train", limit=8, samples_per_class=1)
         view_preview = build_pretrain_view_preview(config_path, split="train", index=0)
@@ -190,6 +336,18 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(batch_shapes["num_views"], 4)
 
     def test_build_dataset_preview_respects_display_size(self) -> None:
+        """Test that build dataset preview respects display size.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         config_path = Path("configs/smoke_mnist_mae.yaml")
         small_preview = build_dataset_preview(config_path, split="train", limit=4, samples_per_class=1, display_size=64)
         large_preview = build_dataset_preview(config_path, split="train", limit=4, samples_per_class=1, display_size=160)
@@ -197,6 +355,18 @@ class SmokeTests(unittest.TestCase):
         self.assertLess(small_preview.size[0], large_preview.size[0])
 
     def test_mnist_base_transform_converts_grayscale_to_rgb(self) -> None:
+        """Test that mnist base transform converts grayscale to rgb.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         config = load_config(Path("configs/smoke_mnist_mae.yaml"))
         datamodule = create_datamodule(config)
 

@@ -62,14 +62,38 @@ CLASS_NAMES: dict[str, list[str]] = {
 
 
 def _ensure_config(config_or_path: RootConfig | str | Path) -> RootConfig:
-    """Normalize notebook inputs to an in-memory root config."""
+    """Normalize notebook inputs to an in-memory root config.
+
+    Parameters
+    ----------
+    config_or_path : RootConfig | str | Path
+        Input value for ``config_or_path``.
+
+    Returns
+    -------
+    result : RootConfig
+        Return value produced by the function.
+    """
     if isinstance(config_or_path, dict):
         return config_or_path
     return load_config(config_or_path)
 
 
 def _load_raw_dataset(config: RootConfig, split: str) -> tuple[Any, Any]:
-    """Load an unaugmented dataset split for notebook visualizations."""
+    """Load an unaugmented dataset split for notebook visualizations.
+
+    Parameters
+    ----------
+    config : RootConfig
+        Input value for ``config``.
+    split : str
+        Input value for ``split``.
+
+    Returns
+    -------
+    result : tuple[Any, Any]
+        Return value produced by the function.
+    """
     datamodule = create_datamodule(config)
     if datamodule.use_fake_data:
         dataset = FakeData(
@@ -89,7 +113,18 @@ def _load_raw_dataset(config: RootConfig, split: str) -> tuple[Any, Any]:
 
 
 def _dataset_targets(dataset: Any) -> list[int] | None:
-    """Extract integer targets from common torchvision dataset attributes."""
+    """Extract integer targets from common torchvision dataset attributes.
+
+    Parameters
+    ----------
+    dataset : Any
+        Input value for ``dataset``.
+
+    Returns
+    -------
+    result : list[int] | None
+        Return value produced by the function.
+    """
     if hasattr(dataset, "targets"):
         return [int(value) for value in list(dataset.targets)]
     if hasattr(dataset, "labels"):
@@ -101,7 +136,20 @@ def _dataset_targets(dataset: Any) -> list[int] | None:
 
 
 def _label_name(dataset_name: str, label: int) -> str:
-    """Map an integer class label to a human-readable class name."""
+    """Map an integer class label to a human-readable class name.
+
+    Parameters
+    ----------
+    dataset_name : str
+        Input value for ``dataset_name``.
+    label : int
+        Input value for ``label``.
+
+    Returns
+    -------
+    result : str
+        Return value produced by the function.
+    """
     names = CLASS_NAMES.get(dataset_name)
     if names is None or label < 0 or label >= len(names):
         return str(label)
@@ -113,7 +161,22 @@ def _to_pil_image(
     mean: Iterable[float] | None = None,
     std: Iterable[float] | None = None,
 ) -> Image.Image:
-    """Convert tensors or PIL images into a display-ready RGB PIL image."""
+    """Convert tensors or PIL images into a display-ready RGB PIL image.
+
+    Parameters
+    ----------
+    image : Image.Image | torch.Tensor
+        Input value for ``image``.
+    mean : Iterable[float] | None
+        Input value for ``mean``.
+    std : Iterable[float] | None
+        Input value for ``std``.
+
+    Returns
+    -------
+    result : Image.Image
+        Return value produced by the function.
+    """
     if isinstance(image, Image.Image):
         return image.convert("RGB")
 
@@ -129,7 +192,20 @@ def _to_pil_image(
 
 
 def _fit_image(image: Image.Image, cell_size: int) -> Image.Image:
-    """Resize an image to fit inside a square canvas while preserving aspect."""
+    """Resize an image to fit inside a square canvas while preserving aspect.
+
+    Parameters
+    ----------
+    image : Image.Image
+        Input value for ``image``.
+    cell_size : int
+        Input value for ``cell_size``.
+
+    Returns
+    -------
+    result : Image.Image
+        Return value produced by the function.
+    """
     image = image.convert("RGB")
     background = Image.new("RGB", (cell_size, cell_size), (255, 255, 255))
     resized = image.copy()
@@ -140,7 +216,24 @@ def _fit_image(image: Image.Image, cell_size: int) -> Image.Image:
 
 
 def _resize_preview_image(image: Image.Image | torch.Tensor, size: int, *, mean: Iterable[float] | None = None, std: Iterable[float] | None = None) -> Image.Image:
-    """Convert an image to PIL and upscale it for notebook-friendly previews."""
+    """Convert an image to PIL and upscale it for notebook-friendly previews.
+
+    Parameters
+    ----------
+    image : Image.Image | torch.Tensor
+        Input value for ``image``.
+    size : int
+        Input value for ``size``.
+    mean : Iterable[float] | None
+        Input value for ``mean``.
+    std : Iterable[float] | None
+        Input value for ``std``.
+
+    Returns
+    -------
+    result : Image.Image
+        Return value produced by the function.
+    """
     pil_image = _to_pil_image(image, mean=mean, std=std)
     return pil_image.resize((size, size), resample=Image.Resampling.NEAREST)
 
@@ -171,6 +264,28 @@ def build_image_grid(
 
     Raises:
         ValueError: If ``images`` is empty.
+
+    Parameters
+    ----------
+    images : Sequence[Image.Image | torch.Tensor]
+        Input value for ``images``.
+    labels : Sequence[str] | None
+        Input value for ``labels``.
+    title : str | None
+        Input value for ``title``.
+    cell_size : int
+        Input value for ``cell_size``.
+    columns : int
+        Input value for ``columns``.
+    mean : Iterable[float] | None
+        Input value for ``mean``.
+    std : Iterable[float] | None
+        Input value for ``std``.
+
+    Returns
+    -------
+    result : Image.Image
+        Return value produced by the function.
     """
     if not images:
         raise ValueError("build_image_grid requires at least one image.")
@@ -209,6 +324,16 @@ def load_config_text(config_or_path: RootConfig | str | Path) -> str:
 
     Returns:
         YAML text with the normalized section structure used by the tutorials.
+
+    Parameters
+    ----------
+    config_or_path : RootConfig | str | Path
+        Input value for ``config_or_path``.
+
+    Returns
+    -------
+    result : str
+        Return value produced by the function.
     """
     config = _ensure_config(config_or_path)
     return yaml.safe_dump(config, sort_keys=False)
@@ -236,6 +361,26 @@ def build_dataset_preview(
 
     Returns:
         PIL image containing a dataset preview grid.
+
+    Parameters
+    ----------
+    config_or_path : RootConfig | str | Path
+        Input value for ``config_or_path``.
+    split : str
+        Input value for ``split``.
+    limit : int
+        Input value for ``limit``.
+    samples_per_class : int
+        Input value for ``samples_per_class``.
+    seed : int
+        Input value for ``seed``.
+    display_size : int | None
+        Input value for ``display_size``.
+
+    Returns
+    -------
+    result : Image.Image
+        Return value produced by the function.
     """
     config = _ensure_config(config_or_path)
     datamodule, dataset = _load_raw_dataset(config, split=split)
@@ -296,6 +441,24 @@ def build_pretrain_view_preview(
 
     Raises:
         ValueError: If the configured SSL method is unsupported.
+
+    Parameters
+    ----------
+    config_or_path : RootConfig | str | Path
+        Input value for ``config_or_path``.
+    split : str
+        Input value for ``split``.
+    index : int
+        Input value for ``index``.
+    repeats : int
+        Input value for ``repeats``.
+    display_size : int | None
+        Input value for ``display_size``.
+
+    Returns
+    -------
+    result : Image.Image
+        Return value produced by the function.
     """
     config = _ensure_config(config_or_path)
     datamodule, dataset = _load_raw_dataset(config, split=split)
@@ -351,6 +514,24 @@ def build_mae_mask_preview(
 
     Raises:
         ValueError: If the configuration is not for an MAE tutorial.
+
+    Parameters
+    ----------
+    config_or_path : RootConfig | str | Path
+        Input value for ``config_or_path``.
+    split : str
+        Input value for ``split``.
+    index : int
+        Input value for ``index``.
+    seed : int
+        Input value for ``seed``.
+    display_size : int | None
+        Input value for ``display_size``.
+
+    Returns
+    -------
+    result : Image.Image
+        Return value produced by the function.
     """
     config = _ensure_config(config_or_path)
     if config["ssl"]["method"] != "mae":
@@ -411,6 +592,16 @@ def summarize_ssl_batch_shapes(config_or_path: RootConfig | str | Path) -> dict[
     Returns:
         Small summary dictionary describing the number and shapes of the views
         produced by the dataloader.
+
+    Parameters
+    ----------
+    config_or_path : RootConfig | str | Path
+        Input value for ``config_or_path``.
+
+    Returns
+    -------
+    result : dict[str, Any]
+        Return value produced by the function.
     """
     config = _ensure_config(config_or_path)
     datamodule = create_datamodule(config)
@@ -437,6 +628,16 @@ def open_saved_image(path: str | Path) -> Image.Image:
 
     Returns:
         Loaded RGB PIL image.
+
+    Parameters
+    ----------
+    path : str | Path
+        Input value for ``path``.
+
+    Returns
+    -------
+    result : Image.Image
+        Return value produced by the function.
     """
     return Image.open(path).convert("RGB")
 
@@ -449,6 +650,16 @@ def load_json(path: str | Path) -> dict[str, Any]:
 
     Returns:
         Parsed JSON object.
+
+    Parameters
+    ----------
+    path : str | Path
+        Input value for ``path``.
+
+    Returns
+    -------
+    result : dict[str, Any]
+        Return value produced by the function.
     """
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -461,6 +672,16 @@ def format_metrics_markdown(metrics: dict[str, Any]) -> str:
 
     Returns:
         Markdown table with one row per metric.
+
+    Parameters
+    ----------
+    metrics : dict[str, Any]
+        Input value for ``metrics``.
+
+    Returns
+    -------
+    result : str
+        Return value produced by the function.
     """
     lines = ["| Metric | Value |", "| --- | --- |"]
     for key, value in metrics.items():

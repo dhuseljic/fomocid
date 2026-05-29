@@ -19,6 +19,16 @@ def seed_everything(seed: int) -> int:
 
     Returns:
         The seed value returned by Lightning after initialization.
+
+    Parameters
+    ----------
+    seed : int
+        Input value for ``seed``.
+
+    Returns
+    -------
+    result : int
+        Return value produced by the function.
     """
     return pl.seed_everything(seed, workers=True)
 
@@ -32,6 +42,18 @@ def create_run_dir(output_dir: str | Path, stem: str) -> Path:
 
     Returns:
         Newly created run directory path.
+
+    Parameters
+    ----------
+    output_dir : str | Path
+        Input value for ``output_dir``.
+    stem : str
+        Input value for ``stem``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     output_dir = Path(output_dir)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -49,6 +71,18 @@ def save_yaml(output_path: str | Path, payload: dict[str, Any]) -> Path:
 
     Returns:
         Path to the saved file.
+
+    Parameters
+    ----------
+    output_path : str | Path
+        Input value for ``output_path``.
+    payload : dict[str, Any]
+        Input value for ``payload``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -66,6 +100,18 @@ def save_json(output_path: str | Path, payload: dict[str, Any]) -> Path:
 
     Returns:
         Path to the saved file.
+
+    Parameters
+    ----------
+    output_path : str | Path
+        Input value for ``output_path``.
+    payload : dict[str, Any]
+        Input value for ``payload``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

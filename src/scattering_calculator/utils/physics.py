@@ -1,3 +1,5 @@
+"""Physics helper functions for X-ray scattering calculations."""
+
 from __future__ import annotations
 
 import scipy.constants

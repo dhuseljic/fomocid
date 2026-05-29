@@ -53,6 +53,16 @@ def _latest_checkpoint(output_dir: Path) -> Path:
 
     Raises:
         FileNotFoundError: If no ``last.ckpt`` file can be found.
+
+    Parameters
+    ----------
+    output_dir : Path
+        Input value for ``output_dir``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     candidates = sorted(output_dir.glob("**/checkpoints/last.ckpt"), key=lambda path: path.stat().st_mtime)
     if not candidates:
@@ -72,6 +82,18 @@ def _resolve_eval_dir(output_dir: Path, checkpoint_path: Path) -> Path:
 
     Returns:
         Evaluation directory path.
+
+    Parameters
+    ----------
+    output_dir : Path
+        Input value for ``output_dir``.
+    checkpoint_path : Path
+        Input value for ``checkpoint_path``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     run_root = checkpoint_path.parent.parent
     if run_root.exists():
@@ -99,6 +121,20 @@ def run_evaluation(
     Returns:
         Path to the evaluation directory containing embeddings, metrics, and
         figures.
+
+    Parameters
+    ----------
+    config_path : str | Path
+        Input value for ``config_path``.
+    output_dir : str | Path
+        Input value for ``output_dir``.
+    checkpoint_path : str | Path | None
+        Input value for ``checkpoint_path``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     config = load_config(config_path)
     seed_everything(int(config.get("seed", 7)))
@@ -195,6 +231,16 @@ def parse_args() -> argparse.Namespace:
     Returns:
         Parsed namespace containing config path, output root, and optional
         checkpoint override.
+
+    Parameters
+    ----------
+    None
+        This function takes no explicit input parameters.
+
+    Returns
+    -------
+    result : argparse.Namespace
+        Return value produced by the function.
     """
     parser = argparse.ArgumentParser(
         description="Evaluate a trained SSL checkpoint with probing, retrieval, and embedding analysis outputs.",
@@ -211,7 +257,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Run the evaluation CLI entrypoint."""
+    """Run the evaluation CLI entrypoint.
+
+    Parameters
+    ----------
+    None
+        This function takes no explicit input parameters.
+
+    Returns
+    -------
+    None
+        The function completes in place.
+    """
     args = parse_args()
     eval_dir = run_evaluation(args.config, args.output_dir, checkpoint_path=args.checkpoint_path)
     print(eval_dir)

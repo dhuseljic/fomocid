@@ -1,3 +1,5 @@
+"""Generate parameter sweeps of simulated FTH holograms."""
+
 # %%
 # Import general libraries
 import os
@@ -25,7 +27,7 @@ from scattering_calculator.sample_generator import structures
 #################################################################
 nr_simulations = 2  # increase to e.g. 1000 for a full training dataset
 
-# --- Material stack --- 
+# --- Material stack ---
 recipe = "[Au(140)Cr(60)]x5/SiN(200)/Pt(20)Al(20)Co(20)"
 oversampling=2
 
@@ -198,7 +200,24 @@ def aperture_roughness_from_length(
     period=10e-9,
     max_relative_amplitude=0.25,
 ):
-    """Convert physical roughness amplitude/period to relative Fourier settings."""
+    """Convert physical roughness amplitude/period to relative Fourier settings.
+
+    Parameters
+    ----------
+    radius : Any
+        Input value for ``radius``.
+    amplitude : Any
+        Input value for ``amplitude``.
+    period : Any
+        Input value for ``period``.
+    max_relative_amplitude : Any
+        Input value for ``max_relative_amplitude``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     relative_amplitude = min(
         float(max_relative_amplitude),
         float(amplitude) / float(radius),
@@ -301,7 +320,18 @@ config = HologramPipelineConfig(
 # None                — use the fixed value from HologramPipelineConfig
 
 def random_pattern_config(params):
-    """Generate interdependent magnetic-pattern parameters in physical units."""
+    """Generate interdependent magnetic-pattern parameters in physical units.
+
+    Parameters
+    ----------
+    params : Any
+        Input value for ``params``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     stripe_width = Uniform(30e-9, 500e-9).sample()
     config = {
         "stripe_width": stripe_width,
@@ -341,7 +371,18 @@ def random_pattern_config(params):
 
 
 def detector_distance_range(params):
-    """Choose a detector-distance range from sampled energy and stripe width."""
+    """Choose a detector-distance range from sampled energy and stripe width.
+
+    Parameters
+    ----------
+    params : Any
+        Input value for ``params``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     # This function is called once per simulated sample after x-ray energy,
     # detector pixel size, detector shape, and pattern_config have
     # already been sampled. It returns either a fixed detector distance or a
@@ -373,7 +414,18 @@ def detector_distance_range(params):
 
 
 def random_aperture_config(params):
-    """Generate one random OH/RH holography mask from sampled geometry."""
+    """Generate one random OH/RH holography mask from sampled geometry.
+
+    Parameters
+    ----------
+    params : Any
+        Input value for ``params``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     # This function is also called once per simulated sample, after
     # detector_distance_range has already chosen a detector distance. It returns
     # all aperture lists together so their lengths and geometric constraints
@@ -446,6 +498,20 @@ def random_aperture_config(params):
             rh_sigma = Uniform(1e-9, rh_sigma_max).sample()
 
         def _reference_hole_is_clear(candidate_y, candidate_x):
+            """Handle the internal reference hole is clear operation.
+
+            Parameters
+            ----------
+            candidate_y : Any
+                Input value for ``candidate_y``.
+            candidate_x : Any
+                Input value for ``candidate_x``.
+
+            Returns
+            -------
+            result : Any
+                Return value produced by the function.
+            """
             if np.hypot(candidate_y, candidate_x) <= min_oh_distance:
                 return False
             for placed_y, placed_x, placed_top_radius in placed_reference_holes:
@@ -507,7 +573,18 @@ def random_aperture_config(params):
 
 
 def random_coherence_length(params):
-    """Sample similar y/x coherence lengths in metres."""
+    """Sample similar y/x coherence lengths in metres.
+
+    Parameters
+    ----------
+    params : Any
+        Input value for ``params``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     base = Uniform(15e-6, 50e-6).sample()
     anisotropy = Uniform(-0.13, 0.13).sample()
     return (base * (1.0 + anisotropy), base * (1.0 - anisotropy))
@@ -633,6 +710,20 @@ with h5py.File(output_path, "r") as h5:
         print("\nMetadata for '00000/':")
 
         def _print_meta(name, obj):
+            """Handle the internal print meta operation.
+
+            Parameters
+            ----------
+            name : Any
+                Input value for ``name``.
+            obj : Any
+                Input value for ``obj``.
+
+            Returns
+            -------
+            result : Any
+                Return value produced by the function.
+            """
             if hasattr(obj, "shape") and obj.shape == ():
                 print(f"  {name} = {obj[()]}")
 
@@ -731,9 +822,33 @@ if False:
 # Helper: colour limits matching HologramConfig.visualize_averages()
 # ------------------------------------------------------------------
 def _clim(arr):
+    """Handle the internal clim operation.
+
+    Parameters
+    ----------
+    arr : Any
+        Input value for ``arr``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     return np.nanpercentile(arr, [0.1, 99.9])
 
 def _sym_clim(diff):
+    """Handle the internal sym clim operation.
+
+    Parameters
+    ----------
+    diff : Any
+        Input value for ``diff``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
+    """
     d = np.nanpercentile(np.abs(diff), 99.9)
     return -d, d
 

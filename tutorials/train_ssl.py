@@ -126,6 +126,18 @@ def _build_trainer(config: RootConfig, run_dir: Path) -> Trainer:
 
     Returns:
         Configured Lightning trainer.
+
+    Parameters
+    ----------
+    config : RootConfig
+        Input value for ``config``.
+    run_dir : Path
+        Input value for ``run_dir``.
+
+    Returns
+    -------
+    result : Trainer
+        Return value produced by the function.
     """
     trainer_config = config["trainer"]
     checkpoint_dir = run_dir / "checkpoints"
@@ -170,6 +182,16 @@ def _build_progress_bar_callback(trainer_config: TrainerConfig) -> Any:
 
     Raises:
         ValueError: If the configured progress bar style is unsupported.
+
+    Parameters
+    ----------
+    trainer_config : TrainerConfig
+        Input value for ``trainer_config``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
     """
     progress_bar_style = str(trainer_config.get("progress_bar", "auto")).strip().lower()
     if progress_bar_style == "auto":
@@ -188,7 +210,18 @@ def _build_progress_bar_callback(trainer_config: TrainerConfig) -> Any:
 
 
 def _is_notebook_session() -> bool:
-    """Return whether training is running inside a notebook kernel."""
+    """Return whether training is running inside a notebook kernel.
+
+    Parameters
+    ----------
+    None
+        This function takes no explicit input parameters.
+
+    Returns
+    -------
+    result : bool
+        Return value produced by the function.
+    """
     return "ipykernel" in sys.modules
 
 
@@ -204,6 +237,18 @@ def run_training(config_path: str | Path, output_dir: str | Path) -> Path:
     Returns:
         Path to the created run directory containing checkpoints, logs, and the
         resolved config snapshot.
+
+    Parameters
+    ----------
+    config_path : str | Path
+        Input value for ``config_path``.
+    output_dir : str | Path
+        Input value for ``output_dir``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     config = load_config(config_path)
     seed_everything(int(config.get("seed", 7)))
@@ -233,6 +278,16 @@ def parse_args() -> argparse.Namespace:
     Returns:
         Parsed namespace containing config path, output directory, and the
         optional config-explainer flag.
+
+    Parameters
+    ----------
+    None
+        This function takes no explicit input parameters.
+
+    Returns
+    -------
+    result : argparse.Namespace
+        Return value produced by the function.
     """
     parser = argparse.ArgumentParser(
         description="Train a tutorial SSL model from a YAML configuration.",
@@ -258,7 +313,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Run the training CLI entrypoint."""
+    """Run the training CLI entrypoint.
+
+    Parameters
+    ----------
+    None
+        This function takes no explicit input parameters.
+
+    Returns
+    -------
+    None
+        The function completes in place.
+    """
     args = parse_args()
     if args.explain_config:
         print(CONFIG_GUIDE)

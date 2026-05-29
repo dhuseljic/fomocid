@@ -34,6 +34,22 @@ def extract_features(
     Returns:
         Dictionary containing concatenated ``embeddings``, ``labels``, and
         ``images`` tensors on CPU memory.
+
+    Parameters
+    ----------
+    model : Any
+        Input value for ``model``.
+    dataloader : Any
+        Input value for ``dataloader``.
+    device : torch.device | str | None
+        Input value for ``device``.
+    max_batches : int | None
+        Input value for ``max_batches``.
+
+    Returns
+    -------
+    result : dict[str, torch.Tensor]
+        Return value produced by the function.
     """
     resolved_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     model = model.to(resolved_device)
@@ -90,6 +106,34 @@ def fit_linear_probe(
     Returns:
         Dictionary containing the best observed test accuracy and the trained
         probe ``state_dict`` moved back to CPU tensors.
+
+    Parameters
+    ----------
+    train_embeddings : torch.Tensor
+        Input value for ``train_embeddings``.
+    train_labels : torch.Tensor
+        Input value for ``train_labels``.
+    test_embeddings : torch.Tensor
+        Input value for ``test_embeddings``.
+    test_labels : torch.Tensor
+        Input value for ``test_labels``.
+    num_classes : int
+        Input value for ``num_classes``.
+    epochs : int
+        Input value for ``epochs``.
+    lr : float
+        Input value for ``lr``.
+    weight_decay : float
+        Input value for ``weight_decay``.
+    batch_size : int
+        Input value for ``batch_size``.
+    device : torch.device | str | None
+        Input value for ``device``.
+
+    Returns
+    -------
+    result : dict[str, Any]
+        Return value produced by the function.
     """
     resolved_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     classifier = nn.Linear(train_embeddings.shape[1], num_classes).to(resolved_device)
@@ -148,6 +192,26 @@ def knn_accuracy(
 
     Returns:
         Tuple of ``(accuracy, predicted_labels)`` for the test embeddings.
+
+    Parameters
+    ----------
+    train_embeddings : torch.Tensor
+        Input value for ``train_embeddings``.
+    train_labels : torch.Tensor
+        Input value for ``train_labels``.
+    test_embeddings : torch.Tensor
+        Input value for ``test_embeddings``.
+    test_labels : torch.Tensor
+        Input value for ``test_labels``.
+    k : int
+        Input value for ``k``.
+    chunk_size : int
+        Input value for ``chunk_size``.
+
+    Returns
+    -------
+    result : tuple[float, torch.Tensor]
+        Return value produced by the function.
     """
     normalized_train = F.normalize(train_embeddings, dim=1)
     normalized_test = F.normalize(test_embeddings, dim=1)
@@ -182,6 +246,20 @@ def topk_nearest_neighbors(
     Returns:
         Tuple of ``(indices, scores)`` on CPU, where indices point into the
         reference embedding tensor.
+
+    Parameters
+    ----------
+    reference_embeddings : torch.Tensor
+        Input value for ``reference_embeddings``.
+    query_embeddings : torch.Tensor
+        Input value for ``query_embeddings``.
+    k : int
+        Input value for ``k``.
+
+    Returns
+    -------
+    result : tuple[torch.Tensor, torch.Tensor]
+        Return value produced by the function.
     """
     normalized_reference = F.normalize(reference_embeddings, dim=1)
     normalized_query = F.normalize(query_embeddings, dim=1)
@@ -206,6 +284,20 @@ def save_embedding_bundle(
 
     Returns:
         Path to the saved file.
+
+    Parameters
+    ----------
+    output_path : str | Path
+        Input value for ``output_path``.
+    train_features : dict[str, torch.Tensor]
+        Input value for ``train_features``.
+    test_features : dict[str, torch.Tensor]
+        Input value for ``test_features``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -235,6 +327,26 @@ def evaluate_embeddings(
 
     Returns:
         JSON-serializable summary of the linear-probe and kNN results.
+
+    Parameters
+    ----------
+    train_features : dict[str, torch.Tensor]
+        Input value for ``train_features``.
+    test_features : dict[str, torch.Tensor]
+        Input value for ``test_features``.
+    num_classes : int
+        Input value for ``num_classes``.
+    linear_probe_config : LinearProbeConfig
+        Input value for ``linear_probe_config``.
+    knn_config : KNNConfig
+        Input value for ``knn_config``.
+    device : torch.device | str | None
+        Input value for ``device``.
+
+    Returns
+    -------
+    result : dict[str, Any]
+        Return value produced by the function.
     """
     probe = fit_linear_probe(
         train_features["embeddings"],
@@ -275,6 +387,18 @@ def save_metrics(output_path: str | Path, metrics: dict[str, Any]) -> Path:
 
     Returns:
         Path to the saved metrics file.
+
+    Parameters
+    ----------
+    output_path : str | Path
+        Input value for ``output_path``.
+    metrics : dict[str, Any]
+        Input value for ``metrics``.
+
+    Returns
+    -------
+    result : Path
+        Return value produced by the function.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

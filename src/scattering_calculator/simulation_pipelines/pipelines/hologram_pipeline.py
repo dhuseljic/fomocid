@@ -474,6 +474,26 @@ class HologramPipeline:
         n_samples: int,
         verbose: bool = True,
     ) -> None:
+        """Store pipeline configuration and output settings.
+
+        Parameters
+        ----------
+        config : HologramPipelineConfig
+            Fixed parameters shared by every simulated sample.
+        ranges : HologramPipelineRanges
+            Optional parameter distributions or overrides sampled per run.
+        output_path : Path or str
+            HDF5 file path written by :meth:`run`.
+        n_samples : int
+            Number of simulated configurations to generate.
+        verbose : bool
+            If ``True``, print progress and timing information.
+
+        Returns
+        -------
+        None
+            The instance is initialised in place.
+        """
         self.config = config
         self.ranges = ranges
         self.output_path = Path(output_path)
@@ -485,7 +505,18 @@ class HologramPipeline:
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        """Execute the simulation loop and write all results to HDF5."""
+        """Execute the simulation loop and write all results to HDF5.
+
+        Parameters
+        ----------
+        None
+            This method uses the pipeline configuration stored on ``self``.
+
+        Returns
+        -------
+        None
+            Results are written to ``self.output_path``.
+        """
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         width = len(str(self.n_samples))
         t_start = time.time()
@@ -522,11 +553,36 @@ class HologramPipeline:
     # ------------------------------------------------------------------
 
     def _sample_params(self) -> dict[str, Any]:
-        """Draw one sampled parameter set, merging ranges over the base config."""
+        """Draw one sampled parameter set, merging ranges over the base config.
+
+        Parameters
+        ----------
+        None
+            This method samples from ``self.config`` and ``self.ranges``.
+
+        Returns
+        -------
+        params : dict[str, Any]
+            Fully resolved parameters for one simulated sample.
+        """
         cfg = self.config
         rng = self.ranges
 
         def _resolve(value: Any, params: dict[str, Any]) -> Any:
+            """Resolve callables, tuples, and sampler objects against parameters.
+
+            Parameters
+            ----------
+            value : Any
+                Fixed value, callable, tuple, or sampler to resolve.
+            params : dict[str, Any]
+                Parameters already sampled for the current run.
+
+            Returns
+            -------
+            resolved : Any
+                Concrete value to store in the sampled parameter dict.
+            """
             if callable(value):
                 value = value(params)
             if isinstance(value, tuple):
@@ -534,9 +590,41 @@ class HologramPipeline:
             return _s(value)
 
         def _pick(range_val: Any, base_val: Any, params: dict[str, Any]) -> Any:
+            """Return a sampled range value or the fixed base value.
+
+            Parameters
+            ----------
+            range_val : Any
+                Optional range override from :class:`HologramPipelineRanges`.
+            base_val : Any
+                Fixed fallback value from :class:`HologramPipelineConfig`.
+            params : dict[str, Any]
+                Parameters already sampled for the current run.
+
+            Returns
+            -------
+            value : Any
+                ``base_val`` when ``range_val`` is ``None``; otherwise the
+                resolved range value.
+            """
             return base_val if range_val is None else _resolve(range_val, params)
 
         def _sample_dict_with_params(d: dict, params: dict[str, Any]) -> dict:
+            """Sample each value in a nested configuration dictionary.
+
+            Parameters
+            ----------
+            d : dict
+                Dictionary whose values may be fixed values, samplers,
+                callables, or nested dictionaries.
+            params : dict[str, Any]
+                Parameters already sampled for the current run.
+
+            Returns
+            -------
+            sampled : dict
+                Dictionary with all supported values resolved.
+            """
             return {
                 k: (
                     _sample_dict_with_params(v, params)
@@ -549,6 +637,22 @@ class HologramPipeline:
         def _merge_dict(
             range_dict: dict | None, base_dict: dict, params: dict[str, Any]
         ) -> dict:
+            """Merge sampled dictionary overrides over fixed defaults.
+
+            Parameters
+            ----------
+            range_dict : dict or None
+                Optional override dictionary from the sweep ranges.
+            base_dict : dict
+                Fixed dictionary from the base configuration.
+            params : dict[str, Any]
+                Parameters already sampled for the current run.
+
+            Returns
+            -------
+            merged : dict
+                Sampled override values merged over the fixed defaults.
+            """
             if range_dict is not None:
                 if callable(range_dict):
                     resolved = _resolve(range_dict, params)
@@ -619,6 +723,20 @@ class HologramPipeline:
             params["pattern_config"].setdefault(key, value)
         if cfg.random_seed is not None:
             def _set_seed_if_missing(config_dict: dict, key: str) -> None:
+                """Insert a random seed into a config dictionary when absent.
+
+                Parameters
+                ----------
+                config_dict : dict
+                    Configuration dictionary that may need a seed entry.
+                key : str
+                    Name of the seed field to populate.
+
+                Returns
+                -------
+                None
+                    ``config_dict`` is modified in place when ``key`` is absent.
+                """
                 if config_dict.get(key) is None:
                     config_dict[key] = int(np.random.randint(0, 2**31 - 1))
 
@@ -680,6 +798,31 @@ class HologramPipeline:
         stripe patterns, generate a padded bounding box around the OH and paste
         it into a full field initialised to +1. Other pattern generators keep
         their historical full-field behaviour.
+
+        Parameters
+        ----------
+        sample_shape : tuple[int, int] or np.ndarray
+            Full lateral sample shape ``(Ny, Nx)`` in pixels.
+        pixel_size : float
+            Real-space sample pixel size in metres.
+        aperture_config : dict[str, Any]
+            Aperture configuration containing aperture types, radii, centres,
+            edge sigmas, roughnesses, and top radius factors.
+        pattern_type : str
+            Magnetic-pattern generator name.
+        enabled : bool
+            If ``False``, skip ROI selection and return the full sample shape.
+
+        Returns
+        -------
+        roi_shape : tuple[int, int]
+            Shape used to generate the magnetic pattern.
+        slices : tuple[slice, slice] or None
+            Insertion slices into the full magnetic-pattern array, or ``None``
+            when the full sample shape is used.
+        coordinate_offset : tuple[float, float] or None
+            ROI centre offset from the full sample centre in pixels, or
+            ``None`` when the full sample shape is used.
         """
         full_shape = tuple(int(v) for v in sample_shape)
         roi_pattern_types = {
@@ -763,10 +906,37 @@ class HologramPipeline:
     # ------------------------------------------------------------------
 
     def _simulate_one(self, h5: h5py.File, idx: int) -> None:
-        """Run one configuration and write holograms + metadata to HDF5."""
+        """Run one configuration and write holograms and metadata to HDF5.
+
+        Parameters
+        ----------
+        h5 : h5py.File
+            Open output HDF5 file.
+        idx : int
+            Zero-based sample index used for the output group name.
+
+        Returns
+        -------
+        None
+            The sample group is written into ``h5``.
+        """
         stage_times: list[tuple[str, float]] = []
 
         def mark_stage(name: str, start: float) -> float:
+            """Record elapsed time for a named pipeline stage.
+
+            Parameters
+            ----------
+            name : str
+                Human-readable stage name.
+            start : float
+                Start time from ``time.time()``.
+
+            Returns
+            -------
+            now : float
+                Current ``time.time()`` value, used as the next stage start.
+            """
             now = time.time()
             stage_times.append((name, now - start))
             return now
@@ -1189,7 +1359,32 @@ class HologramPipeline:
         #aperture_yz_cuts: np.ndarray,
         #aperture_xz_cuts: np.ndarray,
     ) -> None:
-        """Write one simulation's holograms and metadata to an HDF5 group."""
+        """Write one simulation's holograms and metadata to an HDF5 group.
+
+        Parameters
+        ----------
+        h5 : h5py.File
+            Open output HDF5 file.
+        idx : int
+            Zero-based sample index used for the output group name.
+        hologram_config : HologramConfig
+            Container with exit waves, ideal holograms, and detected holograms.
+        detector_config : DetectorConfig
+            Detector configuration containing the detector layout and beamstop.
+        metadata : dict[str, Any]
+            Scalar metadata to write under the sample ``metadata`` group.
+        aperture_config : dict[str, Any]
+            Aperture configuration to store with typed HDF5 datasets.
+        supportmask : np.ndarray
+            Detector-space support mask to save.
+        magnetic_pattern_oh : np.ndarray
+            Object-hole magnetic pattern crop to save.
+
+        Returns
+        -------
+        None
+            Datasets are written into the sample group.
+        """
         grp = h5.create_group(f"{idx:05d}", track_order=True)
 
         # Hologram arrays — same structure as test.ipynb save_data dict
@@ -1278,7 +1473,21 @@ class HologramPipeline:
     def _write_aperture_metadata(
         self, meta_grp: h5py.Group, aperture_config: dict[str, Any]
     ) -> None:
-        """Store aperture lists as typed HDF5 datasets under metadata/aperture."""
+        """Store aperture lists as typed HDF5 datasets under metadata/aperture.
+
+        Parameters
+        ----------
+        meta_grp : h5py.Group
+            Sample metadata group.
+        aperture_config : dict[str, Any]
+            Aperture configuration containing type, geometry, roughness, and
+            seed lists.
+
+        Returns
+        -------
+        None
+            Aperture datasets are written into ``meta_grp``.
+        """
         aperture_grp = meta_grp.require_group("aperture").require_group(
             "aperture_config"
         )
@@ -1335,14 +1544,37 @@ class HologramPipeline:
 
     @staticmethod
     def _fth_reconstruct(hologram: np.ndarray) -> np.ndarray:
-        """FTH reconstruction over the last two axes of a hologram array."""
+        """Compute an FTH reconstruction over the last two hologram axes.
+
+        Parameters
+        ----------
+        hologram : np.ndarray
+            Hologram array. The Fourier transform is applied over the last two
+            axes, so stacked leading dimensions are preserved.
+
+        Returns
+        -------
+        reconstruction : np.ndarray
+            Complex FTH reconstruction with the same shape as ``hologram``.
+        """
         return np.fft.fftshift(
             np.fft.fft2(np.fft.fftshift(hologram, axes=(-2, -1)), axes=(-2, -1)),
             axes=(-2, -1),
         )
 
     def _write_pipeline_config(self, h5: h5py.File) -> None:
-        """Store top-level fixed pipeline parameters as datasets."""
+        """Store top-level fixed pipeline parameters as datasets.
+
+        Parameters
+        ----------
+        h5 : h5py.File
+            Open output HDF5 file.
+
+        Returns
+        -------
+        None
+            The ``_pipeline_config`` group is written into ``h5``.
+        """
         cfg = self.config
         grp = h5.create_group("_pipeline_config")
         grp.create_dataset("recipe", data=np.bytes_(cfg.recipe))
@@ -1405,7 +1637,23 @@ class HologramPipeline:
         self._write_config_dict(grp, "artifacts_config", cfg.artifacts_config)
 
     def _write_config_dict(self, parent: h5py.Group, name: str, config: dict) -> None:
-        """Write scalar/list config values to a subgroup."""
+        """Write scalar and list config values to a named subgroup.
+
+        Parameters
+        ----------
+        parent : h5py.Group
+            Parent HDF5 group that will contain the named subgroup.
+        name : str
+            Subgroup name to create or reuse.
+        config : dict
+            Configuration dictionary whose serialisable values are written as
+            datasets.
+
+        Returns
+        -------
+        None
+            Supported config values are written into ``parent[name]``.
+        """
         grp = parent.require_group(name)
         for key, value in config.items():
             if isinstance(value, str):

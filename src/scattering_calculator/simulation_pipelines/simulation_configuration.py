@@ -1,3 +1,5 @@
+"""Simulation-configuration dataclasses for scattering workflows."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -16,7 +18,18 @@ from scattering_calculator.beam_propagator import Jones_propagator
 
 class _ConfigMixin:
     def to_dict(self) -> dict:
-        """Return all configuration fields and their current values as a dict."""
+        """Return all configuration fields and their current values as a dict.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : dict
+            Return value produced by the function.
+        """
         return dataclasses.asdict(self)
 
     def get_metadata(self, prefix: str = "") -> dict[str, int | float | str | bool]:
@@ -38,6 +51,20 @@ class _ConfigMixin:
         _SCALAR_TYPES = (int, float, str, bool, np.integer, np.floating)
 
         def _flatten(value, key: str) -> dict:
+            """Handle the internal flatten operation.
+
+            Parameters
+            ----------
+            value : Any
+                Input value for ``value``.
+            key : str
+                Input value for ``key``.
+
+            Returns
+            -------
+            result : dict
+                Return value produced by the function.
+            """
             if value is None:
                 return {key: "None"}
             if isinstance(value, _SCALAR_TYPES):
@@ -89,6 +116,18 @@ class XRayConfig(_ConfigMixin):
     coherence_length: tuple[float, float] = (10e-6, 10e-6)  # m, (y, x)
 
     def __post_init__(self) -> None:
+        """Handle the internal post init operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if self.energy <= 0:
             raise ValueError(f"energy must be positive, got {self.energy}")
         if self.photon_flux <= 0:
@@ -119,6 +158,11 @@ class XRayConfig(_ConfigMixin):
         -------
         light_beam.beam_parameters
             The configured beam parameter object.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         self.beam_params = light_beam.beam_parameters(
             self.energy, self.pol, self.photon_flux, self.coherence_length
@@ -127,7 +171,18 @@ class XRayConfig(_ConfigMixin):
         return self.beam_params
 
     def get_metadata(self, prefix: str = "") -> dict[str, int | float | str | bool]:
-        """Return derived beam parameters as scalar metadata."""
+        """Return derived beam parameters as scalar metadata.
+
+        Parameters
+        ----------
+        prefix : str
+            Input value for ``prefix``.
+
+        Returns
+        -------
+        result : dict[str, int | float | str | bool]
+            Return value produced by the function.
+        """
         meta: dict[str, int | float | str | bool] = {}
         if hasattr(self, "beam_params"):
             bp = self.beam_params
@@ -162,6 +217,18 @@ class BeamstopConfig(_ConfigMixin):
     bs_config: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        """Handle the internal post init operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if self.bs_detector_distance <= 0:
             raise ValueError(
                 f"bs_detector_distance must be positive, got {self.bs_detector_distance}"
@@ -316,6 +383,18 @@ class DetectorConfig(_ConfigMixin):
     beamstop_config: BeamstopConfig | None = None
 
     def __post_init__(self) -> None:
+        """Handle the internal post init operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if any(s <= 0 for s in self.shape):
             raise ValueError(f"shape dimensions must be positive, got {self.shape}")
         if self.pixel_size <= 0:
@@ -332,6 +411,11 @@ class DetectorConfig(_ConfigMixin):
         -------
         detector.detector_layout
             The configured detector layout object.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         self.detector_layout = detector.detector_layout(
             pixel_size=self.pixel_size,
@@ -366,7 +450,18 @@ class DetectorConfig(_ConfigMixin):
         return self.detector_layout.real_space_resolution
 
     def assign_propagated_wavefront(self, samplepropagationconfig) -> None:
-        """Assign a simulated hologram to the detector layout for later retrieval."""
+        """Assign a simulated hologram to the detector layout for later retrieval.
+
+        Parameters
+        ----------
+        samplepropagationconfig : Any
+            Input value for ``samplepropagationconfig``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.propagator = samplepropagationconfig
         self.wavefront = self.propagator.return_wavefront()
         exit_wavefield = self.propagator.return_scalar_wavefield()
@@ -379,7 +474,18 @@ class DetectorConfig(_ConfigMixin):
         self.hologram_intensity = np.sum(self.wavefront.hologram)
 
     def detect_hologram(self) -> np.ndarray:
-        """Simulate the detection of the hologram on the detector, including noise and artifacts."""
+        """Simulate the detection of the hologram on the detector, including noise and artifacts.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
+        """
         if not hasattr(self, "wavefront"):
             raise ValueError("No propagated wavefront assigned to detector layout.")
         self.hologram_exp = detector.detector_hologram(
@@ -398,7 +504,18 @@ class DetectorConfig(_ConfigMixin):
         self.hologram_exp.gnomonic_projection()
 
     def return_ideal_hologram(self) -> np.ndarray:
-        """Return the ideal (noise-free, artifact-free) hologram as a 2-D array."""
+        """Return the ideal (noise-free, artifact-free) hologram as a 2-D array.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
+        """
         if not hasattr(self, "wavefront"):
             raise ValueError("No propagated wavefront assigned to detector layout.")
         return self.hologram_exp.hologram_detector
@@ -409,7 +526,22 @@ class DetectorConfig(_ConfigMixin):
         apply_detector_threshold: bool = True,
         store_no_beamstop: bool = False,
     ) -> np.ndarray:
-        """Return the simulated detected hologram as a 2-D array."""
+        """Return the simulated detected hologram as a 2-D array.
+
+        Parameters
+        ----------
+        apply_beamstop_mask : bool
+            Input value for ``apply_beamstop_mask``.
+        apply_detector_threshold : bool
+            Input value for ``apply_detector_threshold``.
+        store_no_beamstop : bool
+            Input value for ``store_no_beamstop``.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
+        """
         self.hologram_exp.add_noise(
             apply_beamstop_mask=apply_beamstop_mask,
             apply_detector_threshold=apply_detector_threshold,
@@ -420,7 +552,18 @@ class DetectorConfig(_ConfigMixin):
         return self.hologram_exp.hologram_exp
 
     def return_detected_hologram_without_beamstop(self) -> np.ndarray:
-        """Return the no-beamstop detected hologram from the latest noise draw."""
+        """Return the no-beamstop detected hologram from the latest noise draw.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
+        """
         if not hasattr(self.hologram_exp, "hologram_exp_no_beamstop"):
             raise ValueError(
                 "No no-beamstop hologram stored. Call return_detected_hologram("
@@ -429,7 +572,18 @@ class DetectorConfig(_ConfigMixin):
         return self.hologram_exp.hologram_exp_no_beamstop
 
     def visualize_beamstop(self) -> None:
-        """Display the beamstop mask using the detector layout's visualizer."""
+        """Display the beamstop mask using the detector layout's visualizer.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if not hasattr(self, "beamstop"):
             raise ValueError(
                 "No beamstop configured. Set beamstop_config and call setup() first."
@@ -461,6 +615,18 @@ class SimulationConfig(_ConfigMixin):
     other_config: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        """Handle the internal post init operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if any(s <= 0 for s in self.shape):
             raise ValueError(f"shape dimensions must be positive, got {self.shape}")
         if self.real_space_pixel_size <= 0:
@@ -469,7 +635,18 @@ class SimulationConfig(_ConfigMixin):
             )
 
     def setup(self) -> None:
-        """Build centred real-space coordinate grids and store them as ``xgrid``/``ygrid``."""
+        """Build centred real-space coordinate grids and store them as ``xgrid``/``ygrid``.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         y = (np.arange(self.shape[0]) - self.shape[0] / 2) * self.real_space_pixel_size
         x = (np.arange(self.shape[1]) - self.shape[1] / 2) * self.real_space_pixel_size
         self.xgrid, self.ygrid = np.meshgrid(x, y)
@@ -518,7 +695,18 @@ class SampleConfig(_ConfigMixin):
     other_config: dict = field(default_factory=dict)
 
     def setup(self) -> None:
-        """Parse the recipe, load refractive indices, and build the layer stack."""
+        """Parse the recipe, load refractive indices, and build the layer stack.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.multilayer_recipe = structures.parse_recipe(
             self.recipe,
             sample_name=self.sample_name,
@@ -558,6 +746,11 @@ class SampleConfig(_ConfigMixin):
         ----------
         magnetic_vector_field : ndarray of shape (nr_layer,mx, my, mz)
             (4-D) 3-D magnetic vector field.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.sample_structure.magnetization = magnetic_vector_field
 
@@ -568,6 +761,11 @@ class SampleConfig(_ConfigMixin):
         ----------
         aperture_mask : ndarray of shape (Nz, Ny, Nx)
             3-D binary/soft aperture mask.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.sample_structure.mask = aperture_mask
         self.sample_structure.aperture_mask2D = np.average(aperture_mask, axis=0)
@@ -619,7 +817,18 @@ class MagneticPatternConfig(_ConfigMixin):
     pattern_config_length: dict = field(default_factory=dict)
 
     def setup(self):
-        """Return the generator function selected by ``pattern_type_method``."""
+        """Return the generator function selected by ``pattern_type_method``.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         _methods = {
             "skyrmion_pattern": pattern_generator.create_skyrmion_pattern,
             "disordered_skyrmion_lattice_pattern": pattern_generator.create_disordered_skyrmion_lattice_pattern,
@@ -647,6 +856,11 @@ class MagneticPatternConfig(_ConfigMixin):
         -------
         magnetic_pattern : ndarray of shape (Ny, Nx)
         pattern_coordinates : ndarray
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         pattern_function = self.setup()
         config = dict(self.pattern_config_length)
@@ -690,7 +904,18 @@ class MagneticPatternConfig(_ConfigMixin):
         return self.magnetic_pattern, self.pattern_coordinates
 
     def plot_pattern(self) -> None:
-        """Display the generated pattern with real-space axes if available."""
+        """Display the generated pattern with real-space axes if available.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if self.real_space_pixel_size != 1:
             sample_y = (
                 np.arange(self.shape[0]) - self.shape[0] / 2
@@ -767,6 +992,18 @@ class FrontApertureConfig(_ConfigMixin):
     use_roi: bool = True
 
     def __post_init__(self) -> None:
+        """Handle the internal post init operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if any(thickness <= 0 for thickness in self.aperture_thicknesses):
             raise ValueError(
                 f"aperture_thickness must be positive, got {self.aperture_thicknesses}"
@@ -779,6 +1016,11 @@ class FrontApertureConfig(_ConfigMixin):
         -------
         structures.Apertures3D
             The configured aperture object.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         self.aperture = structures.Apertures3D(
             self.aperture_shape,
@@ -798,6 +1040,16 @@ class FrontApertureConfig(_ConfigMixin):
         Object holes (``"OH"``) use ``thickness_OH`` as depth; reference holes
         (``"RH"``) use the full stack thickness (``sum(aperture_thickness)``).
         All coordinates are interpreted as real-space metres.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         types = self.aperture_config.get("apertures_type", None)
         radi = self.aperture_config.get("apertures_radius", None)
@@ -867,7 +1119,22 @@ class FrontApertureConfig(_ConfigMixin):
             )
 
     def _aperture_values(self, key: str, n: int, default):
-        """Return a per-aperture list, using ``default`` when absent."""
+        """Return a per-aperture list, using ``default`` when absent.
+
+        Parameters
+        ----------
+        key : str
+            Input value for ``key``.
+        n : int
+            Input value for ``n``.
+        default : Any
+            Input value for ``default``.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         values = self.aperture_config.get(key, None)
         if values is None:
             return [default] * n
@@ -879,7 +1146,18 @@ class FrontApertureConfig(_ConfigMixin):
         return values
 
     def return_aperture(self) -> np.ndarray:
-        """Return the 3-D aperture design array."""
+        """Return the 3-D aperture design array.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
+        """
         return self.aperture.aperture_design
 
     def create_supportmask(
@@ -900,6 +1178,11 @@ class FrontApertureConfig(_ConfigMixin):
         aperture_types : tuple of str or None
             Optional aperture type filter, e.g. ``("OH",)`` for an object-hole
             mask only. ``None`` includes every aperture.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
         """
         shape = (
             tuple(output_shape)
@@ -994,7 +1277,18 @@ class FrontApertureConfig(_ConfigMixin):
         return supportmask
 
     def visualize_aperture(self) -> None:
-        """Display the depth-averaged aperture mask in pixel and real-space units."""
+        """Display the depth-averaged aperture mask in pixel and real-space units.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         mask = np.average(self.aperture.aperture_design, axis=0)
         extend_real = self.aperture.get_illumination_extent_real_space()
         fig, ax = plt.subplots(1, 2, figsize=(8, 4))
@@ -1028,16 +1322,51 @@ class IlluminationConfig(_ConfigMixin):
     illumination_config: dict = field(default_factory=dict)
 
     def _apply_illumination_function(self) -> None:
-        """Apply the current illumination function to the existing illumination object."""
+        """Apply the current illumination function to the existing illumination object.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         if self.illumination_function == "gaussian":
             self.illumination.gauss_beam(**self.illumination_config)
         elif self.illumination_function in ("plane_wave", None):
             self.illumination.plane_wave(self.shape)
 
     def _incident_photons_per_second(self) -> float:
+        """Handle the internal incident photons per second operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : float
+            Return value produced by the function.
+        """
         return self.XRayConfig.photon_flux
 
     def _scale_illumination_to_photon_flux(self) -> None:
+        """Handle the internal scale illumination to photon flux operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         target_intensity = self._incident_photons_per_second()
         current_intensity = np.sum(np.abs(self.illumination.illumination) ** 2)
         if current_intensity <= 0:
@@ -1050,6 +1379,16 @@ class IlluminationConfig(_ConfigMixin):
         Builds the beam envelope (Gaussian or plane wave) from the current
         ``XRayConfig``. Expensive — call once. Use ``update_polarization()``
         to switch polarisation state without rebuilding the envelope.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.beam_params = self.XRayConfig.setup()
         self.illumination = light_beam.illumination(
@@ -1066,6 +1405,11 @@ class IlluminationConfig(_ConfigMixin):
         ----------
         pol : {"CR", "CL", "x", "y"}
             New polarisation state.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.XRayConfig.polarization = pol
         self.illumination.beam_parameters.pol = pol
@@ -1081,6 +1425,11 @@ class IlluminationConfig(_ConfigMixin):
         ----------
         illumination_config : dict
             New keyword arguments forwarded to ``gauss_beam``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.illumination_config = illumination_config
         self._apply_illumination_function()
@@ -1099,6 +1448,11 @@ class IlluminationConfig(_ConfigMixin):
         ----------
         energy : float
             New photon energy in eV.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.XRayConfig.energy = energy
         self.beam_params = self.XRayConfig.setup()
@@ -1119,6 +1473,11 @@ class IlluminationConfig(_ConfigMixin):
         ----------
         new_xray_config : XRayConfig
             New X-ray source configuration to apply.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         energy_changed = (
             new_xray_config.beam_params.energy != self.XRayConfig.beam_params.energy
@@ -1135,6 +1494,18 @@ class IlluminationConfig(_ConfigMixin):
             self.update_polarization(new_xray_config.pol)
 
     def visualize_illumination(self) -> None:
+        """Run the visualize illumination operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         extend_real = self.illumination.get_illumination_extent_real_space()
         fig, ax = plt.subplots(1, 2, figsize=(10, 4), sharex=True, sharey=True)
         ma = np.max(np.abs(self.illumination.illumination) ** 2)
@@ -1162,7 +1533,18 @@ class IlluminationConfig(_ConfigMixin):
         plt.colorbar(m1, ax=ax[1], label="Phase in rad")
 
     def get_metadata(self, prefix: str = "") -> dict[str, int | float | str | bool]:
-        """Return config fields plus derived beam parameters as scalar metadata."""
+        """Return config fields plus derived beam parameters as scalar metadata.
+
+        Parameters
+        ----------
+        prefix : str
+            Input value for ``prefix``.
+
+        Returns
+        -------
+        result : dict[str, int | float | str | bool]
+            Return value produced by the function.
+        """
         meta = super().get_metadata(prefix=prefix)
         if hasattr(self, "beam_params"):
             bp = self.beam_params
@@ -1202,6 +1584,11 @@ class SamplePropagatorConfig(_ConfigMixin):
         -------
         Jones_propagator.JonesPropagator
             The configured beam propagator object.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
         """
         if self.propagator_method == "Jones":
             self.wavefront = self._jones_propagation()
@@ -1211,6 +1598,18 @@ class SamplePropagatorConfig(_ConfigMixin):
             raise ValueError(f"Unknown propagator method: {self.propagator_method!r}")
 
     def _jones_propagation(self):
+        """Handle the internal jones propagation operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         wavefront = Jones_propagator.wavefronts(
             beam_parameters=self.IlluminationConfig.beam_params,
             eps_stack=self.SampleConfig.sample_structure.final_dielectric_tensor,
@@ -1250,10 +1649,33 @@ class SamplePropagatorConfig(_ConfigMixin):
         return wavefront
 
     def return_wavefront(self) -> Jones_propagator.wavefronts:
-        """Return the configured wavefront object."""
+        """Return the configured wavefront object.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Jones_propagator.wavefronts
+            Return value produced by the function.
+        """
         return self.wavefront
 
     def calculate_scalar_wavefield(self) -> np.ndarray:
+        """Run the calculate scalar wavefield operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
+        """
         amp = (
             np.abs(self.wavefront.exit_wave[..., 0]) ** 2
             + np.abs(self.wavefront.exit_wave[..., 1]) ** 2
@@ -1263,13 +1685,35 @@ class SamplePropagatorConfig(_ConfigMixin):
         self.exit_wavefield = amp * np.exp(1j * phase)
 
     def return_scalar_wavefield(self) -> np.ndarray:
-        """Return the scalar exit wavefield after sample propagation."""
+        """Return the scalar exit wavefield after sample propagation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
+        """
         if not hasattr(self, "exit_wavefield"):
             self.calculate_scalar_wavefield()
         return self.exit_wavefield
 
     def visualize_exit_wavefront(self) -> None:
-        """Display the intensity and phase of the exit wavefront."""
+        """Display the intensity and phase of the exit wavefront.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         self.calculate_scalar_wavefield()
         extend_real = (
             self.IlluminationConfig.illumination.get_illumination_extent_real_space()
@@ -1304,7 +1748,18 @@ class SamplePropagatorConfig(_ConfigMixin):
         plt.colorbar(m1, ax=ax[1], label="Phase in rad")
 
     def get_metadata(self, prefix: str = "") -> dict[str, int | float | str | bool]:
-        """Return own fields plus SampleConfig and IlluminationConfig metadata."""
+        """Return own fields plus SampleConfig and IlluminationConfig metadata.
+
+        Parameters
+        ----------
+        prefix : str
+            Input value for ``prefix``.
+
+        Returns
+        -------
+        result : dict[str, int | float | str | bool]
+            Return value produced by the function.
+        """
         meta = super().get_metadata(prefix=prefix)
         meta.update(self.SampleConfig.get_metadata(prefix=f"{prefix}sample/"))
         meta.update(self.IlluminationConfig.get_metadata(prefix=f"{prefix}illumination/"))
@@ -1354,6 +1809,18 @@ class HologramConfig(_ConfigMixin):
     )
 
     def __post_init__(self) -> None:
+        """Handle the internal post init operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         for store_name, store in (
             ("ideal_holograms", self.ideal_holograms),
             ("detected_holograms", self.detected_holograms),
@@ -1379,6 +1846,18 @@ class HologramConfig(_ConfigMixin):
         self,
         source: Literal["ideal", "detected", "detected_no_beamstop", "exit_wave"],
     ) -> dict:
+        """Handle the internal get store operation.
+
+        Parameters
+        ----------
+        source : Literal["ideal", "detected", "detected_no_beamstop", "exit_wave"]
+            Input value for ``source``.
+
+        Returns
+        -------
+        result : dict
+            Return value produced by the function.
+        """
         if source == "ideal":
             return self.ideal_holograms
         if source == "detected":
@@ -1394,13 +1873,36 @@ class HologramConfig(_ConfigMixin):
 
     @property
     def helicities(self) -> list[str]:
-        """Helicity keys present in the ideal hologram dict."""
+        """Helicity keys present in the ideal hologram dict.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : list[str]
+            Return value produced by the function.
+        """
         return list(self.ideal_holograms.keys())
 
     def add_ideal_hologram(self, helicity: str, hologram: np.ndarray) -> None:
         """Add or replace an ideal hologram for *helicity*.
 
         *hologram* may be 2-D ``(Ny, Nx)`` or 3-D ``(N_frames, Ny, Nx)``.
+
+        Parameters
+        ----------
+        helicity : str
+            Input value for ``helicity``.
+        hologram : np.ndarray
+            Input value for ``hologram``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         if helicity not in self._VALID_HELICITIES:
             raise ValueError(
@@ -1416,6 +1918,18 @@ class HologramConfig(_ConfigMixin):
         """Add or replace a detected hologram for *helicity*.
 
         *hologram* may be 2-D ``(Ny, Nx)`` or 3-D ``(N_frames, Ny, Nx)``.
+
+        Parameters
+        ----------
+        helicity : str
+            Input value for ``helicity``.
+        hologram : np.ndarray
+            Input value for ``hologram``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         if helicity not in self._VALID_HELICITIES:
             raise ValueError(
@@ -1428,7 +1942,20 @@ class HologramConfig(_ConfigMixin):
         self.detected_holograms[helicity] = hologram
 
     def _stack_into(self, store: dict, data: dict) -> None:
-        """Concatenate *data* arrays into *store* along axis 0."""
+        """Concatenate *data* arrays into *store* along axis 0.
+
+        Parameters
+        ----------
+        store : dict
+            Input value for ``store``.
+        data : dict
+            Input value for ``data``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         for helicity, arr in data.items():
             if helicity not in self._VALID_HELICITIES:
                 raise ValueError(
@@ -1462,6 +1989,11 @@ class HologramConfig(_ConfigMixin):
             or 3-D ``(N_frames, Ny, Nx)``.
         source : {"ideal", "detected", "detected_no_beamstop"}
             Which hologram store to append to.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self._stack_into(self._get_store(source), holograms)
 
@@ -1473,6 +2005,11 @@ class HologramConfig(_ConfigMixin):
         exit_waves : dict[str, ndarray]
             Mapping of helicity → complex array. Each array may be 2-D
             ``(Ny, Nx)`` or 3-D ``(N_frames, Ny, Nx)``.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self._stack_into(self.exit_waves, exit_waves)
 
@@ -1508,6 +2045,11 @@ class HologramConfig(_ConfigMixin):
         ----------
         source : {"ideal", "detected", "exit_wave"}
             Which store to use.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
         """
         store = self._get_store(source)
         if "CR" not in store or "CL" not in store:
@@ -1527,6 +2069,11 @@ class HologramConfig(_ConfigMixin):
         ----------
         source : {"ideal", "detected", "exit_wave"}
             Which store to use.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
         """
         store = self._get_store(source)
         if "CR" not in store or "CL" not in store:
@@ -1538,14 +2085,50 @@ class HologramConfig(_ConfigMixin):
         return store["sum"]
 
     def compute_differences(self):
+        """Run the compute differences operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         for source in ["ideal", "detected", "exit_wave"]:
             self.difference(source)
 
     def compute_sums(self):
+        """Run the compute sums operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         for source in ["ideal", "detected", "exit_wave"]:
             self.sum(source)
 
     def compute_reconstructions(self):
+        """Run the compute reconstructions operation.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        result : Any
+            Return value produced by the function.
+        """
         for source in ["ideal", "detected", "exit_wave"]:
             store = self._get_store(source)
             for helicity in list(store.keys()):
@@ -1553,6 +2136,18 @@ class HologramConfig(_ConfigMixin):
 
     @staticmethod
     def _fth_reconstruct(holo: np.ndarray) -> np.ndarray:
+        """Handle the internal fth reconstruct operation.
+
+        Parameters
+        ----------
+        holo : np.ndarray
+            Input value for ``holo``.
+
+        Returns
+        -------
+        result : np.ndarray
+            Return value produced by the function.
+        """
         return np.fft.fftshift(np.fft.fft2(np.fft.fftshift(holo)))
 
     def reconstruct(
@@ -1610,6 +2205,11 @@ class HologramConfig(_ConfigMixin):
             If ``None`` (default), use the frame-averaged hologram.
             If an integer, select that frame from the raw 3-D stack
             ``(N_frames, Ny, Nx)`` stored in the source store.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         if frame is None:
             if not hasattr(self, "exit_waves_avg"):
@@ -1680,6 +2280,16 @@ class HologramConfig(_ConfigMixin):
 
         3-D arrays ``(N_frames, Ny, Nx)`` are reduced to ``(Ny, Nx)`` by
         mean along axis 0. 2-D arrays are stored unchanged.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         self.ideal_holograms_avg = self.average_stack("ideal")
         self.detected_holograms_avg = self.average_stack("detected")
@@ -1697,6 +2307,16 @@ class HologramConfig(_ConfigMixin):
         - Row 2: Amplitude | Phase  of averaged exit wave — helicity 2
         - Row 3: Ideal     | Detected hologram            — helicity 1
         - Row 4: Ideal     | Detected hologram            — helicity 2
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
         """
         if not hasattr(self, "exit_waves_avg"):
             self.compute_averages()

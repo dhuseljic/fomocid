@@ -26,6 +26,18 @@ def build_resnet_encoder(backbone_name: str, image_size: int) -> tuple[nn.Module
 
     Raises:
         ValueError: If the backbone name is unsupported.
+
+    Parameters
+    ----------
+    backbone_name : str
+        Input value for ``backbone_name``.
+    image_size : int
+        Input value for ``image_size``.
+
+    Returns
+    -------
+    result : tuple[nn.Module, int]
+        Return value produced by the function.
     """
     if backbone_name != "resnet18":
         raise ValueError(f"Unsupported backbone: {backbone_name}")
@@ -45,6 +57,16 @@ def freeze_module(module: nn.Module) -> None:
 
     Args:
         module: Module to freeze.
+
+    Parameters
+    ----------
+    module : nn.Module
+        Input value for ``module``.
+
+    Returns
+    -------
+    None
+        The function completes in place.
     """
     module.eval()
     for parameter in module.parameters():
@@ -59,6 +81,20 @@ def momentum_update(student: nn.Module, teacher: nn.Module, momentum: float) -> 
         student: Online network providing current weights.
         teacher: Momentum network updated in place.
         momentum: Exponential moving-average coefficient.
+
+    Parameters
+    ----------
+    student : nn.Module
+        Input value for ``student``.
+    teacher : nn.Module
+        Input value for ``teacher``.
+    momentum : float
+        Input value for ``momentum``.
+
+    Returns
+    -------
+    None
+        The function completes in place.
     """
     for teacher_param, student_param in zip(teacher.parameters(), student.parameters(), strict=True):
         teacher_param.data.mul_(momentum).add_(student_param.data, alpha=1.0 - momentum)
@@ -82,6 +118,16 @@ def resolve_optimizer_config(config: RootConfig) -> OptimizerConfig:
 
     Raises:
         ValueError: If optimizer parameters are invalid.
+
+    Parameters
+    ----------
+    config : RootConfig
+        Input value for ``config``.
+
+    Returns
+    -------
+    result : OptimizerConfig
+        Return value produced by the function.
     """
     optimizer_config = dict(config.get("optimizer", {}))
     learning_rate = float(optimizer_config.get("lr", 1e-3))
@@ -114,6 +160,18 @@ def _resolve_scheduler_config(raw_scheduler_config: Any, learning_rate: float) -
     Raises:
         ValueError: If the scheduler name, interval, or numeric bounds are
             invalid.
+
+    Parameters
+    ----------
+    raw_scheduler_config : Any
+        Input value for ``raw_scheduler_config``.
+    learning_rate : float
+        Input value for ``learning_rate``.
+
+    Returns
+    -------
+    result : SchedulerConfig | None
+        Return value produced by the function.
     """
     if raw_scheduler_config is None:
         return None
@@ -158,6 +216,18 @@ def build_optimizer(parameters: Any, optimizer_config: OptimizerConfig) -> Optim
 
     Returns:
         Configured AdamW optimizer.
+
+    Parameters
+    ----------
+    parameters : Any
+        Input value for ``parameters``.
+    optimizer_config : OptimizerConfig
+        Input value for ``optimizer_config``.
+
+    Returns
+    -------
+    result : Optimizer
+        Return value produced by the function.
     """
     return AdamW(parameters, lr=float(optimizer_config["lr"]), weight_decay=float(optimizer_config["weight_decay"]))
 
@@ -172,6 +242,20 @@ def estimate_warmup_steps(total_steps: int, max_epochs: int, warmup_epochs: floa
 
     Returns:
         Number of optimizer steps that should use linear warmup.
+
+    Parameters
+    ----------
+    total_steps : int
+        Input value for ``total_steps``.
+    max_epochs : int
+        Input value for ``max_epochs``.
+    warmup_epochs : float
+        Input value for ``warmup_epochs``.
+
+    Returns
+    -------
+    result : int
+        Return value produced by the function.
     """
     if warmup_epochs <= 0.0:
         return 0
@@ -198,6 +282,22 @@ def warmup_cosine_factor(
 
     Returns:
         Multiplicative factor applied by :class:`torch.optim.lr_scheduler.LambdaLR`.
+
+    Parameters
+    ----------
+    step_index : int
+        Input value for ``step_index``.
+    total_steps : int
+        Input value for ``total_steps``.
+    warmup_steps : int
+        Input value for ``warmup_steps``.
+    min_lr_scale : float
+        Input value for ``min_lr_scale``.
+
+    Returns
+    -------
+    result : float
+        Return value produced by the function.
     """
     bounded_total_steps = max(int(total_steps), 1)
     bounded_step_index = max(int(step_index), 0)
@@ -235,6 +335,22 @@ def build_scheduler(
 
     Returns:
         A configured scheduler, or ``None`` if scheduling is disabled.
+
+    Parameters
+    ----------
+    optimizer : Optimizer
+        Input value for ``optimizer``.
+    optimizer_config : OptimizerConfig
+        Input value for ``optimizer_config``.
+    total_steps : int
+        Input value for ``total_steps``.
+    max_epochs : int
+        Input value for ``max_epochs``.
+
+    Returns
+    -------
+    result : LambdaLR | None
+        Return value produced by the function.
     """
     scheduler_config = optimizer_config.get("scheduler")
     if scheduler_config is None:
@@ -267,6 +383,18 @@ def configure_pretraining_optimizers(module: Any, optimizer_config: OptimizerCon
 
     Returns:
         Either an optimizer or a Lightning optimizer-and-scheduler mapping.
+
+    Parameters
+    ----------
+    module : Any
+        Input value for ``module``.
+    optimizer_config : OptimizerConfig
+        Input value for ``optimizer_config``.
+
+    Returns
+    -------
+    result : Any
+        Return value produced by the function.
     """
     optimizer = build_optimizer(module.parameters(), optimizer_config)
     scheduler = build_scheduler(

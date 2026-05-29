@@ -1,3 +1,5 @@
+"""Test Jones propagation padding, absorbers, and ROI propagation."""
+
 from __future__ import annotations
 
 import sys
@@ -17,6 +19,18 @@ from scattering_calculator.sample_generator.structures import CompactDielectricT
 
 class JonesFreeSpacePropagationTests(unittest.TestCase):
     def test_padded_propagation_preserves_original_shape(self) -> None:
+        """Test that padded propagation preserves original shape.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         field = np.zeros((16, 18, 2), dtype=complex)
         field[8, 9, 0] = 1.0
 
@@ -37,6 +51,18 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(out)))
 
     def test_edge_absorber_is_one_in_the_center(self) -> None:
+        """Test that edge absorber is one in the center.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         absorber = wavefronts._edge_absorber(
             32,
             32,
@@ -49,6 +75,18 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         self.assertAlmostEqual(absorber[16, 16], 1.0)
 
     def test_absorber_profile_varies_smoothly(self) -> None:
+        """Test that absorber profile varies smoothly.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         absorber = wavefronts._edge_absorber(
             32,
             32,
@@ -62,6 +100,18 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         self.assertAlmostEqual(edge_to_center[-1], 1.0)
 
     def test_compact_dielectric_stack_matches_dense_stack(self) -> None:
+        """Test that compact dielectric stack matches dense stack.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         field = np.zeros((8, 9, 2), dtype=complex)
         field[..., 0] = 1.0
         field[..., 1] = 0.25j
@@ -106,6 +156,18 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         self.assertTrue(np.allclose(compact_out, dense_out))
 
     def test_roi_free_space_propagation_keeps_plane_phase_outside_roi(self) -> None:
+        """Test that roi free space propagation keeps plane phase outside roi.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         field = np.ones((16, 18, 2), dtype=complex)
         field[7:9, 8:10, 0] = 5.0
         field[7:9, 8:10, 1] = -2.0j
@@ -137,12 +199,36 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         self.assertTrue(np.all(np.isfinite(out)))
 
     def test_pad_regions_clips_to_field_shape(self) -> None:
+        """Test that pad regions clips to field shape.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         regions = ((slice(1, 4), slice(2, 5)),)
         padded = wavefronts._pad_regions(regions, shape=(6, 7), padding_px=3)
 
         self.assertEqual(padded, ((slice(0, 6), slice(0, 7)),))
 
     def test_roi_free_space_propagation_falls_back_without_regions(self) -> None:
+        """Test that roi free space propagation falls back without regions.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
         field = np.zeros((8, 9, 2), dtype=complex)
         field[4, 4, 0] = 1.0
 
