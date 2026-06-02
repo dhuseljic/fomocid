@@ -76,8 +76,9 @@ ROI, the solver still carries a field forward:
 - `multislice_propagation_roi=True` runs the inter-slice FFT propagator only in
   padded aperture boxes. The solver starts from the zero-spatial-frequency
   plane-wave phase everywhere, then adds each ROI crop's local diffraction
-  correction relative to that baseline. Overlapping boxes therefore add their
-  corrections instead of overwriting one another. Pixels outside all boxes keep
+  correction relative to that baseline. Overlapping padded boxes are merged
+  before propagation, so nearby apertures are treated as one local diffraction
+  problem instead of competing in shared pixels. Pixels outside all boxes keep
   only the plane-wave phase, not a full diffraction calculation.
 
 Use full-field multislice, `propagate=True` with

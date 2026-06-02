@@ -208,9 +208,10 @@ class HologramPipelineConfig:
         angular-spectrum propagation only inside aperture ROI boxes. The full
         field starts from the plane-wave phase advance; each ROI crop then adds
         its local diffraction correction relative to that baseline, so
-        overlapping ROI boxes add corrections instead of overwriting one
-        another. If ``False``, use full-field free-space propagation. Default
-        ``False``.
+        disjoint ROI boxes add corrections without overwriting one another.
+        Overlapping padded boxes are merged first and propagated as one larger
+        local crop. If ``False``, use full-field free-space propagation.
+        Default ``False``.
     multislice_propagation_roi_padding_px : int
         Extra pixels added around each aperture ROI box before approximate
         ROI-only free-space propagation. This is separate from

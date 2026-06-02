@@ -198,8 +198,64 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         self.assertTrue(np.allclose(out[outside], expected_outside[outside]))
         self.assertTrue(np.all(np.isfinite(out)))
 
-    def test_roi_free_space_propagation_adds_overlapping_roi_corrections(self) -> None:
-        """Test that overlapping roi crops add corrections instead of overwriting.
+    def test_roi_free_space_propagation_merges_overlapping_roi_crops(self) -> None:
+        """Test that overlapping roi crops are propagated as one merged crop.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
+        field = np.ones((8, 8, 2), dtype=complex)
+        wavelength = 1e-9
+        dz = 2e-9
+        baseline = field * np.exp(-1j * 2 * np.pi / wavelength * dz)
+        correction = 2.0 + 0.5j
+        calls = []
+
+        def fake_local_propagator(
+            E_crop,
+            wavelength,
+            dz,
+            pixel_size,
+            padding_px=0,
+            padding_mode="edge",
+            absorber_width_px=0,
+            absorber_strength=0.0,
+            absorber_profile="cosine",
+        ):
+            calls.append(E_crop.shape)
+            local_baseline = E_crop * np.exp(-1j * 2 * np.pi / wavelength * dz)
+            return local_baseline + correction
+
+        wf = object.__new__(wavefronts)
+        wf.propagate_free_space_jones = fake_local_propagator
+        regions = (
+            (slice(1, 5), slice(1, 5)),
+            (slice(3, 7), slice(3, 7)),
+        )
+
+        out = wf.propagate_free_space_jones_roi(
+            field,
+            wavelength=wavelength,
+            dz=dz,
+            pixel_size=1e-9,
+            aperture_support_regions=regions,
+        )
+
+        expected = baseline.copy()
+        expected[slice(1, 7), slice(1, 7), :] += correction
+
+        self.assertEqual(calls, [(6, 6, 2)])
+        self.assertTrue(np.allclose(out, expected))
+
+    def test_roi_free_space_propagation_adds_disjoint_roi_corrections(self) -> None:
+        """Test that disjoint roi crops add corrections to the baseline field.
 
         Parameters
         ----------
@@ -237,8 +293,8 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         wf = object.__new__(wavefronts)
         wf.propagate_free_space_jones = fake_local_propagator
         regions = (
-            (slice(1, 5), slice(1, 5)),
-            (slice(3, 7), slice(3, 7)),
+            (slice(1, 3), slice(1, 3)),
+            (slice(5, 7), slice(5, 7)),
         )
 
         out = wf.propagate_free_space_jones_roi(
@@ -255,9 +311,6 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
 
         self.assertEqual(calls["count"], 2)
         self.assertTrue(np.allclose(out, expected))
-        self.assertTrue(
-            np.allclose(out[3:5, 3:5], baseline[3:5, 3:5] + sum(corrections))
-        )
 
     def test_pad_regions_clips_to_field_shape(self) -> None:
         """Test that pad regions clips to field shape.

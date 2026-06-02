@@ -538,12 +538,13 @@ class wavefronts:
         """Approximate free-space propagation with FFTs only in aperture ROIs.
 
         Outside the ROI boxes the field is assumed locally plane-wave-like and
-        receives only the zero-spatial-frequency angular-spectrum phase. Each
-        ROI contributes only its deviation from that baseline, so overlapping
-        ROI boxes add their local diffraction corrections instead of later
-        boxes overwriting earlier ones. This is faster than a global FFT but
-        intentionally approximate because true free-space propagation couples
-        all pixels.
+        receives only the zero-spatial-frequency angular-spectrum phase.
+        Padded ROI boxes that overlap are merged before propagation, so nearby
+        apertures are treated as one local diffraction problem instead of
+        separate crops competing in shared pixels. Each merged ROI contributes
+        only its deviation from the plane-wave baseline. This is faster than a
+        global FFT but intentionally approximate because true free-space
+        propagation couples all pixels.
 
         Parameters
         ----------
@@ -597,10 +598,12 @@ class wavefronts:
         baseline = np.asarray(E_in * np.exp(-1j * k0 * dz), dtype=complex)
         E_out = baseline.copy()
 
-        roi_regions = self._pad_regions(
-            aperture_support_regions,
-            E_in.shape[:2],
-            roi_padding_px,
+        roi_regions = self._merge_overlapping_regions(
+            self._pad_regions(
+                aperture_support_regions,
+                E_in.shape[:2],
+                roi_padding_px,
+            )
         )
         for region in roi_regions:
             region_key = (*region, slice(None))
@@ -651,6 +654,63 @@ class wavefronts:
             if y1 > y0 and x1 > x0:
                 padded.append((slice(y0, y1), slice(x0, x1)))
         return tuple(padded)
+
+    @staticmethod
+    def _merge_overlapping_regions(regions):
+        """Return bounding boxes formed by merging overlapping y/x regions.
+
+        Parameters
+        ----------
+        regions : Any
+            Iterable of ``(y_slice, x_slice)`` regions.
+
+        Returns
+        -------
+        result : tuple
+            Tuple of non-overlapping ``(y_slice, x_slice)`` regions.
+        """
+        boxes = [
+            [
+                int(y_slice.start or 0),
+                int(y_slice.stop),
+                int(x_slice.start or 0),
+                int(x_slice.stop),
+            ]
+            for y_slice, x_slice in regions
+        ]
+        if not boxes:
+            return ()
+
+        def overlaps(a, b):
+            return (
+                a[0] < b[1]
+                and b[0] < a[1]
+                and a[2] < b[3]
+                and b[2] < a[3]
+            )
+
+        merged = []
+        for box in boxes:
+            pending = box
+            i = 0
+            while i < len(merged):
+                if overlaps(pending, merged[i]):
+                    existing = merged.pop(i)
+                    pending = [
+                        min(pending[0], existing[0]),
+                        max(pending[1], existing[1]),
+                        min(pending[2], existing[2]),
+                        max(pending[3], existing[3]),
+                    ]
+                    i = 0
+                else:
+                    i += 1
+            merged.append(pending)
+
+        merged.sort(key=lambda item: (item[0], item[2], item[1], item[3]))
+        return tuple(
+            (slice(y0, y1), slice(x0, x1)) for y0, y1, x0, x1 in merged
+        )
 
     @classmethod
     def _normalize_padding_mode(cls, padding_mode):
