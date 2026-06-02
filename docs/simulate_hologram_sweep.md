@@ -116,6 +116,46 @@ diagonal terms plus aperture ROI patches, then evaluates those patches during
 Jones propagation. Set it to `False` if you need `final_dielectric_tensor` to be
 a materialized dense array for debugging or downstream inspection.
 
+#### What is approximated outside ROIs?
+
+The ROI switches do not all mean the same thing, and none of them creates a hard
+zero-valued mask for the exit wave.
+
+`magnetic_pattern_use_roi=True` affects only magnetic-pattern generation for
+supported expensive texture types, currently including labyrinth, wavy stripe,
+and disordered skyrmion patterns. The pipeline creates a full magnetic-pattern
+array initialized to the background value `+1`, generates the texture in a
+padded object-hole bounding box, and pastes the local result into the full
+array. Outside that box, the magnetic texture remains background. This assumes
+texture outside the object-hole region is irrelevant because it is hidden by the
+front aperture or by object-hole-focused diagnostics.
+
+`dielectric_tensor_use_roi=True` affects the dielectric tensor and Jones
+interaction. Aperture support boxes are built around the FTH holes. Inside those
+boxes, the simulator evaluates the aperture, vacuum, magnetic, and off-diagonal
+dielectric corrections. Outside those boxes, each material slice is approximated
+as the spatially uniform diagonal background response for that layer. During the
+Jones step, outside-ROI pixels are still multiplied by this constant per-layer
+transmission; they are not zeroed.
+
+`multislice_propagation_roi=True` affects only free-space propagation between
+material slices, and only when `propagate=True`. The full field is first
+advanced outside the ROI boxes by the zero-spatial-frequency plane-wave phase,
+`exp(-i k0 dz)`. The local angular-spectrum FFT is then run in each padded
+aperture ROI crop, and those locally propagated crops overwrite the
+corresponding boxes. Outside the boxes, no diffractive redistribution is
+computed. This is the strongest ROI approximation because true free-space
+propagation is nonlocal: diffracted light can move between ROI and non-ROI
+pixels.
+
+If the exit-wave signal outside the plotted ROI rectangles is nonzero, that is
+therefore expected. The rectangles show where expensive corrections or local
+FFTs were evaluated, not where the field is allowed to exist. Use
+`propagate=True` with `multislice_propagation_roi=False` for the conservative
+full-field propagation reference, and increase
+`multislice_propagation_roi_padding_px` when ROI multislice is useful but the
+crop is too tight.
+
 ### Multislice Propagation
 
 Free-space propagation between material layers is controlled near the top of

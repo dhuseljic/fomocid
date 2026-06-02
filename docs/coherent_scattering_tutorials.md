@@ -62,6 +62,26 @@ The practical mode choices are:
 - **Full-field reference/debug mode**: `use_roi=False`. Use this for small
   arrays or reference comparisons.
 
+These ROI modes are computational approximations, not hard masks. Outside an
+ROI, the solver still carries a field forward:
+
+- `magnetic_pattern_use_roi=True` initializes the full magnetic-pattern plane to
+  the background value `+1`, generates supported expensive textures only in a
+  padded object-hole box, and pastes that texture into the full plane. Outside
+  the box, the magnetic texture remains background.
+- `dielectric_tensor_use_roi=True` computes dense magnetic/vacuum dielectric
+  corrections only in aperture support boxes. Outside those boxes, each layer is
+  treated as the spatially uniform diagonal background response, so Jones
+  propagation still applies the layer transmission there.
+- `multislice_propagation_roi=True` runs the inter-slice FFT propagator only in
+  padded aperture boxes. Outside those boxes, the field is advanced by the
+  zero-spatial-frequency plane-wave phase, not by a full diffraction
+  calculation.
+
+Use full-field multislice, `propagate=True` with
+`multislice_propagation_roi=False`, when diffraction between ROI and non-ROI
+pixels is important.
+
 For a deeper explanation and runnable comparisons, use
 [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb).
 
