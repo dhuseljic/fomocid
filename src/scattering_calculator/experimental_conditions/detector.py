@@ -508,7 +508,12 @@ class detector_hologram:
             hologram_shape[0] * real_space_resolution / coherence_length_x
         )
 
-    def add_noise(self):
+    def add_noise(
+        self,
+        apply_beamstop_mask: bool = True,
+        apply_detector_threshold: bool = True,
+        store_no_beamstop: bool = False,
+    ):
         """
         Given the hologram, the function simulates the holograms introducing drift,
          coherence effects and Poisson noise
@@ -518,6 +523,13 @@ class detector_hologram:
                 max_counts_per_image: max number of counts the camera can take in one image
                 counts_per_photon:
                 number_of_frames: number of acquired frames. The more, the lower the noise
+                apply_beamstop_mask: if True, apply the beamstop shadow to the
+                    detected hologram.
+                apply_detector_threshold: if True, cap the detected image at the
+                    detector threshold.
+                store_no_beamstop: if True, also store a detected hologram made
+                    from the same photon/readout noise draw but without applying
+                    the beamstop shadow or detector-threshold cap.
 
         ----------
         Author: RB_2020
@@ -605,30 +617,51 @@ class detector_hologram:
             )
 
         # 7. convert photons back to detector counts
-        holo = photon_counts.astype(float) * self.counts_per_photon
+        holo_counts = photon_counts.astype(float) * self.counts_per_photon
 
-        # 8. apply beamstop mask to shadow
-        holo *= 1.0 - self.beamstop.beamstop
-
-        # 9. add gaussian readout noise from detector
+        # 8. draw one readout-noise image and reuse it for optional variants.
+        readout_noise = 0.0
         if self.readout_noise_average > 0 or self.readout_noise_sigma > 0:
-            holo += np.random.normal(
+            readout_noise = np.random.normal(
                 self.readout_noise_average * self.number_frames,
                 self.readout_noise_sigma * np.sqrt(self.number_frames),
-                holo.shape,
+                holo_counts.shape,
             )
 
-        # 10. round to integers and cap image at thresholding camera value
-        holo = np.round(holo, 0)
-        holo = np.minimum(holo, self.number_frames * self.detector_threshold)
+        def finalize_detection(image, apply_mask=True, apply_threshold=True):
+            """Apply detector mask, readout noise, thresholding, and averaging."""
+            detected = np.array(image, dtype=float, copy=True)
+            if apply_mask:
+                detected *= 1.0 - self.beamstop.beamstop
 
-        # 11. divide by frame number: it is an average
-        holo /= self.number_frames
+            detected += readout_noise
 
-        # 12. just making sure the final product is positive
-        holo[holo < 0] = 0
+            # Round to integer counts and optionally cap at the camera threshold.
+            detected = np.round(detected, 0)
+            if apply_threshold:
+                detected = np.minimum(
+                    detected, self.number_frames * self.detector_threshold
+                )
 
-        self.hologram_exp = holo
+            # Divide by frame number: the saved image is a frame average.
+            detected /= self.number_frames
+
+            # Just making sure the final product is positive.
+            detected[detected < 0] = 0
+            return detected
+
+        if store_no_beamstop:
+            self.hologram_exp_no_beamstop = finalize_detection(
+                holo_counts,
+                apply_mask=False,
+                apply_threshold=False,
+            )
+
+        self.hologram_exp = finalize_detection(
+            holo_counts,
+            apply_mask=apply_beamstop_mask,
+            apply_threshold=apply_detector_threshold,
+        )
 
     def gnomonic_projection(self) -> NDArray[np.float64]:
         """Apply gnomonic projection to the hologram to correct for curvature of the Ewald sphere.
