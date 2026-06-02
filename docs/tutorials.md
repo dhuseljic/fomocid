@@ -1,12 +1,15 @@
 # Tutorials
 
-The tutorial notebooks are the main teaching surface, and the scripts under `tutorials/` are the executable source of truth.
+The tutorial notebooks are the main teaching surface, and the scripts under
+`tutorials/` are the executable source of truth.
 
 ## Supported workflows
 
 - `configs/cifar10_mae.yaml` trains and evaluates a CIFAR-10 MAE tutorial run.
 - `configs/mnist_mae.yaml` trains a smaller, faster MAE example on MNIST.
 - `configs/stl10_dino.yaml` trains and evaluates an STL-10 DINO tutorial run.
+- `tutorials/simulate_hologram_sweep.py` generates coherent FTH hologram
+  sweeps and writes HDF5 datasets.
 
 ## Useful CLI entrypoints
 
@@ -14,6 +17,7 @@ The tutorial notebooks are the main teaching surface, and the scripts under `tut
 python tutorials/train_ssl.py --help
 python tutorials/train_ssl.py --config configs/cifar10_mae.yaml --output-dir outputs --explain-config
 python tutorials/evaluate_representations.py --help
+python tutorials/simulate_hologram_sweep.py
 ```
 
 ## Notebook tutorials
@@ -26,7 +30,29 @@ notebook_tutorials/01_mae_pretraining
 notebook_tutorials/02_mae_analysis
 ```
 
+## Coherent-scattering notebooks
+
+The coherent-scattering notebooks are organized by topic so users can learn one
+part of the simulation at a time:
+
+- [`tutorial_beamstop_definition.ipynb`](../tutorials/tutorial_beamstop_definition.ipynb)
+- [`tutorial_material_holography_mask_definition.ipynb`](../tutorials/tutorial_material_holography_mask_definition.ipynb)
+- [`tutorial_illumination_function_definition.ipynb`](../tutorials/tutorial_illumination_function_definition.ipynb)
+- [`tutorial_magnetic_pattern_definition.ipynb`](../tutorials/tutorial_magnetic_pattern_definition.ipynb)
+- [`tutorial_material_parameters_definition.ipynb`](../tutorials/tutorial_material_parameters_definition.ipynb)
+- [`tutorial_hologram_generation_and_artifacts.ipynb`](../tutorials/tutorial_hologram_generation_and_artifacts.ipynb)
+- [`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb)
+- [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb)
+
+Use the [coherent-scattering tutorial map](coherent_scattering_tutorials.md)
+to choose the right notebook, and the
+[hologram sweep reference](simulate_hologram_sweep.md) for the scripted
+pipeline and HDF5 output layout.
+
 ## Script entrypoints
 
 - `tutorials/train_ssl.py` runs pretraining and writes `resolved_config.yaml`, `checkpoints/`, optional `logs/`, and `train_summary.json`.
 - `tutorials/evaluate_representations.py` writes `embeddings.pt`, `metrics.json`, `projection.png`, `nearest_neighbors.png`, and `evaluation_summary.json`.
+- `tutorials/simulate_hologram_sweep.py` writes a single HDF5 file with one
+  group per synthetic coherent-scattering experiment, including CR/CL
+  holograms, exit waves, masks, magnetic pattern crops, and metadata.

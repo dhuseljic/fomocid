@@ -8,6 +8,20 @@ detector distance, beamstop, and detector acquisition settings.
 The script is useful for producing training or benchmarking datasets where each
 HDF5 group is one complete synthetic experiment.
 
+## Related Tutorial Notebooks
+
+For notebook-first learning, use the focused notebooks under `tutorials/`:
+
+- [`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb)
+  walks through `HologramPipelineConfig`, `HologramPipelineRanges`, running the
+  pipeline, reading HDF5 outputs, and visualizing masks, magnetic patterns,
+  CR/CL holograms, CR-CL channels, and exit waves.
+- [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb)
+  explains `propagate=True/False`, aperture ROI modes, Jones/tensor ROI,
+  multislice ROI, padding, absorbers, and recommended operating modes.
+- [`coherent_scattering_tutorials.md`](coherent_scattering_tutorials.md)
+  maps all coherent-scattering notebooks by topic.
+
 ## Running The Sweep
 
 From the repository root:
@@ -86,6 +100,16 @@ dielectric_tensor_compact = True
 `use_roi=True` enables OH-local magnetic patterns and local aperture/dielectric
 optimizations. Turn it off to compute on the full slab.
 
+`magnetic_pattern_use_roi=True` generates expensive texture patterns only in a
+padded object-hole region and pastes that local pattern into a full field. This
+is most useful for labyrinth or stripe-like patterns. Set it to `False` when
+you want the full simulated field to contain the generated texture everywhere.
+
+`dielectric_tensor_use_roi=True` creates aperture support regions and computes
+magnetic/vacuum dielectric corrections only inside local aperture boxes. These
+same support regions are also used by the Jones propagation fast path. If this
+is disabled, Jones propagation has no aperture ROI boxes to use.
+
 `dielectric_tensor_compact=True` avoids allocating the full dense
 `(Nz, Ny, Nx, 2, 2)` tensor stack. The simulator stores constant per-layer
 diagonal terms plus aperture ROI patches, then evaluates those patches during
@@ -129,6 +153,21 @@ holes, where a tight support box can truncate nearby diffracted structure. It is
 separate from `propagation_padding_px`: ROI padding changes which pixels receive
 full local propagation, while propagation padding only pads the FFT calculation
 inside each crop and is cropped away afterward.
+
+Common operating modes:
+
+- **Jones-only with aperture ROI**: `propagate=False`, `use_roi=True`,
+  `dielectric_tensor_use_roi=True`, `dielectric_tensor_compact=True`.
+- **Full-field multislice**: `propagate=True`,
+  `multislice_propagation_roi=False`.
+- **Multislice with Jones/tensor ROI only**: `propagate=True`, `use_roi=True`,
+  `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=False`.
+- **ROI multislice**: `propagate=True`, `use_roi=True`,
+  `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=True`.
+- **Full-field reference/debug mode**: `use_roi=False`.
+
+For runnable comparisons and visual examples, see
+[`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb).
 
 The free-space propagator damps evanescent spatial frequencies to avoid
 unphysical exponential growth and caches repeated propagation kernels for
@@ -510,6 +549,11 @@ The final inspection section in `tutorials/simulate_hologram_sweep.py` opens
 screen-friendly Matplotlib figures and uses `interpolation="none"` for every
 `imshow` call so detector pixels and aperture cuts are shown without display
 smoothing.
+
+For a notebook that reads the HDF5 output and visualizes masks, aperture
+geometry, magnetic pattern crops, CR/CL holograms, CR-CL/CR+CL channels,
+reconstructions, and complex exit waves, see
+[`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb).
 
 ## FTH Reconstruction
 
