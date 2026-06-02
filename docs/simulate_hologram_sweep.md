@@ -142,11 +142,12 @@ transmission; they are not zeroed.
 material slices, and only when `propagate=True`. The full field is first
 advanced outside the ROI boxes by the zero-spatial-frequency plane-wave phase,
 `exp(-i k0 dz)`. The local angular-spectrum FFT is then run in each padded
-aperture ROI crop, and those locally propagated crops overwrite the
-corresponding boxes. Outside the boxes, no diffractive redistribution is
-computed. This is the strongest ROI approximation because true free-space
-propagation is nonlocal: diffracted light can move between ROI and non-ROI
-pixels.
+aperture ROI crop. The solver adds each crop's local correction,
+`local_propagated - plane_wave_baseline`, into the full field. If padded ROI
+boxes overlap, their corrections are summed rather than letting one aperture
+overwrite another. Outside all boxes, no diffractive redistribution is computed.
+This is the strongest ROI approximation because true free-space propagation is
+nonlocal: diffracted light can move between ROI and non-ROI pixels.
 
 If the exit-wave signal outside the plotted ROI rectangles is nonzero, that is
 therefore expected. The rectangles show where expensive corrections or local
@@ -181,11 +182,13 @@ Jones transmission for each layer, which is the faster historical mode.
 
 `multislice_propagation_roi=False` keeps the current full-field free-space
 propagation. If set to `True`, the free-space FFT between slices is evaluated
-only inside the aperture ROI boxes. Outside those boxes, the field is advanced
-with the zero-spatial-frequency plane-wave phase. This can be much faster for
-large grids with small apertures, but it is approximate because true free-space
-propagation is nonlocal and diffracted light can move between ROI and non-ROI
-pixels.
+only inside the aperture ROI boxes. The whole field first receives the
+zero-spatial-frequency plane-wave phase, then each local ROI propagation adds
+its correction relative to that baseline. Overlapping padded ROI boxes therefore
+sum their corrections instead of overwriting one another. This can be much
+faster for large grids with small apertures, but it is approximate because true
+free-space propagation is nonlocal and diffracted light can move between ROI and
+non-ROI pixels.
 
 `multislice_propagation_roi_padding_px` enlarges each aperture ROI box before
 that approximate ROI-only free-space step. This is useful around small reference

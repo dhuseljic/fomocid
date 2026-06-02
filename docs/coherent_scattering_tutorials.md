@@ -74,9 +74,11 @@ ROI, the solver still carries a field forward:
   treated as the spatially uniform diagonal background response, so Jones
   propagation still applies the layer transmission there.
 - `multislice_propagation_roi=True` runs the inter-slice FFT propagator only in
-  padded aperture boxes. Outside those boxes, the field is advanced by the
-  zero-spatial-frequency plane-wave phase, not by a full diffraction
-  calculation.
+  padded aperture boxes. The solver starts from the zero-spatial-frequency
+  plane-wave phase everywhere, then adds each ROI crop's local diffraction
+  correction relative to that baseline. Overlapping boxes therefore add their
+  corrections instead of overwriting one another. Pixels outside all boxes keep
+  only the plane-wave phase, not a full diffraction calculation.
 
 Use full-field multislice, `propagate=True` with
 `multislice_propagation_roi=False`, when diffraction between ROI and non-ROI

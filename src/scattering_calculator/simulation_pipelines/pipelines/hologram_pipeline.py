@@ -205,9 +205,12 @@ class HologramPipelineConfig:
         ``"cosine"``.
     multislice_propagation_roi : bool
         If ``True``, approximate the free-space step between slices by running
-        angular-spectrum propagation only inside aperture ROI boxes and applying
-        a plane-wave phase outside those boxes. If ``False``, use full-field
-        free-space propagation. Default ``False``.
+        angular-spectrum propagation only inside aperture ROI boxes. The full
+        field starts from the plane-wave phase advance; each ROI crop then adds
+        its local diffraction correction relative to that baseline, so
+        overlapping ROI boxes add corrections instead of overwriting one
+        another. If ``False``, use full-field free-space propagation. Default
+        ``False``.
     multislice_propagation_roi_padding_px : int
         Extra pixels added around each aperture ROI box before approximate
         ROI-only free-space propagation. This is separate from

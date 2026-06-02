@@ -538,9 +538,12 @@ class wavefronts:
         """Approximate free-space propagation with FFTs only in aperture ROIs.
 
         Outside the ROI boxes the field is assumed locally plane-wave-like and
-        receives only the zero-spatial-frequency angular-spectrum phase. This is
-        faster than a global FFT but intentionally approximate because true
-        free-space propagation couples all pixels.
+        receives only the zero-spatial-frequency angular-spectrum phase. Each
+        ROI contributes only its deviation from that baseline, so overlapping
+        ROI boxes add their local diffraction corrections instead of later
+        boxes overwriting earlier ones. This is faster than a global FFT but
+        intentionally approximate because true free-space propagation couples
+        all pixels.
 
         Parameters
         ----------
@@ -591,7 +594,8 @@ class wavefronts:
             )
 
         k0 = 2 * np.pi / wavelength
-        E_out = np.asarray(E_in * np.exp(-1j * k0 * dz), dtype=complex)
+        baseline = np.asarray(E_in * np.exp(-1j * k0 * dz), dtype=complex)
+        E_out = baseline.copy()
 
         roi_regions = self._pad_regions(
             aperture_support_regions,
@@ -600,7 +604,7 @@ class wavefronts:
         )
         for region in roi_regions:
             region_key = (*region, slice(None))
-            E_out[region_key] = self.propagate_free_space_jones(
+            local_out = self.propagate_free_space_jones(
                 E_in[region_key],
                 wavelength,
                 dz,
@@ -611,6 +615,7 @@ class wavefronts:
                 absorber_strength=absorber_strength,
                 absorber_profile=absorber_profile,
             )
+            E_out[region_key] += local_out - baseline[region_key]
 
         return E_out
 
