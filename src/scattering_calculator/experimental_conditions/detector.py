@@ -1,5 +1,3 @@
-"""Detector geometry, beamstop, and detector-readout models."""
-
 from __future__ import annotations
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -31,24 +29,6 @@ class detector_layout:
         distance_sample_detector: float = 0.15,
         detector_center: tuple[float, float] = (1024, 1024),
     ) -> None:
-        """Initialize a detector_layout instance.
-
-        Parameters
-        ----------
-        pixel_size : float
-            Input value for ``pixel_size``.
-        detector_shape : tuple[int, int]
-            Input value for ``detector_shape``.
-        distance_sample_detector : float
-            Input value for ``distance_sample_detector``.
-        detector_center : tuple[float, float]
-            Input value for ``detector_center``.
-
-        Returns
-        -------
-        None
-            The function completes in place.
-        """
         self.pixel_size = pixel_size
         self.detector_shape = detector_shape
         self.distance_sample_detector = distance_sample_detector
@@ -63,16 +43,6 @@ class detector_layout:
         Sets ``self.detx`` and ``self.dety`` as sparse 2-D arrays of physical
         coordinates in metres, centred on the optical axis. They broadcast to
         the full detector shape when q-space coordinates are calculated.
-
-        Parameters
-        ----------
-        None
-            This function takes no explicit input parameters.
-
-        Returns
-        -------
-        None
-            The function completes in place.
         """
         x = (
             np.arange(self.detector_shape[1]) - self.detector_center[1]
@@ -90,16 +60,6 @@ class detector_layout:
 
         Sets ``self.detqx`` and ``self.detqy`` as 2-D arrays of physical
         coordinates in metres, centred on the optical axis.
-
-        Parameters
-        ----------
-        beam_parameters : Any
-            Input value for ``beam_parameters``.
-
-        Returns
-        -------
-        None
-            The function completes in place.
         """
 
         r = np.sqrt(self.detx**2 + self.dety**2)
@@ -122,11 +82,6 @@ class detector_layout:
         -------
         extent : tuple of float
             Physical size of the detector plane in metres as (min_x, max_x, min_y, max_y).
-
-        Parameters
-        ----------
-        None
-            This function takes no explicit input parameters.
         """
         extent_det_real = np.array(
             [
@@ -145,27 +100,11 @@ class detector_layout:
         ----------
         beamstop_mask : ndarray
             Boolean or float mask with the same shape as the detector.
-
-        Returns
-        -------
-        None
-            The function completes in place.
         """
         self.beamstop = beamstop_mask
 
     def visualize_beamstop(self) -> None:
-        """Visualize the beamstop mask in both pixel and real-space coordinates.
-
-        Parameters
-        ----------
-        None
-            This function takes no explicit input parameters.
-
-        Returns
-        -------
-        None
-            The function completes in place.
-        """
+        """Visualize the beamstop mask in both pixel and real-space coordinates."""
         extent_det_real = self.get_detector_extent_real_space()
 
         fig, ax = plt.subplots(1, 2, figsize=(8, 4))
@@ -183,11 +122,6 @@ class detector_layout:
         -------
         resolution : float
             Real-space resolution in metres.
-
-        Parameters
-        ----------
-        None
-            This function takes no explicit input parameters.
         """
         q_max = np.max(self.detqx)-np.min(self.detqx)
         #np.sqrt(np.max(self.detqx**2 + self.detqy**2))
@@ -217,20 +151,6 @@ class beamstop:
         detector_config: detector_layout,
         distance_detector_beamstop: float,
     ) -> None:
-        """Initialize a beamstop instance.
-
-        Parameters
-        ----------
-        detector_config : detector_layout
-            Input value for ``detector_config``.
-        distance_detector_beamstop : float
-            Input value for ``distance_detector_beamstop``.
-
-        Returns
-        -------
-        None
-            The function completes in place.
-        """
         self.detector_shape = detector_config.detector_shape
         self.detector_pixel_size = detector_config.pixel_size
         self.distance_sample_detector = detector_config.distance_sample_detector
@@ -262,18 +182,7 @@ class beamstop:
         return effective_radius
 
     def _project_length_to_detector_pixels(self, length: float | None) -> float | None:
-        """Project a beamstop-plane length in metres to detector pixels.
-
-        Parameters
-        ----------
-        length : float | None
-            Input value for ``length``.
-
-        Returns
-        -------
-        result : float | None
-            Return value produced by the function.
-        """
+        """Project a beamstop-plane length in metres to detector pixels."""
         if length is None:
             return None
         return self.calc_effective_beamstop_radius(length) / self.detector_pixel_size
@@ -335,11 +244,6 @@ class beamstop:
             Deprecated alias for ``angle``.
         ellipticity_range : tuple of float or None, optional
             Deprecated alias for ``ellipticity``.
-
-        Returns
-        -------
-        None
-            The function completes in place.
         """
         if radius is None:
             self.create_empty_beamstop()
@@ -432,18 +336,7 @@ class beamstop:
         self.beamstop = mask
 
     def create_empty_beamstop(self) -> None:
-        """Create an empty beamstop mask (all zeros).
-
-        Parameters
-        ----------
-        None
-            This function takes no explicit input parameters.
-
-        Returns
-        -------
-        None
-            The function completes in place.
-        """
+        """Create an empty beamstop mask (all zeros)."""
         self.beamstop = np.zeros(self.detector_shape)
 
     def return_beamstop(self) -> NDArray[np.float64]:
@@ -453,11 +346,6 @@ class beamstop:
         -------
         beamstop : ndarray
             2-D mask array of shape ``self.detector_shape``.
-
-        Parameters
-        ----------
-        None
-            This function takes no explicit input parameters.
         """
         return self.beamstop
 
@@ -498,34 +386,6 @@ class detector_hologram:
         detector_params=None,
         coherence_length=None,
     ):
-        """Initialize a detector_hologram instance.
-
-        Parameters
-        ----------
-        detector_layout : Any
-            Input value for ``detector_layout``.
-        hologram : Any
-            Input value for ``hologram``.
-        beam_parameters : Any
-            Input value for ``beam_parameters``.
-        real_space_pixel_size : Any
-            Input value for ``real_space_pixel_size``.
-        beamstop : Any
-            Input value for ``beamstop``.
-        artifacts_config : Any
-            Input value for ``artifacts_config``.
-        measurement_config : Any
-            Input value for ``measurement_config``.
-        detector_params : Any
-            Input value for ``detector_params``.
-        coherence_length : Any
-            Input value for ``coherence_length``.
-
-        Returns
-        -------
-        None
-            The function completes in place.
-        """
         self.detector_layout = detector_layout
         self.hologram = hologram
         self.beam_parameters = beam_parameters
@@ -540,24 +400,6 @@ class detector_hologram:
         self.sigma_x = 0.0
 
     def _apply_config(self, defaults, config, allowed_keys, aliases=None):
-        """Handle the internal apply config operation.
-
-        Parameters
-        ----------
-        defaults : Any
-            Input value for ``defaults``.
-        config : Any
-            Input value for ``config``.
-        allowed_keys : Any
-            Input value for ``allowed_keys``.
-        aliases : Any
-            Input value for ``aliases``.
-
-        Returns
-        -------
-        result : Any
-            Return value produced by the function.
-        """
         aliases = aliases or {}
         merged = dict(defaults)
         if config is not None:
@@ -574,18 +416,6 @@ class detector_hologram:
             setattr(self, attr, value)
 
     def _apply_measurement_config(self, measurement_config):
-        """Handle the internal apply measurement config operation.
-
-        Parameters
-        ----------
-        measurement_config : Any
-            Input value for ``measurement_config``.
-
-        Returns
-        -------
-        result : Any
-            Return value produced by the function.
-        """
         self._apply_config(
             self.DEFAULT_MEASUREMENT_CONFIG,
             measurement_config,
@@ -597,18 +427,6 @@ class detector_hologram:
         )
 
     def _apply_artifacts_config(self, artifacts_config):
-        """Handle the internal apply artifacts config operation.
-
-        Parameters
-        ----------
-        artifacts_config : Any
-            Input value for ``artifacts_config``.
-
-        Returns
-        -------
-        result : Any
-            Return value produced by the function.
-        """
         self._apply_config(
             {
                 **self.DEFAULT_ARTIFACTS_CONFIG,
@@ -632,18 +450,6 @@ class detector_hologram:
         )
 
     def _apply_detector_params(self, detector_params):
-        """Handle the internal apply detector params operation.
-
-        Parameters
-        ----------
-        detector_params : Any
-            Input value for ``detector_params``.
-
-        Returns
-        -------
-        result : Any
-            Return value produced by the function.
-        """
         self._apply_config(
             self.DEFAULT_DETECTOR_PARAMS,
             detector_params,
@@ -661,18 +467,6 @@ class detector_hologram:
         )
 
     def _coherence_length_yx(self):
-        """Handle the internal coherence length yx operation.
-
-        Parameters
-        ----------
-        None
-            This function takes no explicit input parameters.
-
-        Returns
-        -------
-        result : Any
-            Return value produced by the function.
-        """
         coherence_length = self.coherence_length
         if coherence_length is None:
             coherence_length = getattr(self.beam_parameters, "coherence_length", None)
@@ -688,18 +482,6 @@ class detector_hologram:
         return float(coherence_length[0]), float(coherence_length[1])
 
     def _set_coherence_sigmas(self, hologram_shape):
-        """Handle the internal set coherence sigmas operation.
-
-        Parameters
-        ----------
-        hologram_shape : Any
-            Input value for ``hologram_shape``.
-
-        Returns
-        -------
-        result : Any
-            Return value produced by the function.
-        """
         coherence_length = self._coherence_length_yx()
         if coherence_length is None:
             self.sigma_y = 0.0
@@ -726,13 +508,9 @@ class detector_hologram:
             hologram_shape[0] * real_space_resolution / coherence_length_x
         )
 
-    def add_noise(
-        self,
-        apply_beamstop_mask: bool = True,
-        apply_detector_threshold: bool = True,
-        store_no_beamstop: bool = False,
-    ):
-        """Given the hologram, the function simulates the holograms introducing drift,
+    def add_noise(self):
+        """
+        Given the hologram, the function simulates the holograms introducing drift,
          coherence effects and Poisson noise
         INPUT:
                 readout_noise_average, readout_noise_sigma: readout noise of the camera
@@ -743,20 +521,6 @@ class detector_hologram:
 
         ----------
         Author: RB_2020
-
-        Parameters
-        ----------
-        apply_beamstop_mask : bool
-            Input value for ``apply_beamstop_mask``.
-        apply_detector_threshold : bool
-            Input value for ``apply_detector_threshold``.
-        store_no_beamstop : bool
-            Input value for ``store_no_beamstop``.
-
-        Returns
-        -------
-        result : Any
-            Return value produced by the function.
         """
 
         # 0. we start with holo, the FFT of the exit wave, hence the distribution of photons (or counts) at a certain point in the detector for a single image
@@ -841,75 +605,30 @@ class detector_hologram:
             )
 
         # 7. convert photons back to detector counts
-        detected_counts = photon_counts.astype(float) * self.counts_per_photon
+        holo = photon_counts.astype(float) * self.counts_per_photon
 
-        # 9. generate gaussian readout noise from detector once, then reuse it
-        # for any requested output variants from this same detector realization.
-        readout_noise = 0.0
+        # 8. apply beamstop mask to shadow
+        holo *= 1.0 - self.beamstop.beamstop
+
+        # 9. add gaussian readout noise from detector
         if self.readout_noise_average > 0 or self.readout_noise_sigma > 0:
-            readout_noise = rng.normal(
+            holo += np.random.normal(
                 self.readout_noise_average * self.number_frames,
                 self.readout_noise_sigma * np.sqrt(self.number_frames),
-                detected_counts.shape,
+                holo.shape,
             )
 
-        def _finalize_variant(
-            source_counts: np.ndarray,
-            *,
-            use_beamstop: bool,
-            use_threshold: bool,
-        ) -> np.ndarray:
-            """Handle the internal finalize variant operation.
+        # 10. round to integers and cap image at thresholding camera value
+        holo = np.round(holo, 0)
+        holo = np.minimum(holo, self.number_frames * self.detector_threshold)
 
-            Parameters
-            ----------
-            source_counts : np.ndarray
-                Input value for ``source_counts``.
-            use_beamstop : bool
-                Input value for ``use_beamstop``.
-            use_threshold : bool
-                Input value for ``use_threshold``.
+        # 11. divide by frame number: it is an average
+        holo /= self.number_frames
 
-            Returns
-            -------
-            result : np.ndarray
-                Return value produced by the function.
-            """
-            holo_variant = np.array(source_counts, dtype=float, copy=True)
+        # 12. just making sure the final product is positive
+        holo[holo < 0] = 0
 
-            # 8. apply beamstop mask to shadow
-            if use_beamstop:
-                holo_variant *= 1.0 - self.beamstop.beamstop
-
-            # 9. add gaussian readout noise from detector
-            holo_variant += readout_noise
-
-            # 10. round to integers and optionally cap image at thresholding camera value
-            holo_variant = np.round(holo_variant, 0)
-            if use_threshold:
-                holo_variant = np.minimum(
-                    holo_variant,
-                    self.number_frames * self.detector_threshold,
-                )
-
-            # 11. divide by frame number: it is an average
-            holo_variant /= self.number_frames
-
-            # 12. just making sure the final product is positive
-            holo_variant[holo_variant < 0] = 0
-            return holo_variant
-
-        self.hologram_exp = _finalize_variant(
-            detected_counts,
-            use_beamstop=apply_beamstop_mask,
-            use_threshold=apply_detector_threshold,
-        )
-        if store_no_beamstop:
-            self.hologram_exp_no_beamstop = _finalize_variant(
-                detected_counts,
-                use_beamstop=False,
-                use_threshold=False,
-            )
+        self.hologram_exp = holo
 
     def gnomonic_projection(self) -> NDArray[np.float64]:
         """Apply gnomonic projection to the hologram to correct for curvature of the Ewald sphere.
@@ -917,11 +636,6 @@ class detector_hologram:
         -------
             hologram_gnomonic : ndarray of shape (Ny, Nx)
             Gnomonic-projected hologram.
-
-        Parameters
-        ----------
-        None
-            This function takes no explicit input parameters.
         """
 
         # Full reciprocal-space span of the shifted FFT grid. One FFT pixel is 1/self.real_space_pixel_size
@@ -943,7 +657,8 @@ class detector_hologram:
         )
 
     def make_tile_class_map(self, shape, tile_size=256, n_classes=32, seed=None):
-        """Assign each detector tile to one of n_classes response classes.
+        """
+        Assign each detector tile to one of n_classes response classes.
 
         shape : (Ny, Nx)
         tile_size : int
@@ -952,17 +667,6 @@ class detector_hologram:
         Returns
         -------
         class_map : (Ny, Nx) int
-
-        Parameters
-        ----------
-        shape : Any
-            Input value for ``shape``.
-        tile_size : Any
-            Input value for ``tile_size``.
-        n_classes : Any
-            Input value for ``n_classes``.
-        seed : Any
-            Input value for ``seed``.
         """
         rng = np.random.default_rng(seed)
 
@@ -992,25 +696,8 @@ class detector_hologram:
         irregularity=0.20,
         seed=None,
     ):
-        """Create one irregular single-photon response kernel.
-
-        Parameters
-        ----------
-        size : Any
-            Input value for ``size``.
-        sigma_range : Any
-            Input value for ``sigma_range``.
-        ellipticity_range : Any
-            Input value for ``ellipticity_range``.
-        irregularity : Any
-            Input value for ``irregularity``.
-        seed : Any
-            Input value for ``seed``.
-
-        Returns
-        -------
-        result : Any
-            Return value produced by the function.
+        """
+        Create one irregular single-photon response kernel.
         """
         rng = np.random.default_rng(seed)
 
@@ -1052,28 +739,12 @@ class detector_hologram:
         irregularity=0.20,
         seed=None,
     ):
-        """Kernel bank with detector classes and event variants.
+        """
+        Kernel bank with detector classes and event variants.
 
         Returns
         -------
         kernels : (n_classes, n_variants, size, size)
-
-        Parameters
-        ----------
-        n_classes : Any
-            Input value for ``n_classes``.
-        n_variants : Any
-            Input value for ``n_variants``.
-        size : Any
-            Input value for ``size``.
-        sigma_range : Any
-            Input value for ``sigma_range``.
-        ellipticity_range : Any
-            Input value for ``ellipticity_range``.
-        irregularity : Any
-            Input value for ``irregularity``.
-        seed : Any
-            Input value for ``seed``.
         """
         rng = np.random.default_rng(seed)
 
@@ -1092,22 +763,9 @@ class detector_hologram:
         return kernels
 
     def split_counts_into_variants(self, counts, n_variants, rng):
-        """Split an integer photon-count image into n_variants images,
+        """
+        Split an integer photon-count image into n_variants images,
         preserving the total photon number per pixel.
-
-        Parameters
-        ----------
-        counts : Any
-            Input value for ``counts``.
-        n_variants : Any
-            Input value for ``n_variants``.
-        rng : Any
-            Input value for ``rng``.
-
-        Returns
-        -------
-        result : Any
-            Return value produced by the function.
         """
         counts = counts.astype(np.int64, copy=True)
 
