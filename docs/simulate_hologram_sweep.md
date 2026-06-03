@@ -228,10 +228,11 @@ Common operating modes:
 For runnable comparisons and visual examples, see
 [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb).
 That tutorial also includes a didactic vertical x-z wavefront diagnostic through
-the aperture centers. It overlays the aperture wall, SiN membrane borders, and
-magnetic-material borders while showing amplitude and phase through the stack.
-The diagnostic is reconstructed in the notebook for teaching; the sweep HDF5
-files still store the usual 2-D exit waves and holograms.
+the aperture centers for each propagation mode. It overlays the aperture wall,
+SiN membrane borders, magnetic-material borders, and the 1-D ROI propagation
+intervals used by ROI multislice modes while showing amplitude and phase through
+the stack. The diagnostic is reconstructed in the notebook for teaching; the
+sweep HDF5 files still store the usual 2-D exit waves and holograms.
 
 The free-space propagator damps evanescent spatial frequencies to avoid
 unphysical exponential growth and caches repeated propagation kernels for
