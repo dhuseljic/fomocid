@@ -221,7 +221,7 @@ class HologramPipelineConfig:
         This is safer when reference-hole ROIs overlap the object-hole ROI, but
         can be slower because the merged crop is larger. If ``False``, keep
         padded ROI boxes separate and add each local correction independently.
-        Default ``False``.
+        Default ``True``.
     oversampling : int
         Oversampling factor relative to the Nyquist limit from the detector.
         ``real_space_pixel_size = detector_resolution / oversampling``.
@@ -337,7 +337,7 @@ class HologramPipelineConfig:
     propagation_absorber_profile: str = "cosine"
     multislice_propagation_roi: bool = False
     multislice_propagation_roi_padding_px: int = 0
-    multislice_propagation_roi_merge_overlaps: bool = False
+    multislice_propagation_roi_merge_overlaps: bool = True
 
     # Simulation grid
     oversampling: int = 2

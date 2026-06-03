@@ -39,7 +39,7 @@ class wavefronts:
         propagation_absorber_profile="cosine",
         multislice_propagation_roi=False,
         multislice_propagation_roi_padding_px=0,
-        multislice_propagation_roi_merge_overlaps=False,
+        multislice_propagation_roi_merge_overlaps=True,
     ):
         """Initialize a wavefronts instance.
 
@@ -138,7 +138,7 @@ class wavefronts:
         propagation_absorber_profile="cosine",
         multislice_propagation_roi=False,
         multislice_propagation_roi_padding_px=0,
-        multislice_propagation_roi_merge_overlaps=False,
+        multislice_propagation_roi_merge_overlaps=True,
     ):
         """
         Multislice propagation through a dielectric tensor stack.
@@ -540,7 +540,7 @@ class wavefronts:
         pixel_size,
         aperture_support_regions,
         roi_padding_px=0,
-        merge_overlaps=False,
+        merge_overlaps=True,
         padding_px=0,
         padding_mode="edge",
         absorber_width_px=0,

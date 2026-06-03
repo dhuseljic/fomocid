@@ -255,8 +255,8 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         self.assertEqual(calls, [(6, 6, 2)])
         self.assertTrue(np.allclose(out, expected))
 
-    def test_roi_free_space_propagation_keeps_overlapping_roi_crops_separate_by_default(self) -> None:
-        """Test that overlapping roi crops stay separate unless merging is enabled.
+    def test_roi_free_space_propagation_can_keep_overlapping_roi_crops_separate(self) -> None:
+        """Test that overlapping roi crops can stay separate when requested.
 
         Parameters
         ----------
@@ -304,6 +304,7 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
             dz=dz,
             pixel_size=1e-9,
             aperture_support_regions=regions,
+            merge_overlaps=False,
         )
 
         expected = baseline.copy()

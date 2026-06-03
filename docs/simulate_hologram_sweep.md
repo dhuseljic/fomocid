@@ -144,11 +144,12 @@ advanced outside the ROI boxes by the zero-spatial-frequency plane-wave phase,
 `exp(-i k0 dz)`. The local angular-spectrum FFT is then run in each padded
 aperture ROI crop. The solver adds each crop's local correction,
 `local_propagated - plane_wave_baseline`, into the full field. By default,
-padded ROI boxes remain separate and their local corrections are accumulated.
-Set `multislice_propagation_roi_merge_overlaps=True` to merge overlapping padded
-boxes before propagation, so nearby apertures are propagated as one local crop
-instead of letting separate crops compete in shared pixels. This can be safer
-for close OH/RH layouts, but it can be slower because the merged crop is larger.
+`multislice_propagation_roi_merge_overlaps=True`, so overlapping padded boxes
+are merged before propagation and nearby apertures are propagated as one local
+crop instead of letting separate crops compete in shared pixels. This can be
+safer for close OH/RH layouts, but it can be slower because the merged crop is
+larger. Set it to `False` only when you explicitly want the faster separate-crop
+approximation.
 Outside all boxes, no diffractive redistribution is computed. This is the
 strongest ROI approximation because true free-space propagation is nonlocal:
 diffracted light can move between ROI and non-ROI pixels.
@@ -170,7 +171,7 @@ the script:
 propagate = True
 multislice_propagation_roi = False
 multislice_propagation_roi_padding_px = 64
-multislice_propagation_roi_merge_overlaps = False
+multislice_propagation_roi_merge_overlaps = True
 propagation_padding_px = 128
 propagation_padding_mode = "edge"
 propagation_absorber_width_px = 64
@@ -201,10 +202,11 @@ separate from `propagation_padding_px`: ROI padding changes which pixels receive
 full local propagation, while propagation padding only pads the FFT calculation
 inside each crop and is cropped away afterward.
 
-`multislice_propagation_roi_merge_overlaps=True` merges overlapping padded ROI
-boxes before local propagation. Use it when reference-hole ROI boxes overlap the
-object-hole ROI and you want them treated as one local diffraction crop. Leave
-it `False` for the faster separate-crop approximation.
+`multislice_propagation_roi_merge_overlaps=True` is the default. It merges
+overlapping padded ROI boxes before local propagation. Use it when
+reference-hole ROI boxes overlap the object-hole ROI and you want them treated
+as one local diffraction crop. Set it to `False` only when you explicitly want
+the faster separate-crop approximation.
 
 Common operating modes:
 
