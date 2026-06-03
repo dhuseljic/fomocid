@@ -216,14 +216,22 @@ Common operating modes:
   `multislice_propagation_roi=False`.
 - **Multislice with Jones/tensor ROI only**: `propagate=True`, `use_roi=True`,
   `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=False`.
-- **ROI multislice**: `propagate=True`, `use_roi=True`,
-  `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=True`.
-- **ROI multislice with merged overlaps**: same as ROI multislice, plus
+- **ROI multislice, default merged crops**: `propagate=True`, `use_roi=True`,
+  `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=True`,
   `multislice_propagation_roi_merge_overlaps=True`.
+- **ROI multislice, separate-crop opt-out**: same as ROI multislice, but set
+  `multislice_propagation_roi_merge_overlaps=False` after checking that padded
+  aperture boxes do not overlap or after validating the approximation against a
+  full-field reference.
 - **Full-field reference/debug mode**: `use_roi=False`.
 
 For runnable comparisons and visual examples, see
 [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb).
+That tutorial also includes a didactic vertical x-z wavefront diagnostic through
+the aperture centers. It overlays the aperture wall, SiN membrane borders, and
+magnetic-material borders while showing amplitude and phase through the stack.
+The diagnostic is reconstructed in the notebook for teaching; the sweep HDF5
+files still store the usual 2-D exit waves and holograms.
 
 The free-space propagator damps evanescent spatial frequencies to avoid
 unphysical exponential growth and caches repeated propagation kernels for
