@@ -246,12 +246,71 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
             dz=dz,
             pixel_size=1e-9,
             aperture_support_regions=regions,
+            merge_overlaps=True,
         )
 
         expected = baseline.copy()
         expected[slice(1, 7), slice(1, 7), :] += correction
 
         self.assertEqual(calls, [(6, 6, 2)])
+        self.assertTrue(np.allclose(out, expected))
+
+    def test_roi_free_space_propagation_keeps_overlapping_roi_crops_separate_by_default(self) -> None:
+        """Test that overlapping roi crops stay separate unless merging is enabled.
+
+        Parameters
+        ----------
+        None
+            This function takes no explicit input parameters.
+
+        Returns
+        -------
+        None
+            The function completes in place.
+        """
+        field = np.ones((8, 8, 2), dtype=complex)
+        wavelength = 1e-9
+        dz = 2e-9
+        baseline = field * np.exp(-1j * 2 * np.pi / wavelength * dz)
+        corrections = [2.0 + 0.5j, -0.25 + 1.0j]
+        calls = {"count": 0}
+
+        def fake_local_propagator(
+            E_crop,
+            wavelength,
+            dz,
+            pixel_size,
+            padding_px=0,
+            padding_mode="edge",
+            absorber_width_px=0,
+            absorber_strength=0.0,
+            absorber_profile="cosine",
+        ):
+            correction = corrections[calls["count"]]
+            calls["count"] += 1
+            local_baseline = E_crop * np.exp(-1j * 2 * np.pi / wavelength * dz)
+            return local_baseline + correction
+
+        wf = object.__new__(wavefronts)
+        wf.propagate_free_space_jones = fake_local_propagator
+        regions = (
+            (slice(1, 5), slice(1, 5)),
+            (slice(3, 7), slice(3, 7)),
+        )
+
+        out = wf.propagate_free_space_jones_roi(
+            field,
+            wavelength=wavelength,
+            dz=dz,
+            pixel_size=1e-9,
+            aperture_support_regions=regions,
+        )
+
+        expected = baseline.copy()
+        expected[regions[0][0], regions[0][1], :] += corrections[0]
+        expected[regions[1][0], regions[1][1], :] += corrections[1]
+
+        self.assertEqual(calls["count"], 2)
         self.assertTrue(np.allclose(out, expected))
 
     def test_roi_free_space_propagation_adds_disjoint_roi_corrections(self) -> None:

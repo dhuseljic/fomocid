@@ -59,6 +59,10 @@ The practical mode choices are:
   `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=True`.
   This is fastest for large sweeps, but the free-space step is approximate
   because true propagation is nonlocal.
+- **ROI multislice with merged overlaps**: add
+  `multislice_propagation_roi_merge_overlaps=True` when padded aperture ROI
+  boxes overlap and you want nearby apertures propagated in one local crop. This
+  can be safer for close OH/RH layouts, but the merged crop can be slower.
 - **Full-field reference/debug mode**: `use_roi=False`. Use this for small
   arrays or reference comparisons.
 
@@ -76,10 +80,12 @@ ROI, the solver still carries a field forward:
 - `multislice_propagation_roi=True` runs the inter-slice FFT propagator only in
   padded aperture boxes. The solver starts from the zero-spatial-frequency
   plane-wave phase everywhere, then adds each ROI crop's local diffraction
-  correction relative to that baseline. Overlapping padded boxes are merged
-  before propagation, so nearby apertures are treated as one local diffraction
-  problem instead of competing in shared pixels. Pixels outside all boxes keep
-  only the plane-wave phase, not a full diffraction calculation.
+  correction relative to that baseline. By default, padded boxes remain separate
+  and their corrections are accumulated. With
+  `multislice_propagation_roi_merge_overlaps=True`, overlapping padded boxes are
+  merged before propagation, so nearby apertures are treated as one local
+  diffraction problem instead of competing in shared pixels. Pixels outside all
+  boxes keep only the plane-wave phase, not a full diffraction calculation.
 
 Use full-field multislice, `propagate=True` with
 `multislice_propagation_roi=False`, when diffraction between ROI and non-ROI

@@ -1645,6 +1645,11 @@ class SamplePropagatorConfig(_ConfigMixin):
                     "multislice_propagation_roi_padding_px", 0
                 )
             ),
+            multislice_propagation_roi_merge_overlaps=bool(
+                self.propagator_config.get(
+                    "multislice_propagation_roi_merge_overlaps", False
+                )
+            ),
         )
         return wavefront
 

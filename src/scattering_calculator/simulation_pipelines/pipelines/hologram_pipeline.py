@@ -208,15 +208,20 @@ class HologramPipelineConfig:
         angular-spectrum propagation only inside aperture ROI boxes. The full
         field starts from the plane-wave phase advance; each ROI crop then adds
         its local diffraction correction relative to that baseline, so
-        disjoint ROI boxes add corrections without overwriting one another.
-        Overlapping padded boxes are merged first and propagated as one larger
-        local crop. If ``False``, use full-field free-space propagation.
-        Default ``False``.
+        ROI boxes add corrections without overwriting one another. If
+        ``False``, use full-field free-space propagation. Default ``False``.
     multislice_propagation_roi_padding_px : int
         Extra pixels added around each aperture ROI box before approximate
         ROI-only free-space propagation. This is separate from
         ``propagation_padding_px``, which pads FFT boundaries inside each ROI
         crop but does not enlarge the returned propagated area. Default ``0``.
+    multislice_propagation_roi_merge_overlaps : bool
+        If ``True``, merge overlapping padded ROI boxes before local
+        propagation so nearby apertures are propagated as one larger local crop.
+        This is safer when reference-hole ROIs overlap the object-hole ROI, but
+        can be slower because the merged crop is larger. If ``False``, keep
+        padded ROI boxes separate and add each local correction independently.
+        Default ``False``.
     oversampling : int
         Oversampling factor relative to the Nyquist limit from the detector.
         ``real_space_pixel_size = detector_resolution / oversampling``.
@@ -332,6 +337,7 @@ class HologramPipelineConfig:
     propagation_absorber_profile: str = "cosine"
     multislice_propagation_roi: bool = False
     multislice_propagation_roi_padding_px: int = 0
+    multislice_propagation_roi_merge_overlaps: bool = False
 
     # Simulation grid
     oversampling: int = 2
@@ -1273,6 +1279,9 @@ class HologramPipeline:
                     "multislice_propagation_roi_padding_px": (
                         cfg.multislice_propagation_roi_padding_px
                     ),
+                    "multislice_propagation_roi_merge_overlaps": (
+                        cfg.multislice_propagation_roi_merge_overlaps
+                    ),
                 },
             )
             propagator_config.setup()
@@ -1314,6 +1323,9 @@ class HologramPipeline:
         )
         metadata["propagation/multislice_roi_padding_px"] = int(
             cfg.multislice_propagation_roi_padding_px
+        )
+        metadata["propagation/multislice_roi_merge_overlaps"] = bool(
+            cfg.multislice_propagation_roi_merge_overlaps
         )
         metadata["detector/save_detected_no_beamstop"] = bool(
             cfg.save_detected_hologram_without_beamstop
@@ -1609,6 +1621,10 @@ class HologramPipeline:
         grp.create_dataset(
             "multislice_propagation_roi_padding_px",
             data=int(cfg.multislice_propagation_roi_padding_px),
+        )
+        grp.create_dataset(
+            "multislice_propagation_roi_merge_overlaps",
+            data=bool(cfg.multislice_propagation_roi_merge_overlaps),
         )
         grp.create_dataset("aperture_method", data=np.bytes_(str(cfg.aperture_method)))
         grp.create_dataset(

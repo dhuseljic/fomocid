@@ -39,6 +39,7 @@ class wavefronts:
         propagation_absorber_profile="cosine",
         multislice_propagation_roi=False,
         multislice_propagation_roi_padding_px=0,
+        multislice_propagation_roi_merge_overlaps=False,
     ):
         """Initialize a wavefronts instance.
 
@@ -72,6 +73,8 @@ class wavefronts:
             Input value for ``multislice_propagation_roi``.
         multislice_propagation_roi_padding_px : Any
             Input value for ``multislice_propagation_roi_padding_px``.
+        multislice_propagation_roi_merge_overlaps : Any
+            Input value for ``multislice_propagation_roi_merge_overlaps``.
 
         Returns
         -------
@@ -89,6 +92,9 @@ class wavefronts:
         self.multislice_propagation_roi_padding_px = max(
             0, int(multislice_propagation_roi_padding_px)
         )
+        self.multislice_propagation_roi_merge_overlaps = bool(
+            multislice_propagation_roi_merge_overlaps
+        )
         self.exit_wave = self.propagate_jones_multislice(
             E_in=self.E_in,
             eps_stack=eps_stack,
@@ -104,6 +110,9 @@ class wavefronts:
             multislice_propagation_roi=self.multislice_propagation_roi,
             multislice_propagation_roi_padding_px=(
                 self.multislice_propagation_roi_padding_px
+            ),
+            multislice_propagation_roi_merge_overlaps=(
+                self.multislice_propagation_roi_merge_overlaps
             ),
         )
         self.detector_wave = image_transformator.Fraunhofer_propagation_jones(self.exit_wave)
@@ -129,6 +138,7 @@ class wavefronts:
         propagation_absorber_profile="cosine",
         multislice_propagation_roi=False,
         multislice_propagation_roi_padding_px=0,
+        multislice_propagation_roi_merge_overlaps=False,
     ):
         """
         Multislice propagation through a dielectric tensor stack.
@@ -188,6 +198,7 @@ class wavefronts:
                             pixel_size,
                             self.aperture_support_regions,
                             roi_padding_px=multislice_propagation_roi_padding_px,
+                            merge_overlaps=multislice_propagation_roi_merge_overlaps,
                             padding_px=propagation_padding_px,
                             padding_mode=propagation_padding_mode,
                             absorber_width_px=propagation_absorber_width_px,
@@ -529,6 +540,7 @@ class wavefronts:
         pixel_size,
         aperture_support_regions,
         roi_padding_px=0,
+        merge_overlaps=False,
         padding_px=0,
         padding_mode="edge",
         absorber_width_px=0,
@@ -539,12 +551,12 @@ class wavefronts:
 
         Outside the ROI boxes the field is assumed locally plane-wave-like and
         receives only the zero-spatial-frequency angular-spectrum phase.
-        Padded ROI boxes that overlap are merged before propagation, so nearby
-        apertures are treated as one local diffraction problem instead of
-        separate crops competing in shared pixels. Each merged ROI contributes
-        only its deviation from the plane-wave baseline. This is faster than a
-        global FFT but intentionally approximate because true free-space
-        propagation couples all pixels.
+        Each ROI contributes only its deviation from the plane-wave baseline.
+        If ``merge_overlaps`` is ``True``, padded ROI boxes that overlap are
+        merged before propagation, so nearby apertures are treated as one local
+        diffraction problem instead of separate crops competing in shared
+        pixels. This is faster than a global FFT but intentionally approximate
+        because true free-space propagation couples all pixels.
 
         Parameters
         ----------
@@ -560,6 +572,8 @@ class wavefronts:
             Input value for ``aperture_support_regions``.
         roi_padding_px : Any
             Input value for ``roi_padding_px``.
+        merge_overlaps : Any
+            Input value for ``merge_overlaps``.
         padding_px : Any
             Input value for ``padding_px``.
         padding_mode : Any
@@ -598,13 +612,13 @@ class wavefronts:
         baseline = np.asarray(E_in * np.exp(-1j * k0 * dz), dtype=complex)
         E_out = baseline.copy()
 
-        roi_regions = self._merge_overlapping_regions(
-            self._pad_regions(
-                aperture_support_regions,
-                E_in.shape[:2],
-                roi_padding_px,
-            )
+        roi_regions = self._pad_regions(
+            aperture_support_regions,
+            E_in.shape[:2],
+            roi_padding_px,
         )
+        if merge_overlaps:
+            roi_regions = self._merge_overlapping_regions(roi_regions)
         for region in roi_regions:
             region_key = (*region, slice(None))
             local_out = self.propagate_free_space_jones(

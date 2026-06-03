@@ -143,9 +143,12 @@ material slices, and only when `propagate=True`. The full field is first
 advanced outside the ROI boxes by the zero-spatial-frequency plane-wave phase,
 `exp(-i k0 dz)`. The local angular-spectrum FFT is then run in each padded
 aperture ROI crop. The solver adds each crop's local correction,
-`local_propagated - plane_wave_baseline`, into the full field. Padded ROI boxes
-that overlap are merged before propagation, so nearby apertures are propagated
-as one local crop instead of letting separate crops compete in shared pixels.
+`local_propagated - plane_wave_baseline`, into the full field. By default,
+padded ROI boxes remain separate and their local corrections are accumulated.
+Set `multislice_propagation_roi_merge_overlaps=True` to merge overlapping padded
+boxes before propagation, so nearby apertures are propagated as one local crop
+instead of letting separate crops compete in shared pixels. This can be safer
+for close OH/RH layouts, but it can be slower because the merged crop is larger.
 Outside all boxes, no diffractive redistribution is computed. This is the
 strongest ROI approximation because true free-space propagation is nonlocal:
 diffracted light can move between ROI and non-ROI pixels.
@@ -167,6 +170,7 @@ the script:
 propagate = True
 multislice_propagation_roi = False
 multislice_propagation_roi_padding_px = 64
+multislice_propagation_roi_merge_overlaps = False
 propagation_padding_px = 128
 propagation_padding_mode = "edge"
 propagation_absorber_width_px = 64
@@ -185,11 +189,10 @@ Jones transmission for each layer, which is the faster historical mode.
 propagation. If set to `True`, the free-space FFT between slices is evaluated
 only inside the aperture ROI boxes. The whole field first receives the
 zero-spatial-frequency plane-wave phase, then each local ROI propagation adds
-its correction relative to that baseline. Overlapping padded ROI boxes are
-merged before propagation, so nearby apertures are handled by one larger local
-FFT crop. This can be much faster for large grids with small apertures, but it
-is approximate because true free-space propagation is nonlocal and diffracted
-light can move between ROI and non-ROI pixels.
+its correction relative to that baseline. This can be much faster for large
+grids with small apertures, but it is approximate because true free-space
+propagation is nonlocal and diffracted light can move between ROI and non-ROI
+pixels.
 
 `multislice_propagation_roi_padding_px` enlarges each aperture ROI box before
 that approximate ROI-only free-space step. This is useful around small reference
@@ -197,6 +200,11 @@ holes, where a tight support box can truncate nearby diffracted structure. It is
 separate from `propagation_padding_px`: ROI padding changes which pixels receive
 full local propagation, while propagation padding only pads the FFT calculation
 inside each crop and is cropped away afterward.
+
+`multislice_propagation_roi_merge_overlaps=True` merges overlapping padded ROI
+boxes before local propagation. Use it when reference-hole ROI boxes overlap the
+object-hole ROI and you want them treated as one local diffraction crop. Leave
+it `False` for the faster separate-crop approximation.
 
 Common operating modes:
 
@@ -208,6 +216,8 @@ Common operating modes:
   `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=False`.
 - **ROI multislice**: `propagate=True`, `use_roi=True`,
   `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=True`.
+- **ROI multislice with merged overlaps**: same as ROI multislice, plus
+  `multislice_propagation_roi_merge_overlaps=True`.
 - **Full-field reference/debug mode**: `use_roi=False`.
 
 For runnable comparisons and visual examples, see
@@ -499,9 +509,10 @@ propagation parameters.
 The `_pipeline_config/` group stores fixed top-level settings such as `recipe`,
 `oversampling`, detector shape, `propagate`, `propagation_padding_px`,
 `propagation_padding_mode`, `propagation_absorber_width_px`,
-`propagation_absorber_strength`, `propagation_absorber_profile`, and
+`propagation_absorber_strength`, `propagation_absorber_profile`,
 `multislice_propagation_roi`,
-`multislice_propagation_roi_padding_px`, and
+`multislice_propagation_roi_padding_px`,
+`multislice_propagation_roi_merge_overlaps`, and
 `save_detected_hologram_without_beamstop`.
 
 ## Reading The HDF5 File
