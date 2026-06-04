@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import h5py
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -66,6 +67,7 @@ def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path
     }
     metadata = {
         "sample/use_roi": True,
+        "sample/magnetic_pattern/use_roi": True,
         "sample/dielectric_tensor/compact": True,
         "propagator_config/propagator_method": "Jones",
         "propagator_config/propagate": False,
@@ -76,6 +78,7 @@ def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path
         pipeline._write_metadata(sample, metadata, aperture_config)
 
         assert "00000/metadata/sample/use_roi" in h5
+        assert "00000/metadata/sample/magnetic_pattern/use_roi" in h5
         assert "00000/metadata/sample/aperture/aperture_config" in h5
         assert "00000/metadata/sample/dielectric_tensor/compact" in h5
         assert "00000/metadata/propagator_config/propagator_method" in h5
@@ -86,6 +89,7 @@ def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path
         assert "00000/metadata/use_roi" not in h5
         assert "00000/metadata/aperture" not in h5
         assert "00000/metadata/dielectric_tensor" not in h5
+        assert "00000/metadata/magnetic_pattern" not in h5
         assert "00000/metadata/propagation" not in h5
         assert "00000/metadata/propagator" not in h5
 
@@ -200,3 +204,54 @@ def test_magnetic_pattern_config_rejects_conflicting_legacy_lengths() -> None:
         assert "pattern_config_length is a legacy alias" in str(error)
     else:
         raise AssertionError("Expected conflicting pattern configuration to fail")
+
+
+def test_skyrmion_sigma_is_converted_from_metres_and_softens_edges() -> None:
+    common = {
+        "pattern_type_method": "skyrmion_pattern",
+        "shape": (48, 48),
+        "real_space_pixel_size": 2e-9,
+        "pattern_config": {
+            "skyr_radius": 8e-9,
+            "screening_radius": 10e-9,
+            "number_skyr": 1,
+            "number_iter": 1,
+            "seed": 3,
+        },
+    }
+    sharp = MagneticPatternConfig(**common)
+    smooth = MagneticPatternConfig(
+        **{
+            **common,
+            "pattern_config": {
+                **common["pattern_config"],
+                "sigma": 4e-9,
+            },
+        }
+    )
+
+    sharp_pattern, _ = sharp.create_pattern()
+    smooth_pattern, _ = smooth.create_pattern()
+
+    assert set(sharp_pattern.flat) <= {-1.0, 1.0}
+    assert np.any((smooth_pattern > -1.0) & (smooth_pattern < 1.0))
+
+
+def test_disordered_skyrmion_sigma_softens_edges() -> None:
+    config = MagneticPatternConfig(
+        pattern_type_method="disordered_skyrmion_lattice_pattern",
+        shape=(64, 64),
+        real_space_pixel_size=2e-9,
+        pattern_config={
+            "stripe_width": 16e-9,
+            "sigma": 4e-9,
+            "skyrmion_density": 0.1,
+            "ellipticity": (1.0, 1.0),
+            "roughness": 0.0,
+            "seed": 4,
+        },
+    )
+
+    pattern, _ = config.create_pattern()
+
+    assert np.any((pattern > -1.0) & (pattern < 1.0))

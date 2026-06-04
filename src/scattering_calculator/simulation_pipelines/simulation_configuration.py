@@ -786,8 +786,9 @@ class MagneticPatternConfig(_ConfigMixin):
     pattern_config : dict
         Pattern parameters forwarded to the generator. Physical-length entries
         are specified in metres and converted to pixels automatically for the
-        selected pattern type. For wavy stripes this includes ``stripe_width``,
-        ``sigma``, ``waviness_amplitude``, and ``waviness_scale``.
+        selected pattern type. ``sigma`` is converted for every generator that
+        supports Gaussian domain-wall smoothing, including both skyrmion
+        generators.
     pattern_config_length : dict
         Deprecated compatibility dict for physical-length parameters in metres.
         Values are merged into ``pattern_config`` unless the same key is already
@@ -880,6 +881,7 @@ class MagneticPatternConfig(_ConfigMixin):
             "skyrmion_pattern": {
                 "skyr_radius",
                 "screening_radius",
+                "sigma",
             },
             "disordered_skyrmion_lattice_pattern": {
                 "stripe_width",

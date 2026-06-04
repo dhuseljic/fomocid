@@ -22,7 +22,7 @@ the notebooks below are the recommended teaching path.
 | Beamstop definition | [`tutorial_beamstop_definition.ipynb`](../tutorials/tutorial_beamstop_definition.ipynb) | Detector geometry, physical beamstop parameters, projected mask, wires, roughness, anti-aliasing, and line-profile checks. |
 | Holography mask definition | [`tutorial_material_holography_mask_definition.ipynb`](../tutorials/tutorial_material_holography_mask_definition.ipynb) | FTH object/reference holes, 3-D aperture masks, layer-by-layer views, vertical cuts, and support masks. |
 | Illumination function | [`tutorial_illumination_function_definition.ipynb`](../tutorials/tutorial_illumination_function_definition.ipynb) | Gaussian and plane-wave illumination, beam centre/FWHM/focus distance, Jones polarization, and RGB complex-field visualization. |
-| Magnetic pattern | [`tutorial_magnetic_pattern_definition.ipynb`](../tutorials/tutorial_magnetic_pattern_definition.ipynb) | Labyrinth, wavy-stripe, saturated patterns, histograms, and conversion from scalar `m_z` to vector magnetization. |
+| Magnetic pattern | [`tutorial_magnetic_pattern_definition.ipynb`](../tutorials/tutorial_magnetic_pattern_definition.ipynb) | Labyrinth, stripe, skyrmion, and saturated patterns; physical `sigma` smoothing; statistics; and vector magnetization mapping. |
 | Material parameters | [`tutorial_material_parameters_definition.ipynb`](../tutorials/tutorial_material_parameters_definition.ipynb) | Recipe parsing, effective layers, refractive-index channels, material stack visualization, and compact dielectric tensors. |
 | Hologram generation and artifacts | [`tutorial_hologram_generation_and_artifacts.ipynb`](../tutorials/tutorial_hologram_generation_and_artifacts.ipynb) | Ideal/detected holograms, detector artifacts, beamstop/noise effects, CR-CL/CR+CL channels, and FTH reconstruction. |
 | Pipeline usage | [`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb) | `HologramPipelineConfig`, `HologramPipelineRanges`, running sweeps, HDF5 layout, reading outputs, masks, magnetic patterns, and CR/CL exit waves. |
@@ -129,7 +129,8 @@ conversion setting; it is not duplicated under artifact settings or
 numbered sample so the stored values are always the values actually used.
 
 Sample-owned settings are grouped under `metadata/sample/`, including the
-master `use_roi` switch, aperture geometry, and dielectric-tensor settings.
+master `use_roi` switch, aperture geometry, magnetic-pattern settings, and
+dielectric-tensor settings.
 All propagation metadata is grouped under `metadata/propagator_config/`, with
 `propagator_method` first and no separate propagation group.
 

@@ -265,8 +265,12 @@ pattern_type = "binary_labyrinth_pattern"
 
 Supported options:
 
-- `binary_labyrinth_pattern`: labyrinth domains generated from the binary Gray-Scott helper, rescaled to the requested stripe width.
-- `disordered_skyrmion_lattice_pattern`: random non-overlapping irregular skyrmions; `stripe_width` is the average skyrmion diameter.
+- `binary_labyrinth_pattern`: labyrinth domains generated from the binary
+  Gray-Scott helper, rescaled to the requested stripe width.
+- `skyrmion_pattern`: randomly placed circular skyrmions configured with
+  `skyr_radius`, `screening_radius`, and a target count.
+- `disordered_skyrmion_lattice_pattern`: random non-overlapping irregular
+  skyrmions; `stripe_width` is the average skyrmion diameter.
 - `image_pattern`: magnetic domains loaded from a binary experimental reconstruction.
 - `saturated_pattern`: uniform `mz = +1` or `mz = -1`.
 - `wavy_stripe_pattern`: analytic wavy stripe domains.
@@ -291,6 +295,12 @@ pattern_type=Choice(
 
 That is 5/9 labyrinth, 3/9 skyrmions, and 1/9 saturated. Add or remove
 repeated entries to change the mixture.
+
+`sigma` controls Gaussian domain-wall smoothing and is specified in metres in
+pipeline configurations. `MagneticPatternConfig` converts it to pixels before
+calling the selected generator. This conversion and smoothing apply to both
+`skyrmion_pattern` and `disordered_skyrmion_lattice_pattern`, as well as the
+labyrinth, stripe, and image-based generators.
 
 ### Pattern Size Parameter
 
@@ -521,6 +531,7 @@ values actually used after applying sweep ranges and compatibility aliases:
     │   ├── use_roi                  # master sample/ROI switch
     │   ├── aperture/                # aperture method, thicknesses, geometry
     │   │   └── aperture_config/
+    │   ├── magnetic_pattern/        # pattern method/config and ROI information
     │   └── dielectric_tensor/       # tensor ROI/compact flags
     ├── xray/                        # energy, flux, coherence, wavelength
     ├── detector/                    # detector geometry and output switches
@@ -530,7 +541,6 @@ values actually used after applying sweep ranges and compatibility aliases:
     ├── artifacts_config/            # photon-event shape/splatting controls
     ├── beamstop/                    # effective beamstop geometry
     ├── illumination/                # beam profile, center, focus, FWHM
-    ├── magnetic_pattern/            # pattern method/config and ROI information
     ├── propagator_config/           # propagation method and effective config
     │   ├── propagator_method        # written first
     │   ├── propagate
@@ -552,6 +562,7 @@ Each physical parameter has one canonical saved path. Important examples:
 | Sample-plane pixel size | `metadata/sample/real_space_pixel_size` |
 | Master ROI switch | `metadata/sample/use_roi` |
 | Aperture geometry | `metadata/sample/aperture/aperture_config/...` |
+| Magnetic-pattern method/config | `metadata/sample/magnetic_pattern/...` |
 | Dielectric-tensor compact flag | `metadata/sample/dielectric_tensor/compact` |
 | Detector distance | `metadata/detector/sample_to_detector_distance` |
 | Readout-noise sigma | `metadata/detector_params/readout_noise_sigma` |
@@ -566,16 +577,17 @@ Each physical parameter has one canonical saved path. Important examples:
 The hierarchy follows ownership:
 
 - `sample/` owns the master ROI switch, aperture geometry, and dielectric
-  tensor settings because they describe how the sample is represented.
+  tensor settings, and magnetic pattern because they describe how the sample is
+  represented.
 - `propagator_config/` owns both `propagator_method` and every propagation
   option. There is no separate `propagation/` or `propagator/` group.
   `propagator_method` is written first so a tree inspection identifies the
   selected algorithm before its options.
 - `sample/use_roi` is the master switch. The scoped
-  `magnetic_pattern/use_roi` and `sample/dielectric_tensor/use_roi` datasets
-  record whether each individual optimization was actually active. These
-  similarly named datasets are intentional because they answer different
-  questions.
+  `sample/magnetic_pattern/use_roi` and
+  `sample/dielectric_tensor/use_roi` datasets record whether each individual
+  optimization was actually active. These similarly named datasets are
+  intentional because they answer different questions.
 
 Polarization datasets:
 
@@ -660,7 +672,7 @@ with h5py.File(path, "r") as h5:
     m = h5["00000/metadata"]
 
     energy = m["xray/energy_eV"][()]
-    pattern_type = m["magnetic_pattern/pattern_type_method"][()].decode()
+    pattern_type = m["sample/magnetic_pattern/pattern_type_method"][()].decode()
     detector_distance = m["detector/sample_to_detector_distance"][()]
     illumination_center = m["illumination/center_m"][()]
     aperture_roughness = m["sample/aperture/aperture_config/apertures_roughness"][()]
@@ -695,7 +707,7 @@ with h5py.File(path, "r") as h5:
     meta = read_h5_group(h5["00000/metadata"])
 
 print(meta["xray/energy_eV"])
-print(meta["magnetic_pattern/pattern_type_method"])
+print(meta["sample/magnetic_pattern/pattern_type_method"])
 ```
 
 ## Inspecting The Output
@@ -774,7 +786,7 @@ detector_pixel_shape = (1300, 1300)
   converts them to pixels using the simulation real-space pixel size.
 - `magnetic_pattern_oh` may be saved as an OH ROI rather than the full simulated
   slab when ROI mode is enabled. Its ROI offsets are saved under
-  `metadata/magnetic_pattern/saved_roi_*`.
+  `metadata/sample/magnetic_pattern/saved_roi_*`.
 - Callable range functions receive the already-sampled parameter dictionary, so
   they can build dependent ranges such as detector distance from energy and
   texture size.

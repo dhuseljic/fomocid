@@ -456,9 +456,10 @@ class HologramPipeline:
         │   └── metadata/           ← all scalar parameters as datasets
         │       ├── xray/
         │       ├── detector/
-        │       ├── magnetic_pattern/
-        │       └── aperture/
-        │           └── aperture_config/
+        │       └── sample/
+        │           ├── magnetic_pattern/
+        │           └── aperture/
+        │               └── aperture_config/
         │               ├── apertures_type    ← aperture labels, e.g. OH/RH
         │               ├── apertures_radius  ← aperture radii in metres
         │               ├── apertures_center  ← aperture centres in metres, (y, x)
@@ -1170,17 +1171,27 @@ class HologramPipeline:
         )
         sample_config.assign_magnetic_pattern(magnetization)
         magnetic_metadata = magnetic_pattern_config.get_metadata(
-            prefix="magnetic_pattern/"
+            prefix="sample/magnetic_pattern/"
         )
-        magnetic_metadata.pop("magnetic_pattern/real_space_pixel_size", None)
+        magnetic_metadata.pop(
+            "sample/magnetic_pattern/real_space_pixel_size", None
+        )
         metadata.update(magnetic_metadata)
         if pattern_slices is not None:
-            metadata["magnetic_pattern/roi_y_start_px"] = pattern_slices[0].start
-            metadata["magnetic_pattern/roi_y_stop_px"] = pattern_slices[0].stop
-            metadata["magnetic_pattern/roi_x_start_px"] = pattern_slices[1].start
-            metadata["magnetic_pattern/roi_x_stop_px"] = pattern_slices[1].stop
+            metadata["sample/magnetic_pattern/roi_y_start_px"] = (
+                pattern_slices[0].start
+            )
+            metadata["sample/magnetic_pattern/roi_y_stop_px"] = (
+                pattern_slices[0].stop
+            )
+            metadata["sample/magnetic_pattern/roi_x_start_px"] = (
+                pattern_slices[1].start
+            )
+            metadata["sample/magnetic_pattern/roi_x_stop_px"] = (
+                pattern_slices[1].stop
+            )
         metadata["sample/use_roi"] = bool(cfg.use_roi)
-        metadata["magnetic_pattern/use_roi"] = bool(
+        metadata["sample/magnetic_pattern/use_roi"] = bool(
             cfg.use_roi and cfg.magnetic_pattern_use_roi
         )
         t_stage = mark_stage("magnetic pattern", t_stage)
@@ -1261,16 +1272,16 @@ class HologramPipeline:
         magnetic_pattern_oh = magnetic_pattern * oh_mask
         if output_pattern_slices is not None:
             magnetic_pattern_oh = magnetic_pattern_oh[output_pattern_slices]
-            metadata["magnetic_pattern/saved_roi_y_start_px"] = (
+            metadata["sample/magnetic_pattern/saved_roi_y_start_px"] = (
                 output_pattern_slices[0].start
             )
-            metadata["magnetic_pattern/saved_roi_y_stop_px"] = (
+            metadata["sample/magnetic_pattern/saved_roi_y_stop_px"] = (
                 output_pattern_slices[0].stop
             )
-            metadata["magnetic_pattern/saved_roi_x_start_px"] = (
+            metadata["sample/magnetic_pattern/saved_roi_x_start_px"] = (
                 output_pattern_slices[1].start
             )
-            metadata["magnetic_pattern/saved_roi_x_stop_px"] = (
+            metadata["sample/magnetic_pattern/saved_roi_x_stop_px"] = (
                 output_pattern_slices[1].stop
             )
         aperture_metadata = front_aperture_config.get_metadata(
