@@ -15,6 +15,10 @@ For a first pass:
 The full CK notebook remains useful as an end-to-end interactive reference, but
 the notebooks below are the recommended teaching path.
 
+Its final export section uses `HologramPipeline.build_precomputed_metadata()`
+and `HologramPipeline.write_precomputed_result()` so an interactively simulated
+result is saved with the same canonical HDF5 structure as a scripted sweep.
+
 ## Focused Notebooks
 
 | Topic | Notebook | What it teaches |

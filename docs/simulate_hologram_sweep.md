@@ -627,6 +627,12 @@ Magnetic-pattern physical lengths also belong directly in `pattern_config`.
 `pattern_config_length` remains a legacy input alias, but conflicting keys raise
 an error and it is not saved as a second metadata configuration.
 
+Interactive simulations can use
+`HologramPipeline.build_precomputed_metadata()` followed by
+`HologramPipeline.write_precomputed_result()` to save an already-computed
+`HologramConfig` with this same layout. The end of
+`tutorials/Scattering_simulator_CK.ipynb` demonstrates this workflow.
+
 ## Reading The HDF5 File
 
 Basic inspection:

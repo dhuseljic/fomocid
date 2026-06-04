@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import h5py
 import numpy as np
@@ -48,6 +49,133 @@ def test_pipeline_config_does_not_duplicate_per_sample_configs(tmp_path: Path) -
         assert "_pipeline_config/recipe" not in h5
         assert "_pipeline_config/propagate" not in h5
         assert sorted(h5["_pipeline_config"].keys()) == ["n_samples", "oversampling"]
+
+
+def test_write_precomputed_result_requires_single_sample(tmp_path: Path) -> None:
+    pipeline = HologramPipeline(
+        config=HologramPipelineConfig(recipe="SiN(80)"),
+        ranges=HologramPipelineRanges(),
+        output_path=tmp_path / "output.h5",
+        n_samples=2,
+        verbose=False,
+    )
+
+    try:
+        pipeline.write_precomputed_result(None, None, {}, {}, None, None)
+    except ValueError as error:
+        assert "exactly one sample" in str(error)
+    else:
+        raise AssertionError("Expected multi-sample precomputed export to fail")
+
+
+def test_write_precomputed_result_uses_pipeline_hdf5_layout(tmp_path: Path) -> None:
+    pipeline = _pipeline(tmp_path)
+    cfg = pipeline.config
+    aperture_config = {
+        "aperture_types": cfg.aperture_types,
+        "aperture_radii": cfg.aperture_radii,
+        "aperture_centers": cfg.aperture_centers,
+        "aperture_sigmas": cfg.aperture_sigmas,
+        "aperture_angles": cfg.aperture_angles,
+        "aperture_ellipticities": cfg.aperture_ellipticities,
+        "aperture_roughnesses": cfg.aperture_roughnesses,
+        "aperture_roughness_modes": cfg.aperture_roughness_modes,
+        "aperture_seeds": cfg.aperture_seeds,
+        "aperture_top_radius_factors": cfg.aperture_top_radius_factors,
+    }
+    hologram = SimpleNamespace(
+        to_dict=lambda **_: {
+            "CR": {"exit_wave": np.ones((4, 4), dtype=complex), "ideal": np.ones((4, 4))},
+            "CL": {"exit_wave": np.ones((4, 4), dtype=complex), "ideal": np.ones((4, 4))},
+        }
+    )
+    detector = SimpleNamespace(
+        detector_layout=SimpleNamespace(beamstop=np.ones((4, 4)))
+    )
+
+    written = pipeline.write_precomputed_result(
+        hologram_config=hologram,
+        detector_config=detector,
+        metadata={"sample/recipe": "SiN(80)"},
+        aperture_config=aperture_config,
+        supportmask=np.ones((4, 4)),
+        magnetic_pattern_oh=np.ones((4, 4)),
+        overwrite=True,
+    )
+
+    with h5py.File(written, "r") as h5:
+        assert "_pipeline_config/oversampling" in h5
+        assert "00000/CR/exit_wave" in h5
+        assert "00000/CL/ideal" in h5
+        assert "00000/supportmask" in h5
+        assert "00000/magnetic_pattern_oh" in h5
+        assert "00000/metadata/sample/recipe" in h5
+        assert "00000/metadata/sample/aperture/aperture_config" in h5
+
+
+def test_build_precomputed_metadata_uses_canonical_groups() -> None:
+    def config_with_metadata(values):
+        return SimpleNamespace(
+            get_metadata=lambda prefix="": {
+                f"{prefix}{key}": value for key, value in values.items()
+            }
+        )
+
+    xray = SimpleNamespace(
+        beam_params=SimpleNamespace(
+            energy=778.0,
+            photon_flux=1e5,
+            coherence_length=(1e-6, 1e-6),
+            wavelength=1e-9,
+            wavevector=2 * np.pi / 1e-9,
+        )
+    )
+    detector = config_with_metadata(
+        {
+            "shape": (4, 4),
+            "detector_params/counts_per_photon": 100,
+            "measurement_config/exposure_time": 1.0,
+        }
+    )
+    magnetic = config_with_metadata(
+        {"pattern_type_method": "saturated_pattern", "real_space_pixel_size": 1e-9}
+    )
+    aperture = config_with_metadata(
+        {"aperture_method": "FTH_circular", "real_space_pixel_size": 1e-9}
+    )
+    metadata = HologramPipeline.build_precomputed_metadata(
+        xray_config=xray,
+        detector_config=detector,
+        beamstop_config=config_with_metadata({"bs_method": "circular"}),
+        sample_config=config_with_metadata({"recipe": "SiN(80)"}),
+        magnetic_pattern_config=magnetic,
+        aperture_config=aperture,
+        illumination_config=SimpleNamespace(
+            illumination_function="gaussian",
+            illumination_config={
+                "center": (0.0, 0.0),
+                "distance": 1e-3,
+                "fwhm": 1e-6,
+            },
+        ),
+        propagator_config=SimpleNamespace(
+            propagator_method="Jones",
+            propagator_config={"propagate": False},
+        ),
+        use_roi=True,
+        magnetic_pattern_use_roi=False,
+        dielectric_tensor_use_roi=True,
+        dielectric_tensor_compact=True,
+        save_detected_hologram_without_beamstop=False,
+    )
+
+    assert "sample/magnetic_pattern/pattern_type_method" in metadata
+    assert "sample/aperture/aperture_method" in metadata
+    assert "sample/dielectric_tensor/compact" in metadata
+    assert "propagator_config/propagator_method" in metadata
+    assert "detector_params/counts_per_photon" in metadata
+    assert "measurement_config/exposure_time" in metadata
+    assert "detector/detector_params/counts_per_photon" not in metadata
 
 
 def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path) -> None:

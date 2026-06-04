@@ -570,6 +570,136 @@ class HologramPipeline:
                 f"{elapsed:.1f} s → {self.output_path}"
             )
 
+    def write_precomputed_result(
+        self,
+        hologram_config: HologramConfig,
+        detector_config: DetectorConfig,
+        metadata: dict[str, Any],
+        aperture_config: dict[str, Any],
+        supportmask: np.ndarray,
+        magnetic_pattern_oh: np.ndarray,
+        *,
+        overwrite: bool = False,
+    ) -> Path:
+        """Write one already-simulated result using the canonical pipeline layout.
+
+        This is useful for interactive notebooks that construct each simulation
+        object explicitly but should produce HDF5 files compatible with
+        :meth:`run`.
+
+        Parameters
+        ----------
+        hologram_config : HologramConfig
+            Container with CR/CL exit waves and holograms.
+        detector_config : DetectorConfig
+            Configured detector containing the detector layout and beamstop.
+        metadata : dict[str, Any]
+            Canonical flat metadata paths for the simulated result.
+        aperture_config : dict[str, Any]
+            Pipeline-style aperture configuration with ``aperture_*`` keys.
+        supportmask : np.ndarray
+            Detector-space aperture support mask.
+        magnetic_pattern_oh : np.ndarray
+            Magnetic pattern visible through the object hole.
+        overwrite : bool, optional
+            Replace an existing output file when ``True``.
+
+        Returns
+        -------
+        pathlib.Path
+            Path of the written HDF5 file.
+        """
+        if self.n_samples != 1:
+            raise ValueError(
+                "write_precomputed_result writes exactly one sample; "
+                "construct the pipeline with n_samples=1."
+            )
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        mode = "w" if overwrite else "x"
+        with h5py.File(self.output_path, mode) as h5:
+            self._write_pipeline_config(h5)
+            self._write_sample(
+                h5,
+                0,
+                hologram_config,
+                detector_config,
+                metadata,
+                aperture_config=aperture_config,
+                supportmask=supportmask,
+                magnetic_pattern_oh=magnetic_pattern_oh,
+            )
+        return self.output_path
+
+    @classmethod
+    def build_precomputed_metadata(
+        cls,
+        *,
+        xray_config: XRayConfig,
+        detector_config: DetectorConfig,
+        beamstop_config: BeamstopConfig,
+        sample_config: SampleConfig,
+        magnetic_pattern_config: MagneticPatternConfig,
+        aperture_config: FrontApertureConfig,
+        illumination_config: IlluminationConfig,
+        propagator_config: SamplePropagatorConfig,
+        use_roi: bool,
+        magnetic_pattern_use_roi: bool,
+        dielectric_tensor_use_roi: bool,
+        dielectric_tensor_compact: bool,
+        save_detected_hologram_without_beamstop: bool,
+    ) -> dict[str, Any]:
+        """Build canonical metadata for an interactively simulated result."""
+        metadata: dict[str, Any] = {}
+        metadata.update(beamstop_config.get_metadata(prefix="beamstop/"))
+        metadata.update(cls._detector_metadata(detector_config))
+        metadata.update(sample_config.get_metadata(prefix="sample/"))
+
+        magnetic_metadata = magnetic_pattern_config.get_metadata(
+            prefix="sample/magnetic_pattern/"
+        )
+        magnetic_metadata.pop(
+            "sample/magnetic_pattern/real_space_pixel_size", None
+        )
+        metadata.update(magnetic_metadata)
+
+        aperture_metadata = aperture_config.get_metadata(prefix="sample/aperture/")
+        aperture_metadata.pop("sample/aperture/real_space_pixel_size", None)
+        aperture_metadata.pop("sample/aperture/use_roi", None)
+        metadata.update(aperture_metadata)
+
+        illumination_values = illumination_config.illumination_config
+        metadata["illumination/function"] = str(
+            illumination_config.illumination_function
+        )
+        metadata["illumination/center_m"] = np.asarray(
+            illumination_values.get("center", (0.0, 0.0)), dtype=float
+        )
+        metadata["illumination/focus_distance_m"] = illumination_values.get(
+            "distance", 0.0
+        )
+        metadata["illumination/fwhm_m"] = illumination_values.get("fwhm", 0.0)
+
+        metadata["sample/use_roi"] = bool(use_roi)
+        metadata["sample/magnetic_pattern/use_roi"] = bool(
+            use_roi and magnetic_pattern_use_roi
+        )
+        metadata["sample/dielectric_tensor/use_roi"] = bool(
+            use_roi and dielectric_tensor_use_roi
+        )
+        metadata["sample/dielectric_tensor/compact"] = bool(
+            dielectric_tensor_compact
+        )
+        metadata["propagator_config/propagator_method"] = str(
+            propagator_config.propagator_method
+        )
+        for key, value in propagator_config.propagator_config.items():
+            metadata[f"propagator_config/{key}"] = value
+        metadata.update(cls._xray_metadata(xray_config))
+        metadata["detector/save_detected_no_beamstop"] = bool(
+            save_detected_hologram_without_beamstop
+        )
+        return metadata
+
     # ------------------------------------------------------------------
     # Parameter sampling
     # ------------------------------------------------------------------
