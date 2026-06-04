@@ -121,6 +121,21 @@ simulation_sweep.h5
 └── ...
 ```
 
+Detector acquisition metadata is separated into sibling
+`measurement_config/`, `detector_params/`, and `artifacts_config/` groups.
+`detector_params/counts_per_photon` is the single canonical counts-to-photon
+conversion setting; it is not duplicated under artifact settings or
+`_pipeline_config/`. Sweepable configuration dictionaries are saved once per
+numbered sample so the stored values are always the values actually used.
+
+Sample-owned settings are grouped under `metadata/sample/`, including the
+master `use_roi` switch, aperture geometry, and dielectric-tensor settings.
+All propagation metadata is grouped under `metadata/propagator_config/`, with
+`propagator_method` first and no separate propagation group.
+
+The complete annotated HDF5 tree and canonical path table are in
+[`simulate_hologram_sweep.md`](simulate_hologram_sweep.md#hdf5-layout).
+
 The pipeline usage notebook shows how to load:
 
 - `CR/ideal`, `CL/ideal`;

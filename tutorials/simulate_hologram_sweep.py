@@ -73,18 +73,21 @@ detector_distance = 0.02  # m
 detector_center = (650, 650)  # px
 detector_params = {
     "readout_noise_average": 50,
-    "noise_rms": 3,
+    # Canonical readout-noise width. The legacy name "noise_rms" is only an alias.
+    "readout_noise_sigma": 3,
     "detector_threshold": 64.3e3,
+    # Canonical conversion between detector counts and photon events.
     "counts_per_photon": 100,
     "quantum_efficiency": 1.0,
 }
+# Acquisition timing/frame settings are separate from detector response.
 measurement_config = {
     "number_frames": 1,
     "max_counts_per_image": 64.3e3,
     "exposure_time": 1e-2,
 }
+# Photon-event shape controls only; counts_per_photon belongs in detector_params.
 artifacts_config = {
-    "counts_per_photon": 100,
     "sigma_photon": 0.75,
     "photon_n_classes": 1,
     "photon_n_variants": 30,
@@ -613,6 +616,11 @@ ranges = HologramPipelineRanges(
         "max_counts_per_image": Uniform(40_000, 70_000).sample(),
         "exposure_time": measurement_config["exposure_time"],
     },
+    detector_params={
+        # counts_per_photon belongs to detector_params because it controls the
+        # conversion between detector counts and photon events.
+        "counts_per_photon": Uniform(80, 220),
+    },
     # Pattern-type mix: 40% labyrinth, 40% skyrmion lattice, 20% saturated.
     pattern_type=Choice(
         (
@@ -640,7 +648,6 @@ ranges = HologramPipelineRanges(
     },
 
     artifacts_config = {
-        "counts_per_photon": Uniform(80,220),
         "sigma_photon": Uniform(0.7,0.9),
         "photon_n_classes": 1,
         "photon_n_variants": 30,
@@ -742,8 +749,8 @@ with h5py.File(output_path, "r") as h5:
     cl_ideal    = grp["CL/ideal"][frame]
     cl_detected = grp["CL/detected"][frame]
 
-    recipe_saved = h5["_pipeline_config/recipe"][()].decode()
-    detector_shape_saved = tuple(h5["_pipeline_config/detector_shape"][()].astype(int))
+    recipe_saved = grp["metadata/sample/recipe"][()].decode()
+    detector_shape_saved = tuple(grp["metadata/detector/shape"][()].astype(int))
     oversampling_saved = int(h5["_pipeline_config/oversampling"][()])
     real_space_pixel_size_saved = float(
         grp["metadata/sample/real_space_pixel_size"][()]
@@ -761,7 +768,7 @@ with h5py.File(output_path, "r") as h5:
     aperture_taper_depth_saved = float(
         np.sum(layer_thicknesses_saved[: max(0, membrane_index_saved - 2)])
     )
-    aperture_meta = grp["metadata/aperture/aperture_config"]
+    aperture_meta = grp["metadata/sample/aperture/aperture_config"]
     aperture_types_saved = [
         t.decode() if isinstance(t, bytes) else str(t)
         for t in aperture_meta["apertures_type"][()]

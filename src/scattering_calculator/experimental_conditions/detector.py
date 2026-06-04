@@ -365,7 +365,6 @@ class detector_hologram:
         "noise_seed": None,
     }
     DEFAULT_ARTIFACTS_CONFIG = {
-        "counts_per_photon": 100,
         "sigma_photon": 0.75,
         "photon_n_classes": 1,
         "photon_n_variants": 30,
@@ -393,6 +392,11 @@ class detector_hologram:
         self.beamstop = beamstop
         self.coherence_length = coherence_length
 
+        artifacts_config, detector_params = self._normalize_counts_per_photon(
+            artifacts_config,
+            detector_params,
+        )
+        detector_params = self._normalize_detector_param_aliases(detector_params)
         self._apply_measurement_config(measurement_config)
         self._apply_artifacts_config(artifacts_config)
         self._apply_detector_params(detector_params)
@@ -426,6 +430,42 @@ class detector_hologram:
             },
         )
 
+    @staticmethod
+    def _normalize_counts_per_photon(artifacts_config, detector_params):
+        """Keep ``counts_per_photon`` in detector parameters only.
+
+        Older configurations sometimes placed this value in ``artifacts_config``.
+        Accept that location as an input alias, but reject conflicting values
+        instead of silently overwriting one with the other.
+        """
+        artifacts_config = dict(artifacts_config or {})
+        detector_params = dict(detector_params or {})
+        legacy_value = artifacts_config.pop("counts_per_photon", None)
+        detector_value = detector_params.get("counts_per_photon")
+        if legacy_value is not None:
+            if detector_value is not None and detector_value != legacy_value:
+                raise ValueError(
+                    "Conflicting counts_per_photon values: use only "
+                    "detector_params['counts_per_photon']."
+                )
+            detector_params["counts_per_photon"] = legacy_value
+        return artifacts_config, detector_params
+
+    @staticmethod
+    def _normalize_detector_param_aliases(detector_params):
+        """Normalize legacy detector parameter names without silent overwrite."""
+        detector_params = dict(detector_params or {})
+        legacy_noise = detector_params.pop("noise_rms", None)
+        canonical_noise = detector_params.get("readout_noise_sigma")
+        if legacy_noise is not None:
+            if canonical_noise is not None and canonical_noise != legacy_noise:
+                raise ValueError(
+                    "Conflicting detector noise values: use only "
+                    "detector_params['readout_noise_sigma']."
+                )
+            detector_params["readout_noise_sigma"] = legacy_noise
+        return detector_params
+
     def _apply_artifacts_config(self, artifacts_config):
         self._apply_config(
             {
@@ -434,7 +474,6 @@ class detector_hologram:
             },
             artifacts_config,
             allowed_keys={
-                "counts_per_photon",
                 "sigma_photon",
                 "photon_n_classes",
                 "photon_n_variants",

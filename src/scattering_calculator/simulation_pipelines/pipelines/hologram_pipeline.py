@@ -49,6 +49,7 @@ from typing import Any, Callable
 import h5py
 import numpy as np
 
+from scattering_calculator.experimental_conditions import detector
 from scattering_calculator.sample_generator import pattern_generator
 from scattering_calculator.simulation_pipelines.simulation_configuration import (
     BeamstopConfig,
@@ -100,9 +101,22 @@ class HologramPipelineConfig:
     detector_center : tuple of int or None
         Pixel position of the direct beam. ``None`` → ``shape // 2``.
     detector_noise_rms : float
-        RMS readout noise in detector counts.
+        Deprecated alias for ``detector_params["readout_noise_sigma"]``.
+        Leave as ``None`` and use the detector-parameter dictionary.
     detector_quantum_efficiency : float
-        Detector quantum efficiency (0–1).
+        Deprecated alias for ``detector_params["quantum_efficiency"]``.
+        Leave as ``None`` and use the detector-parameter dictionary.
+    detector_params : dict
+        Detector-response parameters. Canonical keys include
+        ``readout_noise_average``, ``readout_noise_sigma``,
+        ``detector_threshold``, ``counts_per_photon``, and
+        ``quantum_efficiency``.
+    measurement_config : dict
+        Acquisition settings: ``exposure_time``, ``number_frames``, and
+        ``max_counts_per_image``.
+    artifacts_config : dict
+        Photon-event shape and splatting settings. It does not own
+        ``counts_per_photon``; that value belongs in ``detector_params``.
     beamstop_method : {"circular"} or None
         Beamstop shape. ``None`` → transparent (no beamstop).
     beamstop_distance : float
@@ -244,20 +258,17 @@ class HologramPipelineConfig:
     detector_pixel_size: float = 20e-6  # m/px
     detector_distance: float = 0.02  # m
     detector_center: tuple[int, int] | None = None  # None → shape // 2
-    detector_noise_rms: float = 3.0
-    detector_quantum_efficiency: float = 1.0
+    detector_noise_rms: float | None = None
+    detector_quantum_efficiency: float | None = None
     detector_params: dict = field(
         default_factory=lambda: {
             "readout_noise_average": 50,
-            "noise_rms": 3,
             "detector_threshold": 64e3,
             "counts_per_photon": 100,
-            "quantum_efficiency": 1.0,
         }
     )
     artifacts_config: dict = field(
         default_factory=lambda: {
-            "counts_per_photon": 100,
             "sigma_photon": 0.75,
             "photon_n_classes": 1,
             "photon_n_variants": 30,
@@ -433,7 +444,7 @@ class HologramPipeline:
     ::
 
         output.h5
-        ├── _pipeline_config/       ← top-level fixed parameters
+        ├── _pipeline_config/       ← file-global n_samples and oversampling
         ├── 00000/
         │   ├── CR/
         │   │   ├── ideal           ← float32 2D hologram
@@ -688,37 +699,39 @@ class HologramPipeline:
         params["detector_pixel_size"] = _pick(
             rng.detector_pixel_size, cfg.detector_pixel_size, params
         )
-        params["detector_noise_rms"] = _pick(
-            rng.detector_noise_rms, cfg.detector_noise_rms, params
-        )
         params["detector_params"] = _merge_dict(
             rng.detector_params, cfg.detector_params, params
         )
-        if rng.detector_noise_rms is not None:
-            params["detector_params"]["noise_rms"] = params["detector_noise_rms"]
-        elif (
-            "noise_rms" not in params["detector_params"]
-            and "readout_noise_sigma" not in params["detector_params"]
-        ):
-            params["detector_params"]["noise_rms"] = params["detector_noise_rms"]
-        if (
-            cfg.detector_quantum_efficiency != 1.0
-            and (
-                rng.detector_params is None
-                or "quantum_efficiency" not in rng.detector_params
-            )
-        ):
-            params["detector_params"]["quantum_efficiency"] = (
-                cfg.detector_quantum_efficiency
-            )
-        elif rng.detector_params is None and "quantum_efficiency" not in cfg.detector_params:
-            params["detector_params"]["quantum_efficiency"] = (
-                cfg.detector_quantum_efficiency
-            )
+        params["detector_params"] = self._normalize_detector_params(
+            params["detector_params"],
+            legacy_noise_rms=_pick(
+                rng.detector_noise_rms, cfg.detector_noise_rms, params
+            ),
+            legacy_quantum_efficiency=cfg.detector_quantum_efficiency,
+        )
+        params["detector_params"].setdefault("readout_noise_sigma", 3.0)
         params["detector_params"].setdefault("quantum_efficiency", 1.0)
         params["artifacts_config"] = _merge_dict(
             rng.artifacts_config, cfg.artifacts_config, params
         )
+        legacy_counts_per_photon = params["artifacts_config"].pop(
+            "counts_per_photon", None
+        )
+        detector_counts_per_photon = params["detector_params"].get(
+            "counts_per_photon"
+        )
+        if legacy_counts_per_photon is not None:
+            if (
+                detector_counts_per_photon is not None
+                and detector_counts_per_photon != legacy_counts_per_photon
+            ):
+                raise ValueError(
+                    "Conflicting counts_per_photon values: use only "
+                    "detector_params['counts_per_photon']."
+                )
+            params["detector_params"]["counts_per_photon"] = (
+                legacy_counts_per_photon
+            )
         params["measurement_config"] = _merge_dict(
             rng.measurement_config, cfg.measurement_config, params
         )
@@ -730,7 +743,16 @@ class HologramPipeline:
             rng.pattern_config_length, cfg.pattern_config_length, params
         )
         for key, value in params["pattern_config_length"].items():
-            params["pattern_config"].setdefault(key, value)
+            if (
+                key in params["pattern_config"]
+                and not np.array_equal(params["pattern_config"][key], value)
+            ):
+                raise ValueError(
+                    f"Conflicting magnetic-pattern value for {key!r}: use only "
+                    "pattern_config. pattern_config_length is a legacy alias."
+                )
+            params["pattern_config"][key] = value
+        params["pattern_config_length"] = {}
         if cfg.random_seed is not None:
             def _set_seed_if_missing(config_dict: dict, key: str) -> None:
                 """Insert a random seed into a config dictionary when absent.
@@ -791,6 +813,37 @@ class HologramPipeline:
             _set_seed_if_missing(params["artifacts_config"], "photon_kernel_seed")
             _set_seed_if_missing(params["detector_params"], "noise_seed")
         return params
+
+    @staticmethod
+    def _normalize_detector_params(
+        detector_params: dict,
+        *,
+        legacy_noise_rms: float | None,
+        legacy_quantum_efficiency: float | None,
+    ) -> dict:
+        """Normalize legacy detector aliases and reject conflicting values."""
+        normalized = detector.detector_hologram._normalize_detector_param_aliases(
+            detector_params
+        )
+        for legacy_name, legacy_value, canonical_name in (
+            ("detector_noise_rms", legacy_noise_rms, "readout_noise_sigma"),
+            (
+                "detector_quantum_efficiency",
+                legacy_quantum_efficiency,
+                "quantum_efficiency",
+            ),
+        ):
+            if legacy_value is None:
+                continue
+            canonical_value = normalized.get(canonical_name)
+            if canonical_value is not None and canonical_value != legacy_value:
+                raise ValueError(
+                    f"Conflicting {legacy_name} and "
+                    f"detector_params['{canonical_name}']; use only the "
+                    "detector_params value."
+                )
+            normalized[canonical_name] = legacy_value
+        return normalized
 
     @staticmethod
     def _magnetic_pattern_roi(
@@ -993,7 +1046,7 @@ class HologramPipeline:
             / cfg.oversampling
         )
         metadata.update(beamstop_config.get_metadata(prefix="beamstop/"))
-        metadata.update(detector_config.get_metadata(prefix="detector/"))
+        metadata.update(self._detector_metadata(detector_config))
         t_stage = mark_stage("detector/beamstop", t_stage)
 
         # ---- Sample config -----------------------------------------------
@@ -1116,13 +1169,17 @@ class HologramPipeline:
             nr_repeats=sample_shape[0],
         )
         sample_config.assign_magnetic_pattern(magnetization)
-        metadata.update(magnetic_pattern_config.get_metadata(prefix="magnetic_pattern/"))
+        magnetic_metadata = magnetic_pattern_config.get_metadata(
+            prefix="magnetic_pattern/"
+        )
+        magnetic_metadata.pop("magnetic_pattern/real_space_pixel_size", None)
+        metadata.update(magnetic_metadata)
         if pattern_slices is not None:
             metadata["magnetic_pattern/roi_y_start_px"] = pattern_slices[0].start
             metadata["magnetic_pattern/roi_y_stop_px"] = pattern_slices[0].stop
             metadata["magnetic_pattern/roi_x_start_px"] = pattern_slices[1].start
             metadata["magnetic_pattern/roi_x_stop_px"] = pattern_slices[1].stop
-        metadata["use_roi"] = bool(cfg.use_roi)
+        metadata["sample/use_roi"] = bool(cfg.use_roi)
         metadata["magnetic_pattern/use_roi"] = bool(
             cfg.use_roi and cfg.magnetic_pattern_use_roi
         )
@@ -1216,17 +1273,24 @@ class HologramPipeline:
             metadata["magnetic_pattern/saved_roi_x_stop_px"] = (
                 output_pattern_slices[1].stop
             )
-        metadata.update(front_aperture_config.get_metadata(prefix="aperture/"))
+        aperture_metadata = front_aperture_config.get_metadata(
+            prefix="sample/aperture/"
+        )
+        aperture_metadata.pop("sample/aperture/real_space_pixel_size", None)
+        aperture_metadata.pop("sample/aperture/use_roi", None)
+        metadata.update(aperture_metadata)
         t_stage = mark_stage("front aperture", t_stage)
 
         sample_config.sample_structure.calculate_final_dielectric_tensor(
             use_aperture_roi=cfg.use_roi and cfg.dielectric_tensor_use_roi,
             compact=cfg.dielectric_tensor_compact,
         )
-        metadata["dielectric_tensor/use_roi"] = bool(
+        metadata["sample/dielectric_tensor/use_roi"] = bool(
             cfg.use_roi and cfg.dielectric_tensor_use_roi
         )
-        metadata["dielectric_tensor/compact"] = bool(cfg.dielectric_tensor_compact)
+        metadata["sample/dielectric_tensor/compact"] = bool(
+            cfg.dielectric_tensor_compact
+        )
         t_stage = mark_stage("dielectric tensor", t_stage)
 
         # ---- Illumination config -----------------------------------------
@@ -1245,6 +1309,7 @@ class HologramPipeline:
         metadata["illumination/center_m"] = np.asarray(
             p["illumination_center"], dtype=float
         )
+        metadata["illumination/function"] = str(cfg.illumination_function)
         metadata["illumination/focus_distance_m"] = p["illumination_focus_distance"]
         metadata["illumination/fwhm_m"] = p["illumination_fwhm"]
         t_stage = mark_stage("illumination", t_stage)
@@ -1316,17 +1381,13 @@ class HologramPipeline:
                 )
             t_stage = mark_stage(f"{pol} detector noise", t_stage)
 
-        metadata.update(propagator_config.get_metadata())
-        metadata.update(xray_config.get_metadata(prefix="xray/"))
-        metadata["propagation/multislice_roi"] = bool(
-            cfg.multislice_propagation_roi
+        metadata.update(sample_config.get_metadata(prefix="sample/"))
+        metadata["propagator_config/propagator_method"] = str(
+            propagator_config.propagator_method
         )
-        metadata["propagation/multislice_roi_padding_px"] = int(
-            cfg.multislice_propagation_roi_padding_px
-        )
-        metadata["propagation/multislice_roi_merge_overlaps"] = bool(
-            cfg.multislice_propagation_roi_merge_overlaps
-        )
+        for key, value in propagator_config.propagator_config.items():
+            metadata[f"propagator_config/{key}"] = value
+        metadata.update(self._xray_metadata(xray_config))
         metadata["detector/save_detected_no_beamstop"] = bool(
             cfg.save_detected_hologram_without_beamstop
         )
@@ -1358,6 +1419,38 @@ class HologramPipeline:
     # ------------------------------------------------------------------
     # HDF5 I/O
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _detector_metadata(detector_config: DetectorConfig) -> dict[str, Any]:
+        """Return detector metadata with configuration groups kept as siblings."""
+        raw = detector_config.get_metadata(prefix="detector/")
+        result: dict[str, Any] = {}
+        sibling_groups = (
+            "detector_params",
+            "measurement_config",
+            "artifacts_config",
+        )
+        for key, value in raw.items():
+            remapped = key
+            for group in sibling_groups:
+                prefix = f"detector/{group}/"
+                if key.startswith(prefix):
+                    remapped = f"{group}/{key[len(prefix):]}"
+                    break
+            result[remapped] = value
+        return result
+
+    @staticmethod
+    def _xray_metadata(xray_config: XRayConfig) -> dict[str, Any]:
+        """Return one canonical X-ray metadata group."""
+        beam = xray_config.beam_params
+        return {
+            "xray/energy_eV": beam.energy,
+            "xray/photon_flux": beam.photon_flux,
+            "xray/coherence_length_m": beam.coherence_length,
+            "xray/wavelength_m": beam.wavelength,
+            "xray/wavevector_per_m": beam.wavevector,
+        }
 
     def _write_sample(
         self,
@@ -1469,16 +1562,27 @@ class HologramPipeline:
                 compression="gzip",
             )
 
-        # Metadata — scalar datasets under metadata/ subgroup
-        meta_grp = grp.create_group("metadata")
+        self._write_metadata(grp, metadata, aperture_config)
+
+    def _write_metadata(
+        self,
+        sample_grp: h5py.Group,
+        metadata: dict[str, Any],
+        aperture_config: dict[str, Any],
+    ) -> None:
+        """Write the canonical, ordered metadata hierarchy for one sample."""
+        meta_grp = sample_grp.create_group("metadata", track_order=True)
         self._write_aperture_metadata(meta_grp, aperture_config)
         for key, value in metadata.items():
-            if key.startswith("aperture/aperture_config/apertures_"):
+            if key.startswith("sample/aperture/aperture_config/apertures_"):
                 continue
             parts = key.split("/")
             sub = meta_grp
             for part in parts[:-1]:
-                sub = sub.require_group(part)
+                if part in sub:
+                    sub = sub[part]
+                else:
+                    sub = sub.create_group(part, track_order=True)
             if isinstance(value, str):
                 value = np.bytes_(value)
             try:
@@ -1489,7 +1593,7 @@ class HologramPipeline:
     def _write_aperture_metadata(
         self, meta_grp: h5py.Group, aperture_config: dict[str, Any]
     ) -> None:
-        """Store aperture lists as typed HDF5 datasets under metadata/aperture.
+        """Store typed aperture lists under metadata/sample/aperture.
 
         Parameters
         ----------
@@ -1504,9 +1608,13 @@ class HologramPipeline:
         None
             Aperture datasets are written into ``meta_grp``.
         """
-        aperture_grp = meta_grp.require_group("aperture").require_group(
-            "aperture_config"
+        sample_grp = (
+            meta_grp["sample"]
+            if "sample" in meta_grp
+            else meta_grp.create_group("sample", track_order=True)
         )
+        aperture_grp = sample_grp.create_group("aperture", track_order=True)
+        aperture_grp = aperture_grp.create_group("aperture_config", track_order=True)
         aperture_grp.create_dataset(
             "apertures_type",
             data=np.asarray(aperture_config["aperture_types"], dtype="S"),
@@ -1579,7 +1687,7 @@ class HologramPipeline:
         )
 
     def _write_pipeline_config(self, h5: h5py.File) -> None:
-        """Store top-level fixed pipeline parameters as datasets.
+        """Store file-global pipeline parameters as datasets.
 
         Parameters
         ----------
@@ -1593,92 +1701,5 @@ class HologramPipeline:
         """
         cfg = self.config
         grp = h5.create_group("_pipeline_config")
-        grp.create_dataset("recipe", data=np.bytes_(cfg.recipe))
         grp.create_dataset("n_samples", data=self.n_samples)
         grp.create_dataset("oversampling", data=cfg.oversampling)
-        grp.create_dataset("propagate", data=bool(cfg.propagate))
-        grp.create_dataset("propagation_padding_px", data=int(cfg.propagation_padding_px))
-        grp.create_dataset(
-            "propagation_padding_mode",
-            data=np.bytes_(str(cfg.propagation_padding_mode)),
-        )
-        grp.create_dataset(
-            "propagation_absorber_width_px",
-            data=int(cfg.propagation_absorber_width_px),
-        )
-        grp.create_dataset(
-            "propagation_absorber_strength",
-            data=float(cfg.propagation_absorber_strength),
-        )
-        grp.create_dataset(
-            "propagation_absorber_profile",
-            data=np.bytes_(str(cfg.propagation_absorber_profile)),
-        )
-        grp.create_dataset(
-            "multislice_propagation_roi",
-            data=bool(cfg.multislice_propagation_roi),
-        )
-        grp.create_dataset(
-            "multislice_propagation_roi_padding_px",
-            data=int(cfg.multislice_propagation_roi_padding_px),
-        )
-        grp.create_dataset(
-            "multislice_propagation_roi_merge_overlaps",
-            data=bool(cfg.multislice_propagation_roi_merge_overlaps),
-        )
-        grp.create_dataset("aperture_method", data=np.bytes_(str(cfg.aperture_method)))
-        grp.create_dataset(
-            "illumination_function", data=np.bytes_(str(cfg.illumination_function))
-        )
-        grp.create_dataset("beamstop_method", data=np.bytes_(str(cfg.beamstop_method)))
-        grp.create_dataset("beamstop_distance_m", data=cfg.beamstop_distance)
-        grp.create_dataset(
-            "save_detected_hologram_without_beamstop",
-            data=bool(cfg.save_detected_hologram_without_beamstop),
-        )
-        beamstop_cfg_grp = grp.create_group("beamstop_config")
-        for key, value in cfg.beamstop_config.items():
-            if isinstance(value, str):
-                value = np.bytes_(value)
-            try:
-                beamstop_cfg_grp.create_dataset(key, data=value)
-            except (TypeError, ValueError):
-                pass
-        grp.create_dataset("illumination_fwhm_m", data=cfg.illumination_fwhm)
-        grp.create_dataset(
-            "illumination_focus_distance_m", data=cfg.illumination_focus_distance
-        )
-        grp.create_dataset("detector_shape", data=np.array(cfg.detector_shape))
-        grp.create_dataset(
-            "detector_quantum_efficiency", data=cfg.detector_quantum_efficiency
-        )
-        self._write_config_dict(grp, "detector_params", cfg.detector_params)
-        self._write_config_dict(grp, "measurement_config", cfg.measurement_config)
-        self._write_config_dict(grp, "artifacts_config", cfg.artifacts_config)
-
-    def _write_config_dict(self, parent: h5py.Group, name: str, config: dict) -> None:
-        """Write scalar and list config values to a named subgroup.
-
-        Parameters
-        ----------
-        parent : h5py.Group
-            Parent HDF5 group that will contain the named subgroup.
-        name : str
-            Subgroup name to create or reuse.
-        config : dict
-            Configuration dictionary whose serialisable values are written as
-            datasets.
-
-        Returns
-        -------
-        None
-            Supported config values are written into ``parent[name]``.
-        """
-        grp = parent.require_group(name)
-        for key, value in config.items():
-            if isinstance(value, str):
-                value = np.bytes_(value)
-            try:
-                grp.create_dataset(key, data=value)
-            except (TypeError, ValueError):
-                pass

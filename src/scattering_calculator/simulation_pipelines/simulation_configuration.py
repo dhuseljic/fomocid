@@ -355,7 +355,7 @@ class DetectorConfig(_ConfigMixin):
     detector_params: dict = field(
         default_factory=lambda: {
             "readout_noise_average": 50,
-            "noise_rms": 3,
+            "readout_noise_sigma": 3,
             "detector_threshold": 64e3,
             "counts_per_photon": 100,
             "quantum_efficiency": 1.0,
@@ -364,7 +364,6 @@ class DetectorConfig(_ConfigMixin):
     artifacts_method: str | None = None
     artifacts_config: dict = field(
         default_factory=lambda: {
-            "counts_per_photon": 100,
             "sigma_photon": 0.75,
             "photon_n_classes": 1,
             "photon_n_variants": 30,
@@ -849,8 +848,8 @@ class MagneticPatternConfig(_ConfigMixin):
 
         Physical-length values in ``pattern_config`` are converted to pixel
         units by dividing by ``real_space_pixel_size`` before the generator is
-        called. ``pattern_config_length`` is still accepted as a lower-priority
-        legacy source.
+        called. ``pattern_config_length`` is still accepted as a legacy source,
+        but conflicting keys are rejected.
 
         Returns
         -------
@@ -863,8 +862,14 @@ class MagneticPatternConfig(_ConfigMixin):
             This function takes no explicit input parameters.
         """
         pattern_function = self.setup()
-        config = dict(self.pattern_config_length)
-        config.update(self.pattern_config)
+        config = dict(self.pattern_config)
+        for key, value in self.pattern_config_length.items():
+            if key in config and not np.array_equal(config[key], value):
+                raise ValueError(
+                    f"Conflicting magnetic-pattern value for {key!r}: use only "
+                    "pattern_config. pattern_config_length is a legacy alias."
+                )
+            config[key] = value
         length_keys_by_method = {
             "wavy_stripe_pattern": {
                 "stripe_width",

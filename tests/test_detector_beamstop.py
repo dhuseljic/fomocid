@@ -19,6 +19,36 @@ from scattering_calculator.simulation_pipelines.simulation_configuration import 
 
 
 class DetectorBeamstopTests(unittest.TestCase):
+    def test_legacy_artifact_counts_per_photon_moves_to_detector_params(self) -> None:
+        artifacts, detector_params = detector_hologram._normalize_counts_per_photon(
+            {"counts_per_photon": 125, "sigma_photon": 0.5},
+            {"noise_rms": 2},
+        )
+
+        self.assertNotIn("counts_per_photon", artifacts)
+        self.assertEqual(detector_params["counts_per_photon"], 125)
+
+    def test_conflicting_counts_per_photon_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Conflicting counts_per_photon"):
+            detector_hologram._normalize_counts_per_photon(
+                {"counts_per_photon": 100},
+                {"counts_per_photon": 180},
+            )
+
+    def test_legacy_noise_alias_moves_to_canonical_name(self) -> None:
+        params = detector_hologram._normalize_detector_param_aliases(
+            {"noise_rms": 2}
+        )
+
+        self.assertNotIn("noise_rms", params)
+        self.assertEqual(params["readout_noise_sigma"], 2)
+
+    def test_conflicting_noise_alias_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Conflicting detector noise"):
+            detector_hologram._normalize_detector_param_aliases(
+                {"noise_rms": 2, "readout_noise_sigma": 3}
+            )
+
     def _hologram(self) -> detector_hologram:
         """Handle the internal hologram operation.
 

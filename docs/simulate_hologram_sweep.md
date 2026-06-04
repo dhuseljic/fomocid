@@ -452,6 +452,21 @@ illumination_center=(
 
 The center tuple is `(y, x)` in metres.
 
+### Detector, Measurement, And Artifact Ownership
+
+These dictionaries configure different stages and should not repeat keys:
+
+- `detector_params`: detector response and photon/count conversion:
+  `readout_noise_average`, `readout_noise_sigma`, `detector_threshold`,
+  `counts_per_photon`, and `quantum_efficiency`.
+- `measurement_config`: acquisition timing and frame aggregation:
+  `exposure_time`, `number_frames`, and `max_counts_per_image`.
+- `artifacts_config`: photon-event shape and splatting controls such as
+  `sigma_photon`, kernel size, class count, and irregularity.
+
+Do not define one parameter in multiple dictionaries. Legacy aliases are
+normalized when unambiguous; conflicting values raise `ValueError`.
+
 ### Measurement Ranges
 
 The sweep randomizes detector acquisition settings:
@@ -478,27 +493,91 @@ simulation_sweep.h5
 └── ...
 ```
 
-Each sample group contains:
+`_pipeline_config/` contains only values that describe the whole file:
+
+```text
+_pipeline_config/
+├── n_samples
+└── oversampling
+```
+
+Each numbered sample group is self-contained. Its metadata records the effective
+values actually used after applying sweep ranges and compatibility aliases:
 
 ```text
 00000/
-├── CR/
-│   ├── exit_wave
-│   ├── ideal
-│   ├── detected
-│   └── detected_no_beamstop  # optional
-├── CL/
-│   ├── exit_wave
-│   ├── ideal
-│   ├── detected
-│   └── detected_no_beamstop  # optional
-├── beamstop_mask
-├── supportmask
-├── magnetic_pattern_oh
+├── CR/                              # circular-right polarization
+│   ├── exit_wave                    # complex sample-plane wavefield
+│   ├── ideal                        # ideal detector hologram
+│   ├── detected                     # noisy/artifact-affected hologram
+│   └── detected_no_beamstop         # optional
+├── CL/                              # same datasets for circular-left
+├── beamstop_mask                    # detector-space beamstop transmission
+├── supportmask                      # FTH aperture support
+├── magnetic_pattern_oh              # magnetic pattern visible through the OH
 └── metadata/
+    ├── sample/
+    │   ├── recipe, sample_name, real_space_pixel_size
+    │   ├── use_roi                  # master sample/ROI switch
+    │   ├── aperture/                # aperture method, thicknesses, geometry
+    │   │   └── aperture_config/
+    │   └── dielectric_tensor/       # tensor ROI/compact flags
+    ├── xray/                        # energy, flux, coherence, wavelength
+    ├── detector/                    # detector geometry and output switches
+    │   └── save_detected_no_beamstop
+    ├── detector_params/             # readout noise, threshold, QE, counts/photon
+    ├── measurement_config/          # exposure, frames, count normalization
+    ├── artifacts_config/            # photon-event shape/splatting controls
+    ├── beamstop/                    # effective beamstop geometry
+    ├── illumination/                # beam profile, center, focus, FWHM
+    ├── magnetic_pattern/            # pattern method/config and ROI information
+    ├── propagator_config/           # propagation method and effective config
+    │   ├── propagator_method        # written first
+    │   ├── propagate
+    │   └── ...
 ```
 
-Polarization groups:
+Older files may also contain baseline simulation settings under
+`_pipeline_config/`. New readers should use the numbered sample's `metadata/`
+paths, because those are the effective values used for that sample.
+
+### Dataset ownership
+
+Each physical parameter has one canonical saved path. Important examples:
+
+| Parameter | Canonical HDF5 path |
+|---|---|
+| X-ray energy | `metadata/xray/energy_eV` |
+| Sample recipe | `metadata/sample/recipe` |
+| Sample-plane pixel size | `metadata/sample/real_space_pixel_size` |
+| Master ROI switch | `metadata/sample/use_roi` |
+| Aperture geometry | `metadata/sample/aperture/aperture_config/...` |
+| Dielectric-tensor compact flag | `metadata/sample/dielectric_tensor/compact` |
+| Detector distance | `metadata/detector/sample_to_detector_distance` |
+| Readout-noise sigma | `metadata/detector_params/readout_noise_sigma` |
+| Quantum efficiency | `metadata/detector_params/quantum_efficiency` |
+| Counts per photon | `metadata/detector_params/counts_per_photon` |
+| Exposure time | `metadata/measurement_config/exposure_time` |
+| Photon-event sigma | `metadata/artifacts_config/sigma_photon` |
+| Illumination FWHM | `metadata/illumination/fwhm_m` |
+| Multislice enable flag | `metadata/propagator_config/propagate` |
+| Multislice ROI flag | `metadata/propagator_config/multislice_propagation_roi` |
+
+The hierarchy follows ownership:
+
+- `sample/` owns the master ROI switch, aperture geometry, and dielectric
+  tensor settings because they describe how the sample is represented.
+- `propagator_config/` owns both `propagator_method` and every propagation
+  option. There is no separate `propagation/` or `propagator/` group.
+  `propagator_method` is written first so a tree inspection identifies the
+  selected algorithm before its options.
+- `sample/use_roi` is the master switch. The scoped
+  `magnetic_pattern/use_roi` and `sample/dielectric_tensor/use_roi` datasets
+  record whether each individual optimization was actually active. These
+  similarly named datasets are intentional because they answer different
+  questions.
+
+Polarization datasets:
 
 - `CR/ideal`, `CL/ideal`: ideal detector holograms before detector noise.
 - `CR/detected`, `CL/detected`: detector holograms after noise/artifacts.
@@ -513,18 +592,28 @@ Other arrays:
 - `supportmask`: binary support mask in FTH reconstruction coordinates.
 - `magnetic_pattern_oh`: magnetic pattern inside the OH save ROI; pixels outside the OH are zeroed.
 
-Metadata is stored as nested scalar/list datasets below `metadata/`, including
-x-ray, detector, measurement, illumination, aperture, magnetic-pattern, ROI, and
-propagation parameters.
+`metadata/measurement_config`, `metadata/detector_params`, and
+`metadata/artifacts_config` are deliberately separate sibling groups.
+Measurement settings are not detector properties, and artifact-shape settings
+do not own the counts-to-photon conversion.
 
-The `_pipeline_config/` group stores fixed top-level settings such as `recipe`,
-`oversampling`, detector shape, `propagate`, `propagation_padding_px`,
-`propagation_padding_mode`, `propagation_absorber_width_px`,
-`propagation_absorber_strength`, `propagation_absorber_profile`,
-`multislice_propagation_roi`,
-`multislice_propagation_roi_padding_px`,
-`multislice_propagation_roi_merge_overlaps`, and
-`save_detected_hologram_without_beamstop`.
+`counts_per_photon` has one canonical location:
+`detector_params/counts_per_photon`. It controls the conversion between detector
+counts and photon events, including photon-artifact splatting. Do not also place
+it in `artifacts_config`. Legacy artifact configurations containing the same
+value are accepted as an input alias and normalized; conflicting values raise an
+error instead of silently selecting one.
+
+The same rule applies to detector noise and quantum efficiency:
+`detector_params/readout_noise_sigma` and
+`detector_params/quantum_efficiency` are canonical. The older `noise_rms`,
+`detector_noise_rms`, and `detector_quantum_efficiency` inputs are compatibility
+aliases only. If an alias conflicts with the canonical value, the pipeline
+raises an error.
+
+Magnetic-pattern physical lengths also belong directly in `pattern_config`.
+`pattern_config_length` remains a legacy input alias, but conflicting keys raise
+an error and it is not saved as a second metadata configuration.
 
 ## Reading The HDF5 File
 
@@ -570,16 +659,16 @@ Read metadata:
 with h5py.File(path, "r") as h5:
     m = h5["00000/metadata"]
 
-    energy = m["xray/energy"][()]
+    energy = m["xray/energy_eV"][()]
     pattern_type = m["magnetic_pattern/pattern_type_method"][()].decode()
-    detector_distance = m["detector/detector_distance"][()]
+    detector_distance = m["detector/sample_to_detector_distance"][()]
     illumination_center = m["illumination/center_m"][()]
-    aperture_roughness = m["aperture/aperture_config/apertures_roughness"][()]
-    propagate = h5["_pipeline_config/propagate"][()]
-    propagation_padding_px = h5["_pipeline_config/propagation_padding_px"][()]
-    propagation_padding_mode = h5["_pipeline_config/propagation_padding_mode"][()].decode()
-    propagation_absorber_width_px = h5["_pipeline_config/propagation_absorber_width_px"][()]
-    propagation_absorber_profile = h5["_pipeline_config/propagation_absorber_profile"][()].decode()
+    aperture_roughness = m["sample/aperture/aperture_config/apertures_roughness"][()]
+    propagate = m["propagator_config/propagate"][()]
+    propagation_padding_px = m["propagator_config/propagation_padding_px"][()]
+    propagation_padding_mode = m["propagator_config/propagation_padding_mode"][()].decode()
+    propagation_absorber_width_px = m["propagator_config/propagation_absorber_width_px"][()]
+    propagation_absorber_profile = m["propagator_config/propagation_absorber_profile"][()].decode()
 ```
 
 Some string datasets are stored as bytes, so use `.decode()` when needed.
@@ -605,7 +694,7 @@ def read_h5_group(group, prefix=""):
 with h5py.File(path, "r") as h5:
     meta = read_h5_group(h5["00000/metadata"])
 
-print(meta["xray/energy"])
+print(meta["xray/energy_eV"])
 print(meta["magnetic_pattern/pattern_type_method"])
 ```
 
