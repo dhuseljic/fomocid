@@ -6,6 +6,7 @@ import os
 import numpy as np
 import h5py
 from scattering_calculator.utils import physics
+import ast
 
 # Imports from our own codebase
 from fomocid import DATA_ROOT
@@ -750,7 +751,8 @@ with h5py.File(output_path, "r") as h5:
     cl_detected = grp["CL/detected"][frame]
 
     recipe_saved = grp["metadata/sample/recipe"][()].decode()
-    detector_shape_saved = tuple(grp["metadata/detector/shape"][()].astype(int))
+    #detector_shape_saved = tuple(grp["metadata/detector/shape"][()].astype(int))
+    detector_shape_saved = tuple(ast.literal_eval(grp["metadata/detector/shape"][()].decode() if isinstance(grp["metadata/detector/shape"][()], bytes) else grp["metadata/detector/shape"][()]))
     oversampling_saved = int(h5["_pipeline_config/oversampling"][()])
     real_space_pixel_size_saved = float(
         grp["metadata/sample/real_space_pixel_size"][()]
