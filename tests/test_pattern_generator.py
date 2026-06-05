@@ -15,6 +15,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from scattering_calculator.sample_generator import pattern_generator
+from scattering_calculator.sample_generator.structures import Apertures3D
 from scattering_calculator.simulation_pipelines import simulation_configuration
 
 
@@ -192,6 +193,86 @@ class ImagePatternTests(unittest.TestCase):
         self.assertAlmostEqual(meta["rescale_factor"], 2.0)
         self.assertLess(np.min(np.abs(pattern)), 1.0)
         self.assertLessEqual(np.max(np.abs(pattern)), 1.0)
+
+
+class DisorderedSkyrmionTests(unittest.TestCase):
+    def test_small_skyrmions_are_sampled_as_continuous_profiles(self) -> None:
+        """Test that subpixel skyrmions do not collapse to binary crosses."""
+        pattern, coords = pattern_generator.create_disordered_skyrmion_lattice_pattern(
+            (32, 32),
+            stripe_width=2.4,
+            sigma=0.0,
+            skyrmion_density=0.15,
+            diameter_spread=0.0,
+            ellipticity=(1.0, 1.0),
+            roughness=0.0,
+            placement_center=(16.35, 15.65),
+            placement_radius=3.0,
+            seed=7,
+        )
+
+        self.assertGreaterEqual(len(coords), 1)
+        self.assertTrue(np.any((pattern > -1.0) & (pattern < 1.0)))
+        self.assertGreater(len(np.unique(np.round(pattern, 3))), 3)
+        self.assertLess(np.min(pattern), -0.5)
+
+    def test_subpixel_disordered_skyrmion_has_area_averaged_contrast(self) -> None:
+        """Test that a subpixel skyrmion does not receive full contrast."""
+        pattern, coords = pattern_generator.create_disordered_skyrmion_lattice_pattern(
+            (17, 17),
+            stripe_width=0.6,
+            sigma=0.0,
+            skyrmion_density=0.01,
+            diameter_spread=0.0,
+            ellipticity=(1.0, 1.0),
+            roughness=0.0,
+            placement_center=(8.0, 8.0),
+            placement_radius=0.1,
+            seed=7,
+        )
+
+        self.assertEqual(len(coords), 1)
+        self.assertGreater(np.min(pattern), 0.0)
+        self.assertLess(np.min(pattern), 1.0)
+
+    def test_subpixel_circular_skyrmion_has_area_averaged_contrast(self) -> None:
+        """Test that the legacy circular skyrmion generator preserves area fraction."""
+        pattern, coords = pattern_generator.create_skyrmion_pattern(
+            [17, 17],
+            skyr_radius=0.3,
+            screening_radius=1.0,
+            number_skyr=1,
+            number_iter=1,
+            sigma=0.0,
+            seed=1,
+        )
+
+        self.assertEqual(len(coords), 1)
+        self.assertGreater(np.min(pattern), 0.0)
+        self.assertLess(np.min(pattern), 1.0)
+
+
+class ApertureAreaAverageTests(unittest.TestCase):
+    def test_subpixel_aperture_hole_has_area_averaged_transmission(self) -> None:
+        """Test that a subpixel aperture hole is partial, not binary."""
+        aperture = Apertures3D(
+            shape=(1, 17, 17),
+            real_space_pixel_size=1.0,
+            layer_thicknesses=[1.0],
+        )
+        aperture.create_circle_aperture(
+            center=(8.0, 8.0),
+            radius=0.3,
+            depth=1,
+            use_real_space_coordinates=False,
+            sigma=0.0,
+            top_radius_factor=1.0,
+            use_roi=True,
+        )
+
+        transmission = aperture.return_aperture_mask()[0]
+        self.assertGreater(np.min(transmission), 0.0)
+        self.assertLess(np.min(transmission), 1.0)
 
 
 if __name__ == "__main__":

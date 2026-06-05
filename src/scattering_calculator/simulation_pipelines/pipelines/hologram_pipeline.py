@@ -396,6 +396,11 @@ class HologramPipelineRanges:
     # Detector
     detector_distance: float | Uniform | Callable[[dict[str, Any]], Any] | None = None
     detector_pixel_size: float | Uniform | None = None
+    detector_center: (
+        tuple[float | Uniform, float | Uniform]
+        | Callable[[dict[str, Any]], tuple[float, float]]
+        | None
+    ) = None
     detector_noise_rms: float | Uniform | None = None
     detector_params: dict | None = None
     artifacts_config: dict | None = None
@@ -827,6 +832,9 @@ class HologramPipeline:
         params["coherence_length"] = _pick(
             rng.xray_coherence_length, cfg.xray_coherence_length, params
         )
+        params["detector_center"] = _pick(
+            rng.detector_center, cfg.detector_center, params
+        )
         params["detector_pixel_size"] = _pick(
             rng.detector_pixel_size, cfg.detector_pixel_size, params
         )
@@ -1152,14 +1160,28 @@ class HologramPipeline:
         t_stage = mark_stage("xray", t_stage)
 
         # ---- Detector + beamstop config ----------------------------------
-        detector_center = cfg.detector_center or tuple(
+        detector_center = p["detector_center"] or tuple(
             np.array(cfg.detector_shape) // 2
         )
+        detector_center = tuple(float(v) for v in detector_center)
+        beamstop_values = dict(p["beamstop_config"])
+        beamstop_center = tuple(detector_center)
+        for center_key in ("beamstop_center", "bs_center", "center"):
+            if center_key in beamstop_values:
+                beamstop_center = tuple(float(v) for v in beamstop_values.pop(center_key))
+                break
+        for offset_key in ("beamstop_center_offset_px", "center_offset_px"):
+            if offset_key in beamstop_values:
+                offset = beamstop_values.pop(offset_key)
+                beamstop_center = tuple(
+                    float(c) + float(d) for c, d in zip(beamstop_center, offset)
+                )
+                break
         beamstop_config = BeamstopConfig(
             bs_method=cfg.beamstop_method,
             bs_detector_distance=cfg.beamstop_distance,
-            bs_center=tuple(detector_center),
-            bs_config=p["beamstop_config"],
+            bs_center=beamstop_center,
+            bs_config=beamstop_values,
         )
         detector_config = DetectorConfig(
             pixel_size=p["detector_pixel_size"],

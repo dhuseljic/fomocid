@@ -200,6 +200,7 @@ class beamstop:
         wire_width: float = 0.0,
         wire_bend: float = 0.0,
         antialias: int = 1,
+        antialias_method: str = "analytic",
         seed: int | None = None,
         theta: float | None = None,
         ellipticity_range: tuple[float, float] | None = None,
@@ -238,6 +239,11 @@ class beamstop:
             Supersampling factor used while rasterising the beamstop and wire.
             Values greater than 1 average sub-pixels back to detector pixels,
             reducing stair-step artifacts for thin or diagonal features.
+        antialias_method : {"analytic", "supersample"}, optional
+            ``"analytic"`` uses detector-resolution signed-distance coverage
+            and avoids building a full supersampled detector grid. It is much
+            faster for large detectors. ``"supersample"`` keeps the historical
+            full-grid subpixel averaging. Default is ``"analytic"``.
         seed : int or None, optional
             Random seed for reproducible beamstops.
         theta : float or None, optional
@@ -269,8 +275,9 @@ class beamstop:
             ellipticity = ellipticity_range
         orientation = angle
         antialias = max(1, int(antialias))
+        antialias_method = str(antialias_method)
 
-        if antialias > 1:
+        if antialias > 1 and antialias_method == "supersample":
             rows, cols = self.detector_shape
             sample_y = (
                 (np.arange(rows * antialias, dtype=float) + 0.5) / antialias
@@ -311,7 +318,12 @@ class beamstop:
                 boundary, 1.0 - 2.0 * roughness, 1.0 + 2.0 * roughness
             )
 
-        mask = (normalized_radius <= boundary).astype(float)
+        if antialias > 1 and antialias_method == "analytic":
+            edge_scale = max(1e-12, min(abs(radius_x), abs(radius_y)))
+            edge_distance = (boundary - normalized_radius) * edge_scale
+            mask = np.clip(edge_distance + 0.5, 0.0, 1.0)
+        else:
+            mask = (normalized_radius <= boundary).astype(float)
 
         if wire_width_effective > 0:
             along_wire = cos_orientation * dx + sin_orientation * dy
@@ -323,10 +335,14 @@ class beamstop:
                 np.sin(2.0 * np.pi * along_wire / bend_period + bend_phase)
                 - np.sin(bend_phase)
             )
-            wire_mask = np.abs(across_wire - bend) <= (0.5 * wire_width_effective)
+            wire_distance = 0.5 * wire_width_effective - np.abs(across_wire - bend)
+            if antialias > 1 and antialias_method == "analytic":
+                wire_mask = np.clip(wire_distance + 0.5, 0.0, 1.0)
+            else:
+                wire_mask = wire_distance >= 0
             mask = np.maximum(mask, wire_mask.astype(float))
 
-        if antialias > 1:
+        if antialias > 1 and antialias_method == "supersample":
             rows, cols = self.detector_shape
             mask = mask.reshape(rows, antialias, cols, antialias).mean(axis=(1, 3))
 

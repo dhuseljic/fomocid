@@ -51,6 +51,29 @@ def test_pipeline_config_does_not_duplicate_per_sample_configs(tmp_path: Path) -
         assert sorted(h5["_pipeline_config"].keys()) == ["n_samples", "oversampling"]
 
 
+def test_detector_center_can_be_sampled_from_ranges(tmp_path: Path) -> None:
+    pipeline = HologramPipeline(
+        config=HologramPipelineConfig(
+            recipe="SiN(80)",
+            detector_shape=(100, 120),
+            detector_center=(50, 60),
+        ),
+        ranges=HologramPipelineRanges(
+            detector_center=lambda params: (
+                params["detector_shape"][0] / 2 + 7,
+                params["detector_shape"][1] / 2 - 5,
+            )
+        ),
+        output_path=tmp_path / "output.h5",
+        n_samples=1,
+        verbose=False,
+    )
+
+    params = pipeline._sample_params()
+
+    assert params["detector_center"] == (57, 55)
+
+
 def test_write_precomputed_result_requires_single_sample(tmp_path: Path) -> None:
     pipeline = HologramPipeline(
         config=HologramPipelineConfig(recipe="SiN(80)"),
@@ -361,8 +384,12 @@ def test_skyrmion_sigma_is_converted_from_metres_and_softens_edges() -> None:
     sharp_pattern, _ = sharp.create_pattern()
     smooth_pattern, _ = smooth.create_pattern()
 
-    assert set(sharp_pattern.flat) <= {-1.0, 1.0}
+    sharp_intermediate = np.count_nonzero((sharp_pattern > -1.0) & (sharp_pattern < 1.0))
+    smooth_intermediate = np.count_nonzero((smooth_pattern > -1.0) & (smooth_pattern < 1.0))
+
+    assert sharp_intermediate > 0
     assert np.any((smooth_pattern > -1.0) & (smooth_pattern < 1.0))
+    assert smooth_intermediate > sharp_intermediate
 
 
 def test_disordered_skyrmion_sigma_softens_edges() -> None:

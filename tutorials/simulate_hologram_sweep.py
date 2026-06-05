@@ -43,7 +43,7 @@ use_roi = True # set True to use a region of interest around the sample for the 
 dielectric_tensor_use_roi = True # set True to only compute the dielectric tensor in a region of interest around the sample, which can greatly speed up simulations with large free-space regions; set False to compute the full dense tensor stack, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
 dielectric_tensor_compact = True  # avoid allocating the full dense tensor stack
 propagate = True  # set True for multislice free-space propagation between layers
-multislice_propagation_roi = False  # if True, propagate aperture ROI crops and add local corrections to the plane-wave baseline
+multislice_propagation_roi = True  # if True, propagate aperture ROI crops and add local corrections to the plane-wave baseline
 multislice_propagation_roi_padding_px = 64  # enlarges ROI propagation boxes around apertures, especially useful for RHs
 multislice_propagation_roi_merge_overlaps = True  # merge overlapping padded ROI crops before propagation; set False for faster separate crops
 propagation_padding_px = 128  # 0 disables padded free-space propagation
@@ -71,7 +71,12 @@ coherence_length = (100e-6, 100e-6)  # m, (y, x)
 detector_pixel_size = 20e-6  # m/px
 detector_pixel_shape = (1300, 1300)
 detector_distance = 0.02  # m
-detector_center = (650, 650)  # px
+detector_center = (
+    detector_pixel_shape[0] / 2,
+    detector_pixel_shape[1] / 2,
+)  # px, (y, x) direct-beam position on the detector
+detector_center_jitter_fraction = 0.05  # sample detector_center within +/-5% of each detector axis
+beamstop_center_jitter_radius_fraction = 0.5  # sample beamstop offset within +/-0.5 projected beamstop radii
 detector_params = {
     "readout_noise_average": 50,
     # Canonical readout-noise width. The legacy name "noise_rms" is only an alias.
@@ -109,7 +114,7 @@ beamstop_config = {
     "roughness_modes": (3, 9),
     "wire_width": 0.05e-3,
     "wire_bend": 0.1e-3,
-    "antialias": 4,
+    "antialias": 2,
     "seed": None,
 }
 
@@ -194,9 +199,11 @@ aperture_radii = [60e-9, 6e-9, 4e-9]  # m
 aperture_roughness_amplitude = 20e-9  # m, target boundary fluctuation scale
 aperture_roughness_period = 10e-9  # m, target boundary fluctuation period
 aperture_centers = [(0, 0), (0.2e-6, -0.15e-6), (0.15e-6, 0.15e-6)]  # m (y, x)
-aperture_sigmas = [1e-9, 2e-9, 2e-9]  # m
+aperture_sigmas = [1e-9, 2e-9, 2e-9]  # m, continuous edge transition widths
 aperture_angles = [0.0, 0.0, 0.0]  # rad
 aperture_ellipticities = [1.0, 1.0, 1.0]  # y/x axis ratio
+max_oh_radius_in_texture_widths = 8.0  # avoids tiny domains inside pathologically huge OHs
+max_magnetic_pattern_roi_pixels = 768  # approximate cap for the OH-local magnetic texture ROI
 
 
 def aperture_roughness_from_length(
@@ -455,10 +462,23 @@ def random_aperture_config(params):
     aperture_seeds = [int(np.random.randint(0, 2**31 - 1))]
     aperture_top_radius_factors = [Uniform(1.0, 2.0).sample()]
 
-    # Object hole radius: larger than the sampled texture period and 100 nm,
-    # but smaller than one quarter of the mask FOV and 5 um.
+    # Object hole radius: larger than the sampled texture period, but not so
+    # large that a small magnetic texture length produces an enormous local
+    # pattern-generation ROI.
+    real_space_pixel_size = real_space_resolution / params["oversampling"]
     oh_radius_min = max(stripe_width, 250e-9)
-    oh_radius_max = np.amin([min(fov_xy / 8, 3e-6) ,3e-6])
+    oh_radius_max = np.amin(
+        [
+            min(fov_xy / 8, 3e-6),
+            3e-6,
+            max_oh_radius_in_texture_widths * stripe_width,
+            (
+                max_magnetic_pattern_roi_pixels
+                * real_space_pixel_size
+                / (2.5 * aperture_top_radius_factors[0])
+            ),
+        ]
+    )
     if oh_radius_max <= oh_radius_min:
         oh_radius = oh_radius_min
     else:
@@ -596,6 +616,51 @@ def random_coherence_length(params):
     return (base * (1.0 + anisotropy), base * (1.0 - anisotropy))
 
 
+def random_detector_center(params):
+    """Sample an off-centre direct-beam position in detector pixels."""
+    shape_y, shape_x = params["detector_shape"]
+    return (
+        Uniform(
+            shape_y / 2 - detector_center_jitter_fraction * shape_y,
+            shape_y / 2 + detector_center_jitter_fraction * shape_y,
+        ).sample(),
+        Uniform(
+            shape_x / 2 - detector_center_jitter_fraction * shape_x,
+            shape_x / 2 + detector_center_jitter_fraction * shape_x,
+        ).sample(),
+    )
+
+
+def random_beamstop_config(params):
+    """Sample beamstop geometry and offset it around the sampled detector centre.
+
+    Beamstop radius is specified at the beamstop plane in metres. The centre is
+    stored in detector pixels, so the random offset is drawn in units of the
+    projected beamstop radius on the detector.
+    """
+    radius = Uniform(0.15e-3, 0.5e-3).sample()
+    projected_radius_px = (
+        radius
+        * params["detector_distance"]
+        / (params["detector_distance"] - beamstop_distance)
+        / params["detector_pixel_size"]
+    )
+    max_offset_px = beamstop_center_jitter_radius_fraction * projected_radius_px
+    center_offset_px = (
+        Uniform(-max_offset_px, max_offset_px).sample(),
+        Uniform(-max_offset_px, max_offset_px).sample(),
+    )
+    return {
+        "radius": radius,
+        "center_offset_px": center_offset_px,
+        "angle": Uniform(0.0, np.pi).sample(),
+        "sigma": Uniform(10e-6, 30e-6).sample(),
+        "wire_width": Uniform(0.05e-3, 0.1e-3).sample(),
+        "wire_bend": Uniform(0.0, 0.75e-3).sample(),
+        "antialias": 2,
+    }
+
+
 ###############################################################################################################
 ###############################################################################################################
 ###############################################################################################################
@@ -604,6 +669,10 @@ def random_coherence_length(params):
 ranges = HologramPipelineRanges(
     # Sweep X-ray energy across the Co L-edge absorption region
     xray_energy=Uniform(775, 795),
+    # Move the direct beam away from the exact detector middle by up to
+    # +/-5% of the image size in y and x.
+    detector_center=random_detector_center,
+
     xray_coherence_length=random_coherence_length,
     # Random illumination geometry
     illumination_focus_distance=Uniform(0.0, 2e-3),
@@ -638,15 +707,10 @@ ranges = HologramPipelineRanges(
 
     # Generate interdependent magnetic stripe parameters first.
     pattern_config=random_pattern_config,
-    # Generate beamstop parameters from reasonable ranges
-    beamstop_config={
-        "radius": Uniform(0.1e-3, 0.5e-3),
-        "angle": Uniform(0.0, np.pi),
-        "sigma": Uniform(10e-6, 30e-6),
-        "wire_width": Uniform(0.05e-3, 0.1e-3),
-        "wire_bend": Uniform(0.0, 0.75e-3),
-        "antialias": 4,
-    },
+    # Generate beamstop parameters from reasonable ranges. The beamstop centre
+    # follows the sampled detector centre, with an additional random offset of
+    # +/-0.5 projected beamstop radii in detector pixels.
+    beamstop_config=random_beamstop_config,
 
     artifacts_config = {
         "sigma_photon": Uniform(0.7,0.9),

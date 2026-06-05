@@ -1574,8 +1574,9 @@ class Apertures2D:
             using the real-space coordinate grid. Otherwise, treat the radius
             as already given in pixels.
         sigma : float or None, optional
-            Standard deviation of the Gaussian smoothing filter in pixels.
-            No smoothing when ``None`` or ``0``.
+            Edge transition width in pixels for the continuous aperture mask.
+            A value of ``None`` or ``0`` gives a hard continuous boundary that
+            is still averaged over each output pixel.
 
         Returns
         -------
@@ -1769,8 +1770,9 @@ class Apertures3D:
             using the real-space coordinate grid. Otherwise, treat the radius
             as already given in pixels.
         sigma : float or None, optional
-            Standard deviation of the Gaussian smoothing filter in pixels.
-            No smoothing when ``None`` or ``0``.
+            Edge transition width in pixels for the continuous aperture mask.
+            A value of ``None`` or ``0`` gives a hard continuous boundary that
+            is still averaged over each output pixel.
         top_radius_factor : float, optional
             Ratio between the aperture radius at the top surface and the base
             radius at ``depth``. ``1`` gives the old cylindrical aperture;
@@ -1919,8 +1921,8 @@ class Apertures3D:
         if ellipticity <= 0:
             raise ValueError(f"ellipticity must be positive, got {ellipticity}")
 
-        radius_y = radius * np.sqrt(ellipticity)
-        radius_x = radius / np.sqrt(ellipticity)
+        radius_y = max(float(radius) * np.sqrt(ellipticity), 1e-12)
+        radius_x = max(float(radius) / np.sqrt(ellipticity), 1e-12)
         cos_angle = np.cos(angle)
         sin_angle = np.sin(angle)
         half_x = np.sqrt((radius_x * cos_angle) ** 2 + (radius_y * sin_angle) ** 2)
@@ -1950,6 +1952,11 @@ class Apertures3D:
     ) -> NDArray[np.float64]:
         """Create a possibly elliptical and rough aperture-hole mask.
 
+        Pixel values approximate the area average of the continuous aperture
+        hole over each pixel. This keeps subpixel holes at reduced transmission
+        contrast instead of snapping them to binary full-open/full-closed
+        pixels.
+
         Parameters
         ----------
         shape : Any
@@ -1976,40 +1983,80 @@ class Apertures3D:
         result : NDArray[np.float64]
             Return value produced by the function.
         """
-        _, ny, nx = shape
-        dy = np.arange(ny, dtype=float)[:, None] - center[0]
-        dx = np.arange(nx, dtype=float)[None, :] - center[1]
-
         ellipticity = float(ellipticity)
         if ellipticity <= 0:
             raise ValueError(f"ellipticity must be positive, got {ellipticity}")
 
+        _, ny, nx = shape
         radius_y = radius * np.sqrt(ellipticity)
         radius_x = radius / np.sqrt(ellipticity)
         cos_angle = np.cos(angle)
         sin_angle = np.sin(angle)
-        xr = cos_angle * dx + sin_angle * dy
-        yr = -sin_angle * dx + cos_angle * dy
-        normalized_radius = np.sqrt((xr / radius_x) ** 2 + (yr / radius_y) ** 2)
+        edge_width = max(0.0, float(sigma or 0.0))
+        smallest_length = min(
+            value
+            for value in (abs(float(radius_y)), abs(float(radius_x)), edge_width or 1.0)
+            if value > 0
+        )
+        if smallest_length < 0.75:
+            antialias_samples = 9
+        elif smallest_length < 1.5:
+            antialias_samples = 7
+        elif smallest_length < 3.0:
+            antialias_samples = 5
+        else:
+            antialias_samples = 3
 
+        rough_modes = []
         if roughness > 0:
-            polar_angle = np.arctan2(yr / radius_y, xr / radius_x)
-            boundary = np.ones((ny, nx), dtype=float)
             rng = np.random.default_rng(seed)
             min_mode, max_mode = roughness_modes
             for mode in range(max(1, int(min_mode)), int(max_mode) + 1):
-                amplitude = rng.normal(scale=roughness / mode)
-                phase = rng.uniform(0.0, 2.0 * np.pi)
-                boundary += amplitude * np.cos(mode * polar_angle + phase)
-            boundary = np.clip(
-                boundary, 1.0 - 2.0 * roughness, 1.0 + 2.0 * roughness
-            )
-            mask = (normalized_radius <= boundary).astype(float)
-        else:
-            mask = (normalized_radius <= 1.0).astype(float)
+                rough_modes.append(
+                    (
+                        mode,
+                        float(rng.normal(scale=roughness / mode)),
+                        float(rng.uniform(0.0, 2.0 * np.pi)),
+                    )
+                )
 
-        if sigma is not None and sigma != 0:
-            mask = gaussian_filter(mask, sigma)
+        sample_offsets = (
+            np.arange(antialias_samples, dtype=float) + 0.5
+        ) / antialias_samples - 0.5
+        y_base = np.arange(ny, dtype=float)
+        x_base = np.arange(nx, dtype=float)
+        effective_radius = np.sqrt(radius_y * radius_x)
+        mask = np.zeros((ny, nx), dtype=float)
+        for y_offset in sample_offsets:
+            dy = (y_base + y_offset)[:, None] - center[0]
+            for x_offset in sample_offsets:
+                dx = (x_base + x_offset)[None, :] - center[1]
+                xr = cos_angle * dx + sin_angle * dy
+                yr = -sin_angle * dx + cos_angle * dy
+                normalized_radius = np.sqrt((xr / radius_x) ** 2 + (yr / radius_y) ** 2)
+
+                boundary = 1.0
+                if rough_modes:
+                    polar_angle = np.arctan2(yr / radius_y, xr / radius_x)
+                    boundary = np.ones((ny, nx), dtype=float)
+                    for mode, amplitude, phase in rough_modes:
+                        boundary += amplitude * np.cos(mode * polar_angle + phase)
+                    boundary = np.clip(
+                        boundary, 1.0 - 2.0 * roughness, 1.0 + 2.0 * roughness
+                    )
+
+                signed_distance = (boundary - normalized_radius) * effective_radius
+                if edge_width > 0:
+                    transition = np.clip(
+                        0.5 + 0.5 * signed_distance / edge_width,
+                        0.0,
+                        1.0,
+                    )
+                    mask += transition * transition * (3.0 - 2.0 * transition)
+                else:
+                    mask += (signed_distance >= 0).astype(float)
+
+        mask /= antialias_samples**2
         return mask
 
     def create_empty_aperture(self) -> None:

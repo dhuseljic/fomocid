@@ -14,6 +14,30 @@ from scattering_calculator.sample_generator.gray_scott_generator_binary import (
 from scattering_calculator.utils.masking import circle_mask
 
 
+def _profile_antialias_samples(*lengths: float) -> int:
+    """Choose a local subpixel integration grid for sampled continuous profiles."""
+    finite_lengths = [abs(float(value)) for value in lengths if value is not None]
+    smallest = min((value for value in finite_lengths if value > 0), default=1.0)
+    if smallest < 0.75:
+        return 9
+    if smallest < 1.5:
+        return 7
+    if smallest < 3.0:
+        return 5
+    return 3
+
+
+def _smooth_profile_from_signed_distance(
+    signed_distance: NDArray[np.float64],
+    wall_width: float,
+) -> NDArray[np.float64]:
+    """Map signed distance to core occupancy before pixel-area averaging."""
+    if wall_width <= 0:
+        return (signed_distance >= 0).astype(float)
+    transition = np.clip(0.5 + 0.5 * signed_distance / wall_width, 0.0, 1.0)
+    return transition * transition * (3.0 - 2.0 * transition)
+
+
 def map_magnetization_to_3d(
     magnetic_pattern_x: NDArray[np.float64] | None = None,
     magnetic_pattern_y: NDArray[np.float64] | None = None,
@@ -84,12 +108,12 @@ def create_skyrmion_pattern(
     seed: int | None = None,
     batch_size: int = 256,
 ) -> tuple[NDArray[np.float64], NDArray[np.int_]]:
-    """Create a random skyrmion pattern using batched placement and KDTree screening.
+    """Create a random circular-skyrmion pattern with KDTree screening.
 
-    Functionally identical to :func:`create_skyrmion_pattern` but significantly
-    faster for dense patterns. Candidates are generated in batches and overlap
-    is checked with a KDTree distance query (O(log n)) instead of a 2-D mask
-    scan per candidate.
+    Candidates are generated in batches and overlap is checked with a KDTree
+    distance query instead of a 2-D mask scan per candidate. Skyrmion cores are
+    sampled from a continuous radial profile so small skyrmions retain subpixel
+    edge information.
 
     Parameters
     ----------
@@ -104,8 +128,9 @@ def create_skyrmion_pattern(
     number_iter : int
         Maximum total number of candidates generated before giving up.
     sigma : float or None, optional
-        Standard deviation of the Gaussian smoothing filter. No smoothing when
-        ``None``. Default is ``None``.
+        Domain-wall transition width in pixels. The rendered value in each
+        output pixel is a subpixel average of the continuous profile. If omitted
+        or zero, the integrated profile has a hard wall.
     plot : bool, optional
         If ``True``, plot the screening kernel and the final pattern.
         Default is ``False``.
@@ -141,15 +166,34 @@ def create_skyrmion_pattern(
         ]
     )
 
-    sz = np.ceil(2 * screening_radius).astype(int)
+    edge_width = max(0.0, float(sigma or 0.0))
+    kernel_radius = max(float(screening_radius), float(skyr_radius) + edge_width)
+    sz = np.ceil(2 * kernel_radius).astype(int)
     sky_px = sz + 1
 
     screening_mask = circle_mask(
         (sky_px, sky_px), (0.5 * sz, 0.5 * sz), np.floor(screening_radius)
     )
-    skyrmion_kernel = circle_mask(
-        (sky_px, sky_px), (0.5 * sz, 0.5 * sz), np.floor(skyr_radius)
-    )
+    kernel_y = np.arange(sky_px, dtype=float) - 0.5 * sz
+    kernel_x = np.arange(sky_px, dtype=float) - 0.5 * sz
+    antialias_samples = _profile_antialias_samples(skyr_radius, edge_width)
+    subpixel_offsets = (
+        np.arange(antialias_samples, dtype=float) + 0.5
+    ) / antialias_samples - 0.5
+    skyrmion_kernel = np.zeros((sky_px, sky_px), dtype=float)
+    for y_offset in subpixel_offsets:
+        for x_offset in subpixel_offsets:
+            kernel_yy, kernel_xx = np.meshgrid(
+                kernel_y + y_offset,
+                kernel_x + x_offset,
+                indexing="ij",
+            )
+            signed_distance = float(skyr_radius) - np.hypot(kernel_yy, kernel_xx)
+            skyrmion_kernel += _smooth_profile_from_signed_distance(
+                signed_distance,
+                edge_width,
+            )
+    skyrmion_kernel /= antialias_samples**2
 
     pattern = np.zeros((sz_array[0] + sky_px, sz_array[1] + sky_px))
     placed: list[list[int]] = []
@@ -197,13 +241,7 @@ def create_skyrmion_pattern(
     pbar.close()
     print(f"Placed {len(placed)} skyrmions in {n_iter} iterations.")
 
-    if sigma is not None:
-        pattern = gaussian_filter(pattern, sigma)
-
-    max_val = np.max(pattern)
-    if max_val > 0:
-        pattern = pattern / max_val
-    pattern = -(2 * (pattern - 0.5))
+    pattern = 1.0 - 2.0 * np.clip(pattern, 0.0, 1.0)
 
     half = np.floor(sky_px / 2).astype(int)
     pattern = pattern[half : half + sz_array[0], half : half + sz_array[1]]
@@ -482,15 +520,23 @@ def skyrmions_on_lattice(
     return pattern
 
 
-def _rough_ellipse_mask(
+def _rough_ellipse_profile(
     radius_y: float,
     radius_x: float,
     angle: float = 0.0,
     roughness: float = 0.0,
     roughness_modes: tuple[int, int] = (0, 0),
+    wall_width: float | None = None,
+    center_offset: tuple[float, float] = (0.0, 0.0),
     rng: np.random.Generator | None = None,
 ) -> NDArray[np.float64]:
-    """Return a local binary mask for one elliptical, rough skyrmion core.
+    """Return a sampled continuous profile for one rough elliptical skyrmion.
+
+    The profile is averaged over each output pixel instead of drawing a binary
+    stamp or evaluating only at pixel centers. This is important for small
+    skyrmions: subpixel centers, ellipticity, roughness, and the wall width all
+    contribute continuously instead of collapsing to crosses or full-contrast
+    single pixels.
 
     Parameters
     ----------
@@ -504,6 +550,12 @@ def _rough_ellipse_mask(
         Input value for ``roughness``.
     roughness_modes : tuple[int, int]
         Input value for ``roughness_modes``.
+    wall_width : float | None
+        Domain-wall transition width in pixels. If omitted or zero, the
+        integrated profile has a hard wall.
+    center_offset : tuple[float, float]
+        Subpixel ``(row, col)`` offset between the requested skyrmion center and
+        the integer crop center.
     rng : np.random.Generator | None
         Input value for ``rng``.
 
@@ -513,36 +565,60 @@ def _rough_ellipse_mask(
         Return value produced by the function.
     """
     rng = np.random.default_rng() if rng is None else rng
-    radius_y = max(float(radius_y), 0.5)
-    radius_x = max(float(radius_x), 0.5)
+    radius_y = max(float(radius_y), 1e-12)
+    radius_x = max(float(radius_x), 1e-12)
     roughness = max(0.0, float(roughness))
     roughness_scale = 1.0 + 2.0 * roughness
-    half_y = int(np.ceil(radius_y * roughness_scale)) + 3
-    half_x = int(np.ceil(radius_x * roughness_scale)) + 3
+    edge_width = max(0.0, float(wall_width or 0.0))
+    half_y = int(np.ceil(radius_y * roughness_scale + 2.0 * edge_width)) + 3
+    half_x = int(np.ceil(radius_x * roughness_scale + 2.0 * edge_width)) + 3
 
-    y = np.arange(-half_y, half_y + 1)
-    x = np.arange(-half_x, half_x + 1)
-    yy, xx = np.meshgrid(y, x, indexing="ij")
-
+    center_y_offset, center_x_offset = (
+        float(center_offset[0]),
+        float(center_offset[1]),
+    )
+    y = np.arange(-half_y, half_y + 1, dtype=float) - center_y_offset
+    x = np.arange(-half_x, half_x + 1, dtype=float) - center_x_offset
     cos_a = np.cos(angle)
     sin_a = np.sin(angle)
-    x_rot = xx * cos_a + yy * sin_a
-    y_rot = -xx * sin_a + yy * cos_a
-    normalized_radius = np.sqrt((y_rot / radius_y) ** 2 + (x_rot / radius_x) ** 2)
-
-    boundary = 1.0
+    rough_modes: list[tuple[int, float, float]] = []
     if roughness > 0:
-        polar_angle = np.arctan2(y_rot / radius_y, x_rot / radius_x)
         min_mode, max_mode = roughness_modes
         if max_mode >= min_mode and min_mode >= 1:
-            boundary = np.ones_like(normalized_radius)
             for mode in range(int(min_mode), int(max_mode) + 1):
-                amplitude = rng.normal(scale=roughness / mode)
-                phase = rng.uniform(0, 2 * np.pi)
-                boundary += amplitude * np.cos(mode * polar_angle + phase)
-            boundary = np.clip(boundary, 1.0 - 2.0 * roughness, 1.0 + 2.0 * roughness)
+                rough_modes.append(
+                    (
+                        mode,
+                        float(rng.normal(scale=roughness / mode)),
+                        float(rng.uniform(0, 2 * np.pi)),
+                    )
+                )
 
-    return (normalized_radius <= boundary).astype(float)
+    effective_radius = np.sqrt(radius_y * radius_x)
+    antialias_samples = _profile_antialias_samples(radius_y, radius_x, edge_width)
+    subpixel_offsets = (
+        np.arange(antialias_samples, dtype=float) + 0.5
+    ) / antialias_samples - 0.5
+    profile = np.zeros((len(y), len(x)), dtype=float)
+    for y_offset in subpixel_offsets:
+        for x_offset in subpixel_offsets:
+            yy, xx = np.meshgrid(y + y_offset, x + x_offset, indexing="ij")
+            x_rot = xx * cos_a + yy * sin_a
+            y_rot = -xx * sin_a + yy * cos_a
+            normalized_radius = np.sqrt((y_rot / radius_y) ** 2 + (x_rot / radius_x) ** 2)
+
+            boundary = 1.0
+            if rough_modes:
+                polar_angle = np.arctan2(y_rot / radius_y, x_rot / radius_x)
+                boundary = np.ones_like(normalized_radius)
+                for mode, amplitude, phase in rough_modes:
+                    boundary += amplitude * np.cos(mode * polar_angle + phase)
+                boundary = np.clip(boundary, 1.0 - 2.0 * roughness, 1.0 + 2.0 * roughness)
+
+            signed_distance = (boundary - normalized_radius) * effective_radius
+            profile += _smooth_profile_from_signed_distance(signed_distance, edge_width)
+
+    return profile / antialias_samples**2
 
 
 def create_disordered_skyrmion_lattice_pattern(
@@ -567,15 +643,17 @@ def create_disordered_skyrmion_lattice_pattern(
     ``stripe_width`` is interpreted as the average skyrmion diameter in pixels.
     ``diameter_spread`` and ``sigma`` are also pixel lengths by the time this
     function is called; pipeline configs can specify them in metres and
-    :class:`MagneticPatternConfig` converts them. ``diameter_spread`` is a
-    bounded half-range, so diameters are sampled from
-    ``diameter +/- diameter_spread`` instead of an unbounded Gaussian. The
-    skyrmion density is an approximate target area fraction of skyrmion cores
-    in the generated field. If ``placement_radius`` is provided, random
-    candidate centers are drawn inside that circular placement region, normally
-    the OH radius plus one skyrmion diameter. Candidate centers are accepted
-    greedily only when their conservative bounding radii do not overlap any
-    previously accepted skyrmion.
+    :class:`MagneticPatternConfig` converts them. ``sigma`` controls the
+    continuous domain-wall transition width used while sampling each skyrmion,
+    not a global blur applied after drawing. ``diameter_spread`` is a bounded
+    half-range, so diameters are sampled from ``diameter +/- diameter_spread``
+    instead of an unbounded Gaussian. The skyrmion density is an approximate
+    target area fraction of skyrmion cores in the generated field. If
+    ``placement_radius`` is provided, random candidate centers are drawn inside
+    that circular placement region, normally the OH radius plus one skyrmion
+    diameter. Candidate centers are accepted greedily only when their
+    conservative bounding radii do not overlap any previously accepted
+    skyrmion.
 
     Parameters
     ----------
@@ -629,73 +707,114 @@ def create_disordered_skyrmion_lattice_pattern(
         )
 
     core_area = np.pi * (diameter / 2.0) ** 2
-    target_n = max(1, int(np.round(skyrmion_density * rows * cols / core_area)))
+    if placement_radius is None:
+        placement_area = float(rows * cols)
+    else:
+        placement_area = min(
+            float(rows * cols),
+            np.pi * max(0.0, float(placement_radius)) ** 2,
+        )
+    target_n = max(1, int(np.round(skyrmion_density * placement_area / core_area)))
     if target_n <= 0:
         pattern = np.ones((rows, cols), dtype=float)
         return pattern, np.empty((0, 2), dtype=float)
 
-    candidate_count = max(1000, 50 * target_n)
     if placement_center is None:
         center_y = 0.5 * (rows - 1)
         center_x = 0.5 * (cols - 1)
     else:
         center_y, center_x = (float(placement_center[0]), float(placement_center[1]))
-    center_candidate = np.array([[center_y, center_x]])
+    center_candidate = np.array([[center_y, center_x]], dtype=float)
 
+    # Build a randomised hexagonal proposal grid. This gives near-Poisson
+    # candidate coverage with far fewer doomed attempts than pure rejection
+    # sampling, especially for high densities or small skyrmions.
+    proposal_oversampling = 1.8
+    spacing = np.sqrt(
+        2.0 * placement_area / (np.sqrt(3.0) * max(1.0, proposal_oversampling * target_n))
+    )
+    spacing = max(1.0, spacing)
+    row_step = spacing * np.sqrt(3.0) / 2.0
     if placement_radius is None:
-        sites_arr = np.column_stack(
-            [
-                rng.uniform(0, rows, size=candidate_count),
-                rng.uniform(0, cols, size=candidate_count),
-            ]
-        )
+        y_min, y_max = 0.0, float(rows - 1)
+        x_min, x_max = 0.0, float(cols - 1)
     else:
         radius = max(0.0, float(placement_radius))
-        angles = rng.uniform(0, 2 * np.pi, size=candidate_count)
-        radii = radius * np.sqrt(rng.uniform(0, 1, size=candidate_count))
-        sites_arr = np.column_stack(
-            [
-                center_y + radii * np.sin(angles),
-                center_x + radii * np.cos(angles),
-            ]
-        )
-        inside = (
-            (sites_arr[:, 0] >= 0)
-            & (sites_arr[:, 0] < rows)
-            & (sites_arr[:, 1] >= 0)
-            & (sites_arr[:, 1] < cols)
-        )
-        sites_arr = sites_arr[inside]
-    sites_arr = np.vstack([center_candidate, sites_arr])
+        y_min = max(0.0, center_y - radius)
+        y_max = min(float(rows - 1), center_y + radius)
+        x_min = max(0.0, center_x - radius)
+        x_max = min(float(cols - 1), center_x + radius)
+
+    sites = []
+    y_values = np.arange(y_min, y_max + row_step, row_step)
+    for row_index, y_base in enumerate(y_values):
+        x_offset = 0.5 * spacing if row_index % 2 else 0.0
+        x_values = np.arange(x_min + x_offset, x_max + spacing, spacing)
+        for x_base in x_values:
+            y_site = y_base + rng.uniform(-0.35 * row_step, 0.35 * row_step)
+            x_site = x_base + rng.uniform(-0.35 * spacing, 0.35 * spacing)
+            if not (0 <= y_site < rows and 0 <= x_site < cols):
+                continue
+            if placement_radius is not None and np.hypot(
+                y_site - center_y, x_site - center_x
+            ) > radius:
+                continue
+            sites.append((y_site, x_site))
+
+    if sites:
+        sites_arr = np.asarray(sites, dtype=float)
+        sites_arr = sites_arr[rng.permutation(len(sites_arr))]
+        sites_arr = np.vstack([center_candidate, sites_arr])
+    else:
+        sites_arr = center_candidate
     diameter_half_range = min(max(0.0, float(diameter_spread)), 0.2 * diameter)
     accepted: list[dict[str, float | NDArray[np.float64]]] = []
-    candidate_order = np.concatenate(
-        ([0], 1 + rng.permutation(len(sites_arr) - 1))
+    wall_width = max(0.5, float(sigma or 0.0))
+    roughness_scale = 1.0 + 2.0 * max(0.0, float(roughness))
+    max_possible_radius = 0.5 * (diameter + diameter_half_range)
+    max_possible_bounding_radius = (
+        max_possible_radius * np.sqrt(float(ellipticity[1])) * roughness_scale
+        + 2.0 * wall_width
     )
-    for candidate_index in candidate_order:
+    cell_size = max(1.0, 2.0 * max_possible_bounding_radius)
+    spatial_index: dict[tuple[int, int], list[int]] = {}
+
+    def _cell(y_value, x_value):
+        return (int(np.floor(y_value / cell_size)), int(np.floor(x_value / cell_size)))
+
+    def _nearby_indices(y_value, x_value, bounding_radius):
+        cell_y, cell_x = _cell(y_value, x_value)
+        search_radius = int(
+            np.ceil((bounding_radius + max_possible_bounding_radius) / cell_size)
+        )
+        for yy in range(cell_y - search_radius, cell_y + search_radius + 1):
+            for xx in range(cell_x - search_radius, cell_x + search_radius + 1):
+                yield from spatial_index.get((yy, xx), ())
+
+    for y_center, x_center in sites_arr:
         if len(accepted) >= target_n:
             break
-        y_center, x_center = sites_arr[candidate_index]
         local_diameter = diameter
         if diameter_half_range > 0:
             local_diameter = rng.uniform(
                 diameter - diameter_half_range,
                 diameter + diameter_half_range,
             )
-            local_diameter = max(1.0, local_diameter)
+            local_diameter = max(1e-12, local_diameter)
         local_ellipticity = rng.uniform(float(ellipticity[0]), float(ellipticity[1]))
         radius = 0.5 * local_diameter
         radius_y = radius * np.sqrt(local_ellipticity)
         radius_x = radius / np.sqrt(local_ellipticity)
-        roughness_scale = 1.0 + 2.0 * max(0.0, float(roughness))
-        bounding_radius = max(radius_y, radius_x) * roughness_scale
+        bounding_radius = max(radius_y, radius_x) * roughness_scale + 2.0 * wall_width
         if any(
             np.hypot(y_center - item["y"], x_center - item["x"])
             < bounding_radius + item["bounding_radius"]
-            for item in accepted
+            for item_index in _nearby_indices(y_center, x_center, bounding_radius)
+            for item in (accepted[item_index],)
         ):
             continue
 
+        accepted_index = len(accepted)
         accepted.append(
             {
                 "y": float(y_center),
@@ -706,6 +825,7 @@ def create_disordered_skyrmion_lattice_pattern(
                 "bounding_radius": float(bounding_radius),
             }
         )
+        spatial_index.setdefault(_cell(y_center, x_center), []).append(accepted_index)
 
     sites_arr = np.asarray(
         [[item["y"], item["x"]] for item in accepted], dtype=float
@@ -713,18 +833,20 @@ def create_disordered_skyrmion_lattice_pattern(
 
     core = np.zeros((rows, cols), dtype=float)
     for item in accepted:
-        mask = _rough_ellipse_mask(
+        cy = int(np.round(item["y"]))
+        cx = int(np.round(item["x"]))
+        mask = _rough_ellipse_profile(
             item["radius_y"],
             item["radius_x"],
             angle=item["angle"],
             roughness=roughness,
             roughness_modes=roughness_modes,
+            wall_width=wall_width,
+            center_offset=(float(item["y"]) - cy, float(item["x"]) - cx),
             rng=rng,
         )
         half_y = mask.shape[0] // 2
         half_x = mask.shape[1] // 2
-        cy = int(np.round(item["y"]))
-        cx = int(np.round(item["x"]))
         y0 = max(0, cy - half_y)
         y1 = min(rows, cy - half_y + mask.shape[0])
         x0 = max(0, cx - half_x)
@@ -734,12 +856,6 @@ def create_disordered_skyrmion_lattice_pattern(
         mx0 = x0 - (cx - half_x)
         mx1 = mx0 + (x1 - x0)
         core[y0:y1, x0:x1] = np.maximum(core[y0:y1, x0:x1], mask[my0:my1, mx0:mx1])
-
-    if sigma is not None and sigma > 0:
-        core = gaussian_filter(core, sigma)
-        max_val = np.max(core)
-        if max_val > 0:
-            core = core / max_val
 
     pattern = 1.0 - 2.0 * np.clip(core, 0.0, 1.0)
 

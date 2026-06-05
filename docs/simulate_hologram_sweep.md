@@ -322,6 +322,18 @@ Large final stripes therefore use a smaller generated source field when
 possible, while still regenerating a larger field if the measured FFT stripe
 width would make the scaled image too small to crop safely.
 
+The sweep also caps the random OH size relative to the magnetic texture length:
+
+```python
+max_oh_radius_in_texture_widths = 8.0
+max_magnetic_pattern_roi_pixels = 768
+```
+
+This prevents unlucky combinations such as very small magnetic domains inside a
+very large object hole, which can make the OH-local magnetic-pattern ROI large
+and slow to generate. Increase these values when you intentionally want a large
+object hole containing many magnetic domains.
+
 ### Experimental Image Patterns
 
 The notebook and sweep script can use a binary experimental FTH reconstruction
@@ -354,14 +366,44 @@ beamstop_config = {
     "sigma": 20e-6,
     "wire_width": 0.05e-3,
     "wire_bend": 0.1e-3,
-    "antialias": 4,
+    "antialias": 2,
 }
 ```
 
-`antialias` supersamples the beamstop and wire mask before averaging back to
-detector pixels. Values above `1` reduce stair-step artifacts for thin or
-diagonal wires and produce fractional mask values at edges. Use `1` for the
-historical binary rasterization.
+The sweep script also randomizes the direct-beam detector position:
+
+```python
+detector_center=random_detector_center
+```
+
+`random_detector_center()` samples `(y, x)` in detector pixels within
+`+/-5%` of the image size around the detector midpoint. The beamstop center
+starts from that sampled detector center and then receives its own random
+misalignment:
+
+```python
+beamstop_config=random_beamstop_config
+```
+
+The beamstop radius is still specified in metres at the beamstop plane. The
+extra center offset is drawn in detector pixels after projecting the beamstop
+radius to the detector plane, with the default range
+`+/-0.5 * projected_beamstop_radius`.
+
+`antialias` controls the beamstop and wire edge smoothing. Values above `1`
+produce fractional mask values at edges. Use `1` for historical binary
+rasterization.
+
+By default, anti-aliased beamstops use `antialias_method="analytic"`, which
+computes fractional edge coverage at detector resolution instead of allocating a
+full supersampled detector. This is much faster for large images. For exact
+historical subpixel averaging, add `antialias_method="supersample"` to
+`beamstop_config`, but expect it to be substantially slower.
+
+The important convention is that detector pixels store an average of the
+continuous beamstop transmission over the pixel area. A beamstop edge, wire, or
+subpixel object therefore produces fractional values instead of snapping to a
+binary on/off value at the pixel center.
 
 The normal detected hologram applies the beamstop before readout noise,
 rounding, thresholding, and frame averaging. To additionally save a detected
@@ -387,11 +429,30 @@ The random skyrmion generator uses:
 - `roughness_modes`: Fourier modes used for the rough boundary.
 
 Each skyrmion gets its own random diameter, ellipticity, rotation angle, and
-rough boundary. Candidate centers are sampled randomly inside the OH placement
-region, using the OH radius plus one average skyrmion diameter as the placement
-radius. A center candidate is tried first so low-density skyrmion samples still
-contain at least one skyrmion inside the OH field of view. Candidates are
-accepted only if they do not overlap previously accepted skyrmions.
+rough boundary. The disordered skyrmion lattice is rendered from a continuous
+rough elliptical radial profile sampled onto the magnetic-pattern grid, rather
+than from a binary pixel stamp that is blurred afterwards. This keeps very small
+skyrmions subpixel-aware: they can have smooth partial-pixel edges instead of
+collapsing into isolated binary pixels or cross-like shapes. The value assigned
+to each magnetic-pattern pixel is the area average of the continuous skyrmion
+profile over that pixel. A skyrmion occupying only part of one pixel therefore
+has proportionally reduced contrast instead of full `-1/+1` contrast. `sigma`
+is still specified in metres in the configuration, but after conversion to
+pixels it is used as the skyrmion domain-wall transition width. If `sigma=0`,
+the renderer integrates a hard continuous skyrmion boundary over the pixel
+area.
+
+The simpler `skyrmion_pattern` generator follows the same idea for circular
+skyrmions: it samples a continuous circular core with a finite transition width
+instead of drawing a hard binary circle and applying a global blur.
+
+Candidate centers are generated from a jittered hexagonal proposal grid inside
+the OH placement region, using the OH radius plus one average skyrmion diameter
+as the placement radius. A center candidate is tried first so low-density
+skyrmion samples still contain at least one skyrmion inside the OH field of
+view. Candidates are accepted only if they do not overlap nearby accepted
+skyrmions. A spatial hash keeps those overlap checks local, so dense cases do
+not spend most of their time testing failed random attempts.
 
 ### Aperture Geometry And Roughness
 
@@ -403,6 +464,13 @@ holes (`RH`). Apertures are layer-aware:
 - The two layers closest to the SiN membrane remain cylindrical; if the stack
   above SiN is only two layers, the aperture stays cylindrical.
 - Deeper layers below the taper keep the base aperture size.
+
+Aperture holes use the same pixel-area averaging convention as beamstops and
+skyrmions. The continuous aperture transmission is integrated over each
+transverse pixel, so a reference hole smaller than one pixel becomes a partial
+transmission change rather than a full binary pixel. `aperture_sigmas` are
+continuous edge transition widths in metres after conversion to pixels, not
+post-drawing Gaussian blurs.
 
 Boundary roughness is specified in physical units in the sweep script:
 
