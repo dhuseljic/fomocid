@@ -142,6 +142,20 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         self.assertTrue(np.all(np.diff(edge_to_center) > 0.0))
         self.assertAlmostEqual(edge_to_center[-1], 1.0)
 
+    def test_roi_correction_window_tapers_only_artificial_edges(self) -> None:
+        """Test that ROI correction windows avoid hard artificial crop edges."""
+        window = wavefronts._roi_correction_window(
+            (6, 6),
+            (10, 10),
+            (slice(0, 6), slice(2, 8)),
+            taper_px=2,
+        )
+
+        self.assertTrue(np.allclose(window[:, 0], 0.0))
+        self.assertTrue(np.allclose(window[:, -1], 0.0))
+        self.assertAlmostEqual(window[0, 3], 1.0)
+        self.assertAlmostEqual(window[3, 3], 1.0)
+
     def test_compact_dielectric_stack_matches_dense_stack(self) -> None:
         """Test that compact dielectric stack matches dense stack.
 
@@ -298,8 +312,10 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         self.assertEqual(calls, [(6, 6, 2)])
         self.assertTrue(np.allclose(out, expected))
 
-    def test_roi_free_space_propagation_can_keep_overlapping_roi_crops_separate(self) -> None:
-        """Test that overlapping roi crops can stay separate when requested.
+    def test_roi_free_space_propagation_merges_physical_overlaps_even_when_disabled(
+        self,
+    ) -> None:
+        """Test that overlapping aperture supports are always merged.
 
         Parameters
         ----------
@@ -312,6 +328,106 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
             The function completes in place.
         """
         field = np.ones((8, 8, 2), dtype=complex)
+        wavelength = 1e-9
+        dz = 2e-9
+        baseline = field * np.exp(-1j * 2 * np.pi / wavelength * dz)
+        correction = 2.0 + 0.5j
+        calls = []
+
+        def fake_local_propagator(
+            E_crop,
+            wavelength,
+            dz,
+            pixel_size,
+            padding_px=0,
+            padding_mode="edge",
+            absorber_width_px=0,
+            absorber_strength=0.0,
+            absorber_profile="cosine",
+        ):
+            calls.append(E_crop.shape)
+            local_baseline = E_crop * np.exp(-1j * 2 * np.pi / wavelength * dz)
+            return local_baseline + correction
+
+        wf = object.__new__(wavefronts)
+        wf.propagate_free_space_jones = fake_local_propagator
+        regions = (
+            (slice(1, 5), slice(1, 5)),
+            (slice(3, 7), slice(3, 7)),
+        )
+
+        out = wf.propagate_free_space_jones_roi(
+            field,
+            wavelength=wavelength,
+            dz=dz,
+            pixel_size=1e-9,
+            aperture_support_regions=regions,
+            merge_overlaps=False,
+        )
+
+        expected = baseline.copy()
+        expected[slice(1, 7), slice(1, 7), :] += correction
+
+        self.assertEqual(calls, [(6, 6, 2)])
+        self.assertTrue(np.allclose(out, expected))
+
+    def test_roi_free_space_propagation_merges_overlapping_padded_crops(self) -> None:
+        """Test that overlapping padded crops merge even when opt-out is set."""
+        field = np.ones((10, 10, 2), dtype=complex)
+        wavelength = 1e-9
+        dz = 2e-9
+        baseline = field * np.exp(-1j * 2 * np.pi / wavelength * dz)
+        correction = 2.0 + 0.5j
+        calls = []
+
+        def fake_local_propagator(
+            E_crop,
+            wavelength,
+            dz,
+            pixel_size,
+            padding_px=0,
+            padding_mode="edge",
+            absorber_width_px=0,
+            absorber_strength=0.0,
+            absorber_profile="cosine",
+        ):
+            calls.append(E_crop.shape)
+            local_baseline = E_crop * np.exp(-1j * 2 * np.pi / wavelength * dz)
+            return local_baseline + correction
+
+        wf = object.__new__(wavefronts)
+        wf.propagate_free_space_jones = fake_local_propagator
+        regions = (
+            (slice(1, 3), slice(1, 3)),
+            (slice(5, 7), slice(5, 7)),
+        )
+
+        out = wf.propagate_free_space_jones_roi(
+            field,
+            wavelength=wavelength,
+            dz=dz,
+            pixel_size=1e-9,
+            aperture_support_regions=regions,
+            roi_padding_px=2,
+            merge_overlaps=False,
+        )
+
+        expected = baseline.copy()
+        merged_region = (slice(0, 9), slice(0, 9))
+        window = wavefronts._roi_correction_window(
+            (9, 9),
+            field.shape[:2],
+            merged_region,
+            taper_px=2,
+        )
+        expected[merged_region[0], merged_region[1], :] += correction * window[..., None]
+
+        self.assertEqual(calls, [(9, 9, 2)])
+        self.assertTrue(np.allclose(out, expected))
+
+    def test_roi_free_space_propagation_keeps_disjoint_padded_crops_separate(self) -> None:
+        """Test that non-overlapping padded crops can stay separate."""
+        field = np.ones((12, 12, 2), dtype=complex)
         wavelength = 1e-9
         dz = 2e-9
         baseline = field * np.exp(-1j * 2 * np.pi / wavelength * dz)
@@ -337,8 +453,8 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         wf = object.__new__(wavefronts)
         wf.propagate_free_space_jones = fake_local_propagator
         regions = (
-            (slice(1, 5), slice(1, 5)),
-            (slice(3, 7), slice(3, 7)),
+            (slice(1, 3), slice(1, 3)),
+            (slice(8, 10), slice(8, 10)),
         )
 
         out = wf.propagate_free_space_jones_roi(
@@ -347,12 +463,33 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
             dz=dz,
             pixel_size=1e-9,
             aperture_support_regions=regions,
+            roi_padding_px=1,
             merge_overlaps=False,
         )
 
         expected = baseline.copy()
-        expected[regions[0][0], regions[0][1], :] += corrections[0]
-        expected[regions[1][0], regions[1][1], :] += corrections[1]
+        padded_regions = (
+            (slice(0, 4), slice(0, 4)),
+            (slice(7, 11), slice(7, 11)),
+        )
+        first_window = wavefronts._roi_correction_window(
+            (4, 4),
+            field.shape[:2],
+            padded_regions[0],
+            taper_px=1,
+        )
+        second_window = wavefronts._roi_correction_window(
+            (4, 4),
+            field.shape[:2],
+            padded_regions[1],
+            taper_px=1,
+        )
+        expected[padded_regions[0][0], padded_regions[0][1], :] += (
+            corrections[0] * first_window[..., None]
+        )
+        expected[padded_regions[1][0], padded_regions[1][1], :] += (
+            corrections[1] * second_window[..., None]
+        )
 
         self.assertEqual(calls["count"], 2)
         self.assertTrue(np.allclose(out, expected))

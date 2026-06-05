@@ -1075,9 +1075,11 @@ class Structure:
         The base tensor is the charge/isotropic contribution for each layer.
         Magnetic XMCD and XMLD terms are only added where they can affect the
         hologram: inside the aperture support, i.e. pixels belonging to an OH/RH
-        opening in at least one layer. Outside that support the material remains
-        diagonal, which lets the Jones propagator use its fast diagonal path for
-        the gold-covered regions where domains are not visible.
+        opening in at least one layer. Intersecting aperture funnels are already
+        combined by the multiplied mask and therefore become one connected
+        support ROI. Outside that support the material remains diagonal, which
+        lets the Jones propagator use its fast diagonal path for the
+        gold-covered regions where domains are not visible.
 
         The 3-D ``mask`` still controls whether material or vacuum is present at
         each layer/pixel. Vacuum pixels are set to an identity dielectric tensor
@@ -1086,8 +1088,10 @@ class Structure:
         Parameters
         ----------
         use_aperture_roi : bool
-            If ``True``, split the aperture support into local bounding boxes and
-            apply magnetic/vacuum corrections only in those regions. If
+            If ``True``, split the aperture support into connected local
+            bounding boxes and apply magnetic/vacuum corrections only in those
+            regions. Physically intersecting funnels are one connected support
+            and are not split into independent ROIs. If
             ``False``, use the full 2-D aperture-support mask, matching the
             pre-ROI optimization path for timing comparisons.
 

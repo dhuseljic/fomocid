@@ -76,7 +76,9 @@ class wavefronts:
         multislice_propagation_roi_padding_px : Any
             Input value for ``multislice_propagation_roi_padding_px``.
         multislice_propagation_roi_merge_overlaps : Any
-            Input value for ``multislice_propagation_roi_merge_overlaps``.
+            Retained for API compatibility. Physical aperture support overlaps
+            and padded propagation-box overlaps are always merged. If ``False``,
+            only disjoint padded boxes may remain separate.
         farfield_oversampling : Any
             Integer factor used to extend the complex exit wave before the
             far-field FFT. Values above ``1`` use ``farfield_background_jones``
@@ -594,11 +596,15 @@ class wavefronts:
         Outside the ROI boxes the field is assumed locally plane-wave-like and
         receives only the zero-spatial-frequency angular-spectrum phase.
         Each ROI contributes only its deviation from the plane-wave baseline.
-        If ``merge_overlaps`` is ``True``, padded ROI boxes that overlap are
-        merged before propagation, so nearby apertures are treated as one local
-        diffraction problem instead of separate crops competing in shared
-        pixels. This is faster than a global FFT but intentionally approximate
-        because true free-space propagation couples all pixels.
+        Padded ROI boxes that overlap are always merged before propagation.
+        Otherwise the same output pixels would receive multiple independent
+        local FFT corrections, which can create nonphysical bright overlap
+        artifacts. The local correction is also tapered smoothly to zero at
+        artificial ROI crop borders, so the result returns to the plane-wave
+        baseline without a hard rectangular paste edge. ``merge_overlaps`` is
+        retained for API compatibility; when ``False``, disjoint padded crops
+        stay separate. This is faster than a global FFT but intentionally
+        approximate because true free-space propagation couples all pixels.
 
         Parameters
         ----------
@@ -654,13 +660,19 @@ class wavefronts:
         baseline = np.asarray(E_in * np.exp(-1j * k0 * dz), dtype=complex)
         E_out = baseline.copy()
 
+        # Physical aperture/funnel overlaps are not an optional ROI approximation:
+        # the intersecting holes form one sample volume and must be propagated as
+        # one crop. Padded propagation overlaps are also merged because separate
+        # crops would add multiple local FFT corrections into the same pixels.
+        physical_support_regions = self._merge_overlapping_regions(
+            aperture_support_regions
+        )
         roi_regions = self._pad_regions(
-            aperture_support_regions,
+            physical_support_regions,
             E_in.shape[:2],
             roi_padding_px,
         )
-        if merge_overlaps:
-            roi_regions = self._merge_overlapping_regions(roi_regions)
+        roi_regions = self._merge_overlapping_regions(roi_regions)
         for region in roi_regions:
             region_key = (*region, slice(None))
             local_out = self.propagate_free_space_jones(
@@ -674,7 +686,14 @@ class wavefronts:
                 absorber_strength=absorber_strength,
                 absorber_profile=absorber_profile,
             )
-            E_out[region_key] += local_out - baseline[region_key]
+            correction = local_out - baseline[region_key]
+            correction_window = self._roi_correction_window(
+                correction.shape[:2],
+                E_in.shape[:2],
+                region,
+                roi_padding_px,
+            )
+            E_out[region_key] += correction * correction_window[..., None]
 
         return E_out
 
@@ -767,6 +786,41 @@ class wavefronts:
         return tuple(
             (slice(y0, y1), slice(x0, x1)) for y0, y1, x0, x1 in merged
         )
+
+    @staticmethod
+    def _roi_correction_window(local_shape, full_shape, region, taper_px):
+        """Return a smooth paste window for an ROI propagation correction."""
+        taper_px = max(0, int(taper_px))
+        if taper_px <= 0:
+            return np.ones(local_shape, dtype=float)
+
+        ny, nx = local_shape
+        full_ny, full_nx = full_shape
+        y_slice, x_slice = region
+        y = np.arange(ny, dtype=float)[:, None]
+        x = np.arange(nx, dtype=float)[None, :]
+
+        y_distances = []
+        x_distances = []
+        if int(y_slice.start or 0) > 0:
+            y_distances.append(y)
+        if int(y_slice.stop) < int(full_ny):
+            y_distances.append(ny - 1 - y)
+        if int(x_slice.start or 0) > 0:
+            x_distances.append(x)
+        if int(x_slice.stop) < int(full_nx):
+            x_distances.append(nx - 1 - x)
+
+        distance = np.full((ny, nx), np.inf, dtype=float)
+        for item in y_distances:
+            distance = np.minimum(distance, item)
+        for item in x_distances:
+            distance = np.minimum(distance, item)
+        if np.all(np.isinf(distance)):
+            return np.ones(local_shape, dtype=float)
+
+        ramp = np.clip(distance / float(taper_px), 0.0, 1.0)
+        return np.sin(0.5 * np.pi * ramp) ** 2
 
     @classmethod
     def _normalize_padding_mode(cls, padding_mode):

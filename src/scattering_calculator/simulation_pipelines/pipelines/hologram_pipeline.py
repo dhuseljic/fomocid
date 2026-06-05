@@ -235,14 +235,19 @@ class HologramPipelineConfig:
         Extra pixels added around each aperture ROI box before approximate
         ROI-only free-space propagation. This is separate from
         ``propagation_padding_px``, which pads FFT boundaries inside each ROI
-        crop but does not enlarge the returned propagated area. Default ``0``.
+        crop but does not enlarge the returned propagated area. The local
+        diffraction correction is smoothly tapered across this ROI padding
+        before it is added back to the full field, which avoids hard rectangular
+        paste edges. Default ``0``.
     multislice_propagation_roi_merge_overlaps : bool
-        If ``True``, merge overlapping padded ROI boxes before local
-        propagation so nearby apertures are propagated as one larger local crop.
-        This is safer when reference-hole ROIs overlap the object-hole ROI, but
-        can be slower because the merged crop is larger. If ``False``, keep
-        padded ROI boxes separate and add each local correction independently.
-        Default ``True``.
+        Retained as the user-facing ROI merge preference. Aperture supports
+        that overlap in the physical material mask are always merged before
+        padding, regardless of this flag, because intersecting funnels are one
+        hole system. Padded boxes that overlap are also merged even if this is
+        ``False``; otherwise the same pixels would receive multiple local
+        diffraction corrections. If ``False``, only disjoint padded boxes from
+        physically separate aperture supports may remain separate. Default
+        ``True``.
     farfield_oversampling : int
         Factor used to extend the complex exit wave before the far-field FFT.
         Values above ``1`` fill the larger field with the configured
