@@ -33,8 +33,8 @@ recipe = "[Au(140)Cr(60)]x5/SiN(200)/Pt(20)Al(20)Co(20)"
 
 # simulation sampling options; these can be overridden in the ranges below to create mixed sampling
 oversampling=2 # sampling of the sample relative to the dector-based sampling; e.g. oversampling=2 means the sample grid has 2x finer pixel size than the detector-projected pixel size in the sample plane; this is separate from farfield_oversampling, which controls the hologram sampling relative to the detector
-farfield_oversampling = 1  # >1 extends the exit wave with the physical background before the far-field FFT
-detector_pixel_footprint_samples = 1  # sub-samples per detector-pixel axis when footprint averaging is enabled
+farfield_oversampling = 2  # >1 extends the exit wave with the physical background before the far-field FFT
+detector_pixel_footprint_samples = 2  # sub-samples per detector-pixel axis when footprint averaging is enabled
 
 # %%
 # ===================
