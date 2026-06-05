@@ -30,7 +30,11 @@ nr_simulations = 2  # increase to e.g. 1000 for a full training dataset
 
 # --- Material stack ---
 recipe = "[Au(140)Cr(60)]x5/SiN(200)/Pt(20)Al(20)Co(20)"
-oversampling=2
+
+# simulation sampling options; these can be overridden in the ranges below to create mixed sampling
+oversampling=2 # sampling of the sample relative to the dector-based sampling; e.g. oversampling=2 means the sample grid has 2x finer pixel size than the detector-projected pixel size in the sample plane; this is separate from farfield_oversampling, which controls the hologram sampling relative to the detector
+farfield_oversampling = 1  # >1 extends the exit wave with the physical background before the far-field FFT
+detector_pixel_footprint_samples = 1  # sub-samples per detector-pixel axis when footprint averaging is enabled
 
 # %%
 # ===================
@@ -38,6 +42,9 @@ oversampling=2
 # ===================
 output_folder = DATA_ROOT / "Data" / "hologram_sweep"
 output_path = output_folder / "simulation_sweep.h5"
+
+
+# Pipeline settings that are fixed across all runs in the sweep. These can be overridden in the ranges below to create mixed sampling, but any field not mentioned in the ranges will always use these values.
 pipeline_random_seed = 0  # set to None for non-reproducible random sweeps
 use_roi = True # set True to use a region of interest around the sample for the whole pipeline, which can greatly speed up simulations with large free-space regions; set False to use the full grid, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
 dielectric_tensor_use_roi = True # set True to only compute the dielectric tensor in a region of interest around the sample, which can greatly speed up simulations with large free-space regions; set False to compute the full dense tensor stack, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
@@ -52,6 +59,8 @@ propagation_absorber_width_px = 64  # 0 disables edge absorption
 propagation_absorber_strength = 6.0  # larger values damp padded-edge wraparound more
 propagation_absorber_profile = "cosine"  # "cosine", "smoothstep", "quadratic", or "linear"
 save_detected_hologram_without_beamstop = True # set True to save an extra detected hologram without the beamstop shadow (for supervised learning or beamstop ablation studies)
+use_detector_pixel_footprint = True  # True = average the ideal hologram over each finite detector pixel
+
 
 os.makedirs(output_folder, exist_ok=True)
 
@@ -77,6 +86,8 @@ detector_center = (
 )  # px, (y, x) direct-beam position on the detector
 detector_center_jitter_fraction = 0.05  # sample detector_center within +/-5% of each detector axis
 beamstop_center_jitter_radius_fraction = 0.5  # sample beamstop offset within +/-0.5 projected beamstop radii
+
+
 detector_params = {
     "readout_noise_average": 50,
     # Canonical readout-noise width. The legacy name "noise_rms" is only an alias.
@@ -279,6 +290,8 @@ config = HologramPipelineConfig(
     detector_params=detector_params,
     measurement_config=measurement_config,
     artifacts_config=artifacts_config,
+    use_detector_pixel_footprint=use_detector_pixel_footprint,
+    detector_pixel_footprint_samples=detector_pixel_footprint_samples,
     # Beamstop
     beamstop_method=beamstop_method,
     beamstop_distance=beamstop_distance,
@@ -317,6 +330,7 @@ config = HologramPipelineConfig(
     propagation_absorber_width_px=propagation_absorber_width_px,
     propagation_absorber_strength=propagation_absorber_strength,
     propagation_absorber_profile=propagation_absorber_profile,
+    farfield_oversampling=farfield_oversampling,
     # Simulation grid: sample_shape = oversampling * detector_shape
     oversampling=oversampling,
     random_seed=pipeline_random_seed,

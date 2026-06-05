@@ -40,6 +40,8 @@ class wavefronts:
         multislice_propagation_roi=False,
         multislice_propagation_roi_padding_px=0,
         multislice_propagation_roi_merge_overlaps=True,
+        farfield_oversampling=1,
+        farfield_background_jones=None,
     ):
         """Initialize a wavefronts instance.
 
@@ -75,6 +77,13 @@ class wavefronts:
             Input value for ``multislice_propagation_roi_padding_px``.
         multislice_propagation_roi_merge_overlaps : Any
             Input value for ``multislice_propagation_roi_merge_overlaps``.
+        farfield_oversampling : Any
+            Integer factor used to extend the complex exit wave before the
+            far-field FFT. Values above ``1`` use ``farfield_background_jones``
+            outside the simulated central field.
+        farfield_background_jones : Any
+            Background Jones exit wave on the extended grid, used when
+            ``farfield_oversampling > 1``.
 
         Returns
         -------
@@ -95,6 +104,7 @@ class wavefronts:
         self.multislice_propagation_roi_merge_overlaps = bool(
             multislice_propagation_roi_merge_overlaps
         )
+        self.farfield_oversampling = max(1, int(farfield_oversampling))
         self.exit_wave = self.propagate_jones_multislice(
             E_in=self.E_in,
             eps_stack=eps_stack,
@@ -115,8 +125,40 @@ class wavefronts:
                 self.multislice_propagation_roi_merge_overlaps
             ),
         )
-        self.detector_wave = image_transformator.Fraunhofer_propagation_jones(self.exit_wave)
+        self.exit_wave_for_farfield = self._build_farfield_exit_wave(
+            self.exit_wave,
+            farfield_background_jones,
+            self.farfield_oversampling,
+        )
+        self.detector_wave = image_transformator.Fraunhofer_propagation_jones(
+            self.exit_wave_for_farfield
+        )
         self.hologram = E_I(self.detector_wave)
+
+    @staticmethod
+    def _build_farfield_exit_wave(exit_wave, background_jones, oversampling):
+        """Return the complex field used for the far-field FFT."""
+        oversampling = max(1, int(oversampling))
+        if oversampling == 1:
+            return exit_wave
+        if background_jones is None:
+            raise ValueError(
+                "farfield_background_jones is required when farfield_oversampling > 1."
+            )
+
+        ny, nx = exit_wave.shape[:2]
+        expected_shape = (ny * oversampling, nx * oversampling, 2)
+        extended = np.array(background_jones, dtype=complex, copy=True)
+        if extended.shape != expected_shape:
+            raise ValueError(
+                "farfield_background_jones must have shape "
+                f"{expected_shape}, got {extended.shape}."
+            )
+
+        y0 = (extended.shape[0] - ny) // 2
+        x0 = (extended.shape[1] - nx) // 2
+        extended[y0 : y0 + ny, x0 : x0 + nx, :] = exit_wave
+        return extended
 
 
     # ============================================================

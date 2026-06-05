@@ -273,6 +273,7 @@ class ApertureAreaAverageTests(unittest.TestCase):
         transmission = aperture.return_aperture_mask()[0]
         self.assertGreater(np.min(transmission), 0.0)
         self.assertLess(np.min(transmission), 1.0)
+        self.assertAlmostEqual(1.0 - np.min(transmission), np.pi * 0.3**2, places=2)
 
 
 if __name__ == "__main__":

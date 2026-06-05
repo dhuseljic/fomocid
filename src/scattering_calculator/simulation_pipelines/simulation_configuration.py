@@ -341,6 +341,13 @@ class DetectorConfig(_ConfigMixin):
     beamstop : BeamstopConfig or None
         Optional beamstop configuration. If provided, the beamstop is created
         and assigned to the detector layout during ``setup()``.
+    use_detector_pixel_footprint : bool
+        If ``True``, project ideal holograms by averaging over a sub-sampling
+        grid inside each detector pixel. If ``False``, sample at detector pixel
+        centres using positivity-preserving linear interpolation.
+    detector_pixel_footprint_samples : int
+        Number of sub-samples per detector-pixel axis when
+        ``use_detector_pixel_footprint`` is ``True``.
 
     Attributes
     ----------
@@ -380,6 +387,8 @@ class DetectorConfig(_ConfigMixin):
         }
     )
     beamstop_config: BeamstopConfig | None = None
+    use_detector_pixel_footprint: bool = False
+    detector_pixel_footprint_samples: int = 3
 
     def __post_init__(self) -> None:
         """Handle the internal post init operation.
@@ -464,7 +473,15 @@ class DetectorConfig(_ConfigMixin):
         self.propagator = samplepropagationconfig
         self.wavefront = self.propagator.return_wavefront()
         exit_wavefield = self.propagator.return_scalar_wavefield()
-        exit_intensity = np.sum(np.abs(exit_wavefield) ** 2)
+        farfield_exit_wave = getattr(
+            self.wavefront,
+            "exit_wave_for_farfield",
+            self.wavefront.exit_wave,
+        )
+        if farfield_exit_wave is self.wavefront.exit_wave:
+            exit_intensity = np.sum(np.abs(exit_wavefield) ** 2)
+        else:
+            exit_intensity = np.sum(np.abs(farfield_exit_wave) ** 2)
         hologram_intensity = np.sum(self.wavefront.hologram)
         if hologram_intensity <= 0:
             raise ValueError("Cannot scale detector hologram with zero total intensity.")
@@ -500,7 +517,10 @@ class DetectorConfig(_ConfigMixin):
                 self.propagator.IlluminationConfig.beam_params.coherence_length
             ),
         )
-        self.hologram_exp.gnomonic_projection()
+        self.hologram_exp.gnomonic_projection(
+            use_pixel_footprint=self.use_detector_pixel_footprint,
+            pixel_footprint_samples=self.detector_pixel_footprint_samples,
+        )
 
     def return_ideal_hologram(self) -> np.ndarray:
         """Return the ideal (noise-free, artifact-free) hologram as a 2-D array.
@@ -1584,6 +1604,60 @@ class SamplePropagatorConfig(_ConfigMixin):
     propagator_method: Literal["Jones"] | None = "Jones"
     propagator_config: dict = field(default_factory=dict)
 
+    def _illumination_jones_for_shape(self, shape: tuple[int, int]) -> np.ndarray:
+        """Evaluate the configured illumination on ``shape`` with original scaling."""
+        beam_params = self.IlluminationConfig.beam_params
+        pixel_size = self.SampleConfig.real_space_pixel_size
+
+        def build_unscaled(target_shape):
+            illum = light_beam.illumination(beam_params, target_shape, pixel_size)
+            if self.IlluminationConfig.illumination_function == "gaussian":
+                illum.gauss_beam(**self.IlluminationConfig.illumination_config)
+            elif self.IlluminationConfig.illumination_function in ("plane_wave", None):
+                illum.plane_wave(target_shape)
+            else:
+                raise ValueError(
+                    "Far-field background padding only supports gaussian, "
+                    "plane_wave, or None illumination functions."
+                )
+            return light_beam.scalar_to_jones(illum.illumination, beam_params.pol)
+
+        original_shape = self.IlluminationConfig.shape
+        original_unscaled = build_unscaled(original_shape)
+        original_scaled = self.IlluminationConfig.illumination.illumination_jones
+        unscaled_power = np.sum(np.abs(original_unscaled) ** 2)
+        scaled_power = np.sum(np.abs(original_scaled) ** 2)
+        if unscaled_power <= 0 or scaled_power <= 0:
+            raise ValueError("Cannot build far-field background from zero illumination.")
+        scale = np.sqrt(scaled_power / unscaled_power)
+        return build_unscaled(shape) * scale
+
+    def _background_exit_jones(self, shape: tuple[int, int]) -> np.ndarray:
+        """Build the ROI-consistent background exit wave on an extended grid."""
+        background = self._illumination_jones_for_shape(shape)
+        eps_stack = self.SampleConfig.sample_structure.final_dielectric_tensor
+        thicknesses = self.SampleConfig.sample_structure.layer_thicknesses
+        wavelength = self.IlluminationConfig.beam_params.wavelength
+        k0 = 2 * np.pi / wavelength
+        propagate = bool(self.propagator_config.get("propagate", False))
+
+        if hasattr(eps_stack, "base_diagonal"):
+            base_diagonal = eps_stack.base_diagonal
+        else:
+            eps_arr = np.asarray(eps_stack)
+            base_diagonal = np.stack(
+                (eps_arr[:, 0, 0, 0, 0], eps_arr[:, 0, 0, 1, 1]),
+                axis=-1,
+            )
+
+        for iz, dz in enumerate(thicknesses):
+            phase = -1j * k0 * float(dz)
+            background[..., 0] *= np.exp(phase * np.sqrt(base_diagonal[iz, 0]))
+            background[..., 1] *= np.exp(phase * np.sqrt(base_diagonal[iz, 1]))
+            if propagate and iz < len(thicknesses) - 1:
+                background *= np.exp(-1j * k0 * float(dz))
+        return background
+
     def setup(self) -> Jones_propagator.wavefronts:
         """Build the beam propagator object based on the current sample and illumination.
 
@@ -1617,6 +1691,16 @@ class SamplePropagatorConfig(_ConfigMixin):
         result : Any
             Return value produced by the function.
         """
+        farfield_oversampling = int(
+            self.propagator_config.get("farfield_oversampling", 1)
+        )
+        farfield_background_jones = None
+        if farfield_oversampling > 1:
+            ny, nx = self.IlluminationConfig.shape
+            farfield_background_jones = self._background_exit_jones(
+                (ny * farfield_oversampling, nx * farfield_oversampling)
+            )
+
         wavefront = Jones_propagator.wavefronts(
             beam_parameters=self.IlluminationConfig.beam_params,
             eps_stack=self.SampleConfig.sample_structure.final_dielectric_tensor,
@@ -1657,6 +1741,8 @@ class SamplePropagatorConfig(_ConfigMixin):
                     "multislice_propagation_roi_merge_overlaps", True
                 )
             ),
+            farfield_oversampling=farfield_oversampling,
+            farfield_background_jones=farfield_background_jones,
         )
         return wavefront
 

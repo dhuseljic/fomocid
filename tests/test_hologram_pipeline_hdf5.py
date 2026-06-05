@@ -246,12 +246,17 @@ def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path
 
 
 def test_sample_detector_metadata_uses_sibling_config_groups() -> None:
-    detector_config = DetectorConfig()
+    detector_config = DetectorConfig(
+        use_detector_pixel_footprint=True,
+        detector_pixel_footprint_samples=5,
+    )
     metadata = HologramPipeline._detector_metadata(detector_config)
 
     assert "measurement_config/exposure_time" in metadata
     assert "detector_params/counts_per_photon" in metadata
     assert "artifacts_config/sigma_photon" in metadata
+    assert metadata["detector/use_detector_pixel_footprint"] is True
+    assert metadata["detector/detector_pixel_footprint_samples"] == 5
     assert "detector/measurement_config/exposure_time" not in metadata
     assert "detector/artifacts_config/sigma_photon" not in metadata
     assert "artifacts_config/counts_per_photon" not in metadata
@@ -305,6 +310,18 @@ def test_legacy_detector_fields_are_normalized_when_canonical_values_absent(
     assert params["readout_noise_sigma"] == 2
     assert params["quantum_efficiency"] == 0.8
     assert "noise_rms" not in params
+
+
+def test_detector_pixel_footprint_config_is_sampled(tmp_path: Path) -> None:
+    pipeline = _pipeline(
+        tmp_path,
+        use_detector_pixel_footprint=True,
+        detector_pixel_footprint_samples=5,
+    )
+
+    params = pipeline._sample_params()
+    assert params["use_detector_pixel_footprint"] is True
+    assert params["detector_pixel_footprint_samples"] == 5
 
 
 def test_xray_metadata_has_one_canonical_group() -> None:

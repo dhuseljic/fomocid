@@ -177,6 +177,7 @@ propagation_padding_mode = "edge"
 propagation_absorber_width_px = 64
 propagation_absorber_strength = 6.0
 propagation_absorber_profile = "cosine"
+farfield_oversampling = 1
 ```
 
 When `propagate=True`, the Jones field is propagated between consecutive
@@ -251,6 +252,13 @@ the sweep exposes several boundary controls:
   Larger values damp boundary wraparound more aggressively.
 - `propagation_absorber_profile`: how absorption ramps from the interior to the
   edge. `"cosine"` and `"smoothstep"` are usually smoother than a linear ramp.
+- `farfield_oversampling`: factor used to extend the complex exit wave before
+  the far-field FFT. Values above `1` do **not** zero-pad the field. Instead,
+  the larger field is filled with the configured illumination multiplied by the
+  uniform background dielectric stack and the ROI plane-wave free-space factors,
+  then the simulated central exit wave is pasted into the middle. This gives a
+  finer reciprocal-space hologram grid without inventing a black boundary around
+  the sample.
 
 The previous per-polarization implementation is kept in
 `propagate_free_space_jones_260526` for future comparisons.
@@ -405,6 +413,28 @@ continuous beamstop transmission over the pixel area. A beamstop edge, wire, or
 subpixel object therefore produces fractional values instead of snapping to a
 binary on/off value at the pixel center.
 
+Ideal holograms are projected from the simulated reciprocal-space grid onto the
+detector grid with positivity-preserving linear interpolation by default:
+
+```python
+use_detector_pixel_footprint = False
+detector_pixel_footprint_samples = 3
+```
+
+Set `use_detector_pixel_footprint=True` in the sweep file to average each ideal
+detector pixel over a regular
+`detector_pixel_footprint_samples x detector_pixel_footprint_samples`
+sub-sampling grid. This is closer to a finite detector-pixel footprint and
+cannot create negative intensity values from a non-negative hologram, but it is
+slower by roughly the number of sub-samples per pixel. The package default
+`False` mode uses one centre sample per detector pixel and is faster.
+
+In both modes, the projection always applies the flat-detector solid-angle
+collection factor. A pixel at detector-plane coordinate `(x, y)` and
+sample-detector distance `z` is multiplied by
+`(z / sqrt(x**2 + y**2 + z**2))**3`, so off-axis pixels collect fewer photons
+than an on-axis pixel with the same simulated intensity per solid angle.
+
 The normal detected hologram applies the beamstop before readout noise,
 rounding, thresholding, and frame averaging. To additionally save a detected
 hologram as if no beamstop were present, enable:
@@ -465,10 +495,11 @@ holes (`RH`). Apertures are layer-aware:
   above SiN is only two layers, the aperture stays cylindrical.
 - Deeper layers below the taper keep the base aperture size.
 
-Aperture holes use the same pixel-area averaging convention as beamstops and
-skyrmions. The continuous aperture transmission is integrated over each
-transverse pixel, so a reference hole smaller than one pixel becomes a partial
-transmission change rather than a full binary pixel. `aperture_sigmas` are
+Aperture holes use the same fractional-pixel convention as beamstops and
+skyrmions. The continuous aperture transmission is estimated from a native-grid
+signed-distance model, so reference-hole edges and holes smaller than one pixel
+become partial transmission changes rather than full binary pixels. This avoids
+the older expensive subpixel rasterization loop. `aperture_sigmas` are
 continuous edge transition widths in metres after conversion to pixels, not
 post-drawing Gaussian blurs.
 
@@ -603,7 +634,9 @@ values actually used after applying sweep ranges and compatibility aliases:
     │   └── dielectric_tensor/       # tensor ROI/compact flags
     ├── xray/                        # energy, flux, coherence, wavelength
     ├── detector/                    # detector geometry and output switches
-    │   └── save_detected_no_beamstop
+    │   ├── save_detected_no_beamstop
+    │   ├── use_detector_pixel_footprint
+    │   └── detector_pixel_footprint_samples
     ├── detector_params/             # readout noise, threshold, QE, counts/photon
     ├── measurement_config/          # exposure, frames, count normalization
     ├── artifacts_config/            # photon-event shape/splatting controls

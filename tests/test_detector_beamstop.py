@@ -14,7 +14,10 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from scattering_calculator.experimental_conditions.detector import detector_hologram
+from scattering_calculator.experimental_conditions.detector import (
+    detector_hologram,
+    detector_layout,
+)
 from scattering_calculator.simulation_pipelines.simulation_configuration import HologramConfig
 
 
@@ -182,6 +185,101 @@ class DetectorBeamstopTests(unittest.TestCase):
         )
 
         self.assertTrue(np.array_equal(saved["CR"]["detected_no_beamstop"], arr[None]))
+
+    def test_gnomonic_projection_preserves_non_negative_intensity(self) -> None:
+        """Test that detector projection cannot create negative ideal pixels."""
+        layout = detector_layout(
+            pixel_size=1.0,
+            detector_shape=(33, 33),
+            distance_sample_detector=100.0,
+            detector_center=(16, 16),
+        )
+        layout.detqy, layout.detqx = np.meshgrid(
+            np.linspace(-0.45, 0.45, 33),
+            np.linspace(-0.45, 0.45, 33),
+            indexing="ij",
+        )
+        hologram = np.zeros((33, 33), dtype=float)
+        hologram[12:21, 12:21] = 1.0
+
+        projected = detector_hologram(
+            detector_layout=layout,
+            hologram=hologram,
+            beam_parameters=SimpleNamespace(coherence_length=None),
+            real_space_pixel_size=33.0,
+            beamstop=SimpleNamespace(beamstop=np.zeros((33, 33), dtype=float)),
+            measurement_config={"number_frames": 1},
+            detector_params={
+                "readout_noise_average": 0.0,
+                "readout_noise_sigma": 0.0,
+            },
+        )
+        projected.gnomonic_projection()
+
+        self.assertGreaterEqual(np.min(projected.hologram_detector), 0.0)
+
+    def test_gnomonic_projection_can_average_detector_pixel_footprint(self) -> None:
+        """Test optional finite-pixel footprint averaging for ideal holograms."""
+        layout = detector_layout(
+            pixel_size=1.0,
+            detector_shape=(17, 17),
+            distance_sample_detector=100.0,
+            detector_center=(8, 8),
+        )
+        layout.calc_q_space_coordinates(SimpleNamespace(wavevector=1.0))
+        hologram = np.zeros((17, 17), dtype=float)
+        hologram[7:10, 7:10] = 1.0
+
+        projected = detector_hologram(
+            detector_layout=layout,
+            hologram=hologram,
+            beam_parameters=SimpleNamespace(wavevector=1.0, coherence_length=None),
+            real_space_pixel_size=17.0,
+            beamstop=SimpleNamespace(beamstop=np.zeros((17, 17), dtype=float)),
+            measurement_config={"number_frames": 1},
+            detector_params={
+                "readout_noise_average": 0.0,
+                "readout_noise_sigma": 0.0,
+            },
+        )
+        result = projected.gnomonic_projection(
+            use_pixel_footprint=True,
+            pixel_footprint_samples=3,
+        )
+
+        self.assertEqual(result.shape, (17, 17))
+        self.assertGreaterEqual(np.min(result), 0.0)
+        self.assertLessEqual(np.max(result), 1.0)
+
+    def test_gnomonic_projection_applies_flat_detector_solid_angle(self) -> None:
+        """Test that off-axis flat detector pixels collect less solid angle."""
+        layout = detector_layout(
+            pixel_size=1.0,
+            detector_shape=(5, 5),
+            distance_sample_detector=2.0,
+            detector_center=(2, 2),
+        )
+        layout.detqx = np.zeros((5, 5), dtype=float)
+        layout.detqy = np.zeros((5, 5), dtype=float)
+
+        projected = detector_hologram(
+            detector_layout=layout,
+            hologram=np.ones((5, 5), dtype=float),
+            beam_parameters=SimpleNamespace(wavevector=1.0, coherence_length=None),
+            real_space_pixel_size=5.0,
+            beamstop=SimpleNamespace(beamstop=np.zeros((5, 5), dtype=float)),
+            measurement_config={"number_frames": 1},
+            detector_params={
+                "readout_noise_average": 0.0,
+                "readout_noise_sigma": 0.0,
+            },
+        )
+        result = projected.gnomonic_projection()
+
+        expected_corner = (2.0 / np.sqrt(2.0**2 + 2.0**2 + 2.0**2)) ** 3
+        self.assertAlmostEqual(result[2, 2], 1.0)
+        self.assertAlmostEqual(result[0, 0], expected_corner)
+        self.assertLess(result[0, 0], result[2, 2])
 
 
 if __name__ == "__main__":

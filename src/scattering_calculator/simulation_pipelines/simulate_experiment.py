@@ -127,7 +127,18 @@ class SetupSimulationExperiment:
                 detector_params=getattr(self.detector_config, "detector_params", None),
                 coherence_length=self.beam_params.coherence_length,
             )
-            hologram_exp.gnomonic_projection()
+            hologram_exp.gnomonic_projection(
+                use_pixel_footprint=getattr(
+                    self.detector_config,
+                    "use_detector_pixel_footprint",
+                    False,
+                ),
+                pixel_footprint_samples=getattr(
+                    self.detector_config,
+                    "detector_pixel_footprint_samples",
+                    3,
+                ),
+            )
             hologram_exp.add_noise()
             self.holos[ii] = hologram_exp.hologram_exp.copy()
 

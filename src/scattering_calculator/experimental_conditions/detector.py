@@ -718,8 +718,28 @@ class detector_hologram:
             apply_threshold=apply_detector_threshold,
         )
 
-    def gnomonic_projection(self) -> NDArray[np.float64]:
-        """Apply gnomonic projection to the hologram to correct for curvature of the Ewald sphere.
+    def gnomonic_projection(
+        self,
+        use_pixel_footprint: bool = False,
+        pixel_footprint_samples: int = 3,
+    ) -> NDArray[np.float64]:
+        """Project the ideal hologram onto a flat detector.
+
+        The projection maps detector coordinates onto the simulated reciprocal
+        grid and always applies the flat-pixel solid-angle collection factor,
+        ``(z / sqrt(x**2 + y**2 + z**2))**3``, relative to the on-axis pixel.
+
+        Parameters
+        ----------
+        use_pixel_footprint : bool, optional
+            If ``True``, average the projected hologram over a regular
+            sub-sampling grid inside each detector pixel. If ``False``, sample
+            only at the detector pixel centre. Default is ``False``.
+        pixel_footprint_samples : int, optional
+            Number of sub-samples per detector-pixel axis when
+            ``use_pixel_footprint`` is ``True``. A value of ``3`` uses nine
+            sub-samples per detector pixel. Default is ``3``.
+
         Returns
         -------
             hologram_gnomonic : ndarray of shape (Ny, Nx)
@@ -730,19 +750,61 @@ class detector_hologram:
         # therefore Dq / N, so q maps to q / Dq * N + N / 2.
         Dq = 2.0 * np.pi / self.real_space_pixel_size
 
-        ## we just need to rescale detqx so they are expressed in absolute pixel value
-        self.hologram_detector = map_coordinates(
-            self.hologram,
-            [
-                self.detector_layout.detqy / Dq * self.hologram.shape[0]
-                + 1 * self.hologram.shape[0] / 2,
-                self.detector_layout.detqx / Dq * self.hologram.shape[1]
-                + 1 * self.hologram.shape[1] / 2,
-            ],
-            order=5,
-            mode="constant",
-            cval=0,
-        )
+        def solid_angle_factor(detx, dety):
+            z = float(self.detector_layout.distance_sample_detector)
+            r = np.sqrt(detx**2 + dety**2)
+            return (z / np.sqrt(r**2 + z**2)) ** 3
+
+        def sample_q(detqx, detqy):
+            # Rescale detector q-coordinates into hologram pixel coordinates.
+            # The hologram is an intensity, so use positivity-preserving linear
+            # interpolation. Higher-order splines can ring below zero near sharp
+            # hologram features even when every input pixel is non-negative.
+            return map_coordinates(
+                self.hologram,
+                [
+                    detqy / Dq * self.hologram.shape[0]
+                    + 1 * self.hologram.shape[0] / 2,
+                    detqx / Dq * self.hologram.shape[1]
+                    + 1 * self.hologram.shape[1] / 2,
+                ],
+                order=1,
+                mode="constant",
+                cval=0,
+            )
+
+        if not use_pixel_footprint:
+            self.hologram_detector = sample_q(
+                self.detector_layout.detqx,
+                self.detector_layout.detqy,
+            ) * solid_angle_factor(self.detector_layout.detx, self.detector_layout.dety)
+            return self.hologram_detector
+
+        n_samples = max(1, int(pixel_footprint_samples))
+        offsets = (
+            (np.arange(n_samples, dtype=float) + 0.5) / n_samples - 0.5
+        ) * self.detector_layout.pixel_size
+        accumulated = np.zeros(self.detector_layout.detector_shape, dtype=float)
+        for y_offset in offsets:
+            dety = self.detector_layout.dety + y_offset
+            for x_offset in offsets:
+                detx = self.detector_layout.detx + x_offset
+                r = np.sqrt(detx**2 + dety**2)
+                theta = np.arctan2(dety, detx)
+                detqx = (
+                    self.beam_parameters.wavevector
+                    * np.sin(np.arctan(r / self.detector_layout.distance_sample_detector))
+                    * np.cos(theta)
+                )
+                detqy = (
+                    self.beam_parameters.wavevector
+                    * np.sin(np.arctan(r / self.detector_layout.distance_sample_detector))
+                    * np.sin(theta)
+                )
+                accumulated += sample_q(detqx, detqy) * solid_angle_factor(detx, dety)
+
+        self.hologram_detector = accumulated / n_samples**2
+        return self.hologram_detector
 
     def make_tile_class_map(self, shape, tile_size=256, n_classes=32, seed=None):
         """

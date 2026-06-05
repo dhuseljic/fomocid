@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -18,6 +19,48 @@ from scattering_calculator.sample_generator.structures import CompactDielectricT
 
 
 class JonesFreeSpacePropagationTests(unittest.TestCase):
+    def test_farfield_oversampling_uses_background_extended_field(self) -> None:
+        """Test that far-field oversampling FFTs a background-filled field."""
+        field = np.zeros((4, 4, 2), dtype=complex)
+        field[..., 0] = 2.0
+        background = np.ones((8, 8, 2), dtype=complex)
+        eps = np.zeros((1, 4, 4, 2, 2), dtype=complex)
+        eps[..., 0, 0] = 1.0
+        eps[..., 1, 1] = 1.0
+
+        wf = wavefronts(
+            beam_parameters=SimpleNamespace(wavelength=1.0),
+            eps_stack=eps,
+            layer_thicknesses=[0.0],
+            real_space_pixel_size=1.0,
+            E_in=field,
+            farfield_oversampling=2,
+            farfield_background_jones=background,
+        )
+
+        self.assertEqual(wf.exit_wave.shape, (4, 4, 2))
+        self.assertEqual(wf.exit_wave_for_farfield.shape, (8, 8, 2))
+        np.testing.assert_allclose(wf.exit_wave_for_farfield[:2, :2, :], 1.0)
+        np.testing.assert_allclose(wf.exit_wave_for_farfield[2:6, 2:6, :], wf.exit_wave)
+        self.assertEqual(wf.hologram.shape, (8, 8))
+
+    def test_farfield_oversampling_requires_background_field(self) -> None:
+        """Test that physical far-field padding refuses implicit zero padding."""
+        field = np.zeros((4, 4, 2), dtype=complex)
+        eps = np.zeros((1, 4, 4, 2, 2), dtype=complex)
+        eps[..., 0, 0] = 1.0
+        eps[..., 1, 1] = 1.0
+
+        with self.assertRaisesRegex(ValueError, "farfield_background_jones"):
+            wavefronts(
+                beam_parameters=SimpleNamespace(wavelength=1.0),
+                eps_stack=eps,
+                layer_thicknesses=[0.0],
+                real_space_pixel_size=1.0,
+                E_in=field,
+                farfield_oversampling=2,
+            )
+
     def test_padded_propagation_preserves_original_shape(self) -> None:
         """Test that padded propagation preserves original shape.
 

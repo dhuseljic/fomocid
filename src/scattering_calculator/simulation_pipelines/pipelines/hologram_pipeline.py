@@ -114,6 +114,13 @@ class HologramPipelineConfig:
     measurement_config : dict
         Acquisition settings: ``exposure_time``, ``number_frames``, and
         ``max_counts_per_image``.
+    use_detector_pixel_footprint : bool
+        If ``True``, average the ideal hologram projection over a sub-sampling
+        grid inside each detector pixel. This is more physical for finite
+        detector pixels but slower than centre sampling.
+    detector_pixel_footprint_samples : int
+        Number of sub-samples per detector-pixel axis when
+        ``use_detector_pixel_footprint`` is ``True``.
     artifacts_config : dict
         Photon-event shape and splatting settings. It does not own
         ``counts_per_photon``; that value belongs in ``detector_params``.
@@ -236,6 +243,12 @@ class HologramPipelineConfig:
         can be slower because the merged crop is larger. If ``False``, keep
         padded ROI boxes separate and add each local correction independently.
         Default ``True``.
+    farfield_oversampling : int
+        Factor used to extend the complex exit wave before the far-field FFT.
+        Values above ``1`` fill the larger field with the configured
+        illumination multiplied by the uniform background stack and ROI
+        free-space factors, then paste the simulated central exit wave into the
+        middle. Default ``1``.
     oversampling : int
         Oversampling factor relative to the Nyquist limit from the detector.
         ``real_space_pixel_size = detector_resolution / oversampling``.
@@ -284,6 +297,8 @@ class HologramPipelineConfig:
             "max_counts_per_image": None,
         }
     )
+    use_detector_pixel_footprint: bool = False
+    detector_pixel_footprint_samples: int = 3
 
     # Beamstop
     beamstop_method: str | None = "circular"
@@ -349,6 +364,7 @@ class HologramPipelineConfig:
     multislice_propagation_roi: bool = False
     multislice_propagation_roi_padding_px: int = 0
     multislice_propagation_roi_merge_overlaps: bool = True
+    farfield_oversampling: int = 1
 
     # Simulation grid
     oversampling: int = 2
@@ -405,6 +421,8 @@ class HologramPipelineRanges:
     detector_params: dict | None = None
     artifacts_config: dict | None = None
     measurement_config: dict | None = None
+    use_detector_pixel_footprint: bool | None = None
+    detector_pixel_footprint_samples: int | Uniform | None = None
 
     # Beamstop
     beamstop_config: dict | None = None
@@ -874,6 +892,20 @@ class HologramPipeline:
         params["measurement_config"] = _merge_dict(
             rng.measurement_config, cfg.measurement_config, params
         )
+        params["use_detector_pixel_footprint"] = bool(
+            _pick(
+                rng.use_detector_pixel_footprint,
+                cfg.use_detector_pixel_footprint,
+                params,
+            )
+        )
+        params["detector_pixel_footprint_samples"] = int(
+            _pick(
+                rng.detector_pixel_footprint_samples,
+                cfg.detector_pixel_footprint_samples,
+                params,
+            )
+        )
         params["pattern_type"] = _pick(rng.pattern_type, cfg.pattern_type, params)
         params["pattern_config"] = _merge_dict(
             rng.pattern_config, cfg.pattern_config, params
@@ -1191,6 +1223,8 @@ class HologramPipeline:
             detector_params=p["detector_params"],
             artifacts_config=p["artifacts_config"],
             measurement_config=p["measurement_config"],
+            use_detector_pixel_footprint=p["use_detector_pixel_footprint"],
+            detector_pixel_footprint_samples=p["detector_pixel_footprint_samples"],
             beamstop_config=beamstop_config,
         )
         detector_config.setup()
@@ -1510,6 +1544,7 @@ class HologramPipeline:
                     "multislice_propagation_roi_merge_overlaps": (
                         cfg.multislice_propagation_roi_merge_overlaps
                     ),
+                    "farfield_oversampling": cfg.farfield_oversampling,
                 },
             )
             propagator_config.setup()
