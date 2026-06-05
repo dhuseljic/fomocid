@@ -102,6 +102,9 @@ class SetupSimulationExperiment:
                 self.illumination_config.illumination_center,
                 self.illumination_config.illumination_focus_distance,
                 self.illumination_config.illumination_fwhm,
+                alpha_beam=getattr(
+                    self.illumination_config, "illumination_alpha_beam", 0.0
+                ),
             )
             illumination.get_illumination_jones()
 

@@ -207,6 +207,7 @@ else:
 # --- FTH holography mask ---
 aperture_types = ["OH", "RH", "RH"]
 aperture_radii = [60e-9, 6e-9, 4e-9]  # m
+aperture_lengths = [0.0, 0.0, 0.0]  # m, only used by SLIT apertures
 aperture_roughness_amplitude = 20e-9  # m, target boundary fluctuation scale
 aperture_roughness_period = 10e-9  # m, target boundary fluctuation period
 aperture_centers = [(0, 0), (0.2e-6, -0.15e-6), (0.15e-6, 0.15e-6)]  # m (y, x)
@@ -268,7 +269,8 @@ aperture_top_radius_factors = [2.0, 2.0, 2.0]
 illumination_function = "gaussian"
 illumination_center = (0.0, 0.0)  # m
 illumination_focus_distance = 1e-3  # m
-illumination_fwhm = 10.5e-6  # ms
+illumination_fwhm = 10.5e-6  # m
+illumination_alpha_beam = (0.0, 0.0)  # rad (alpha_y, alpha_x); 0 keeps normal incidence
 
 # %%
 # ===================
@@ -301,6 +303,7 @@ config = HologramPipelineConfig(
     aperture_method="FTH_circular",
     aperture_types=aperture_types,
     aperture_radii=aperture_radii,
+    aperture_lengths=aperture_lengths,
     aperture_centers=aperture_centers,
     aperture_sigmas=aperture_sigmas,
     aperture_angles=aperture_angles,
@@ -314,6 +317,7 @@ config = HologramPipelineConfig(
     illumination_center=illumination_center,
     illumination_focus_distance=illumination_focus_distance,
     illumination_fwhm=illumination_fwhm,
+    illumination_alpha_beam=illumination_alpha_beam,
     # Magnetic domain pattern
     pattern_type=pattern_type,
     pattern_config=pattern_config,
@@ -691,6 +695,7 @@ ranges = HologramPipelineRanges(
     # Random illumination geometry
     illumination_focus_distance=Uniform(0.0, 2e-3),
     illumination_fwhm=Uniform(5e-6, 50e-6),
+    # illumination_alpha_beam=(Uniform(-np.deg2rad(2), np.deg2rad(2)), Uniform(-np.deg2rad(2), np.deg2rad(2))),
     illumination_center=(
         Uniform(-2e-6, 2e-6),
         Uniform(-2e-6, 2e-6),

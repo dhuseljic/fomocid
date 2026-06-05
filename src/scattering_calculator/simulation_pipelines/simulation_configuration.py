@@ -1064,9 +1064,10 @@ class FrontApertureConfig(_ConfigMixin):
     def create_fth_apertures(self) -> None:
         """Iterate over the aperture list in ``aperture_config`` and punch holes.
 
-        Object holes (``"OH"``) use ``thickness_OH`` as depth; reference holes
-        (``"RH"``) use the full stack thickness (``sum(aperture_thickness)``).
-        All coordinates are interpreted as real-space metres.
+        Object holes (``"OH"``) use ``thickness_OH`` as depth. Reference holes
+        (``"RH"``) and slits (``"SLIT"``) use the full stack thickness
+        (``sum(aperture_thickness)``). All coordinates are interpreted as
+        real-space metres.
 
         Parameters
         ----------
@@ -1092,6 +1093,7 @@ class FrontApertureConfig(_ConfigMixin):
         top_radius_factors = self._aperture_values(
             "apertures_top_radius_factor", len(types), 2.0
         )
+        lengths = self._aperture_values("apertures_length", len(types), None)
 
         for (
             type,
@@ -1104,6 +1106,7 @@ class FrontApertureConfig(_ConfigMixin):
             modes,
             seed,
             top_radius_factor,
+            length,
         ) in zip(
             types,
             radi,
@@ -1115,10 +1118,11 @@ class FrontApertureConfig(_ConfigMixin):
             roughness_modes,
             seeds,
             top_radius_factors,
+            lengths,
         ):
             if type == "OH":
                 depth = self.aperture_config.get("thickness_OH", None)
-            elif type == "RH":
+            elif type in ("RH", "SLIT"):
                 depth = np.sum(self.aperture_thicknesses)
             else:
                 raise ValueError(f"Aperture type not defined, got {type}")
@@ -1129,21 +1133,40 @@ class FrontApertureConfig(_ConfigMixin):
                 self.aperture_config.get("thickness_OH", depth),
             )
 
-            self.aperture.create_circle_aperture(
-                center=center,
-                depth=depth,
-                radius=radius,
-                sigma=sigma,
-                angle=angle,
-                ellipticity=ellipticity,
-                roughness=roughness,
-                roughness_modes=tuple(modes),
-                seed=seed,
-                use_real_space_coordinates=True,
-                use_roi=self.use_roi,
-                top_radius_factor=top_radius_factor,
-                taper_depth=taper_depth,
-            )
+            if type == "SLIT":
+                if length is None:
+                    raise ValueError("SLIT apertures require apertures_length.")
+                self.aperture.create_slit_aperture(
+                    center=center,
+                    depth=depth,
+                    width=radius,
+                    length=length,
+                    sigma=sigma,
+                    angle=angle,
+                    roughness=roughness,
+                    roughness_modes=tuple(modes),
+                    seed=seed,
+                    use_real_space_coordinates=True,
+                    use_roi=self.use_roi,
+                    top_radius_factor=top_radius_factor,
+                    taper_depth=taper_depth,
+                )
+            else:
+                self.aperture.create_circle_aperture(
+                    center=center,
+                    depth=depth,
+                    radius=radius,
+                    sigma=sigma,
+                    angle=angle,
+                    ellipticity=ellipticity,
+                    roughness=roughness,
+                    roughness_modes=tuple(modes),
+                    seed=seed,
+                    use_real_space_coordinates=True,
+                    use_roi=self.use_roi,
+                    top_radius_factor=top_radius_factor,
+                    taper_depth=taper_depth,
+                )
 
     def _aperture_values(self, key: str, n: int, default):
         """Return a per-aperture list, using ``default`` when absent.
@@ -1237,6 +1260,7 @@ class FrontApertureConfig(_ConfigMixin):
         top_radius_factors = self._aperture_values(
             "apertures_top_radius_factor", n, 2.0
         )
+        lengths = self._aperture_values("apertures_length", n, None)
         center_y0 = shape[0] / 2
         center_x0 = shape[1] / 2
 
@@ -1250,6 +1274,7 @@ class FrontApertureConfig(_ConfigMixin):
             modes,
             seed,
             top_radius_factor,
+            length,
         ) in zip(
             types,
             radii,
@@ -1260,45 +1285,84 @@ class FrontApertureConfig(_ConfigMixin):
             roughness_modes,
             seeds,
             top_radius_factors,
+            lengths,
         ):
             if aperture_types is not None and type not in aperture_types:
                 continue
             center_y = center_y0 + center[0] / pixel_size
             center_x = center_x0 + center[1] / pixel_size
-            radius_px = radius * max(1.0, float(top_radius_factor)) / pixel_size
             seed = None if seed is None or int(seed) < 0 else int(seed)
-            if self.use_roi:
-                y_slice, x_slice = structures.Apertures3D._aperture_bbox(
-                    (1, *shape),
-                    (center_y, center_x),
+            if type == "SLIT":
+                if length is None:
+                    raise ValueError("SLIT apertures require apertures_length.")
+                width_px = radius * max(1.0, float(top_radius_factor)) / pixel_size
+                length_px = length * max(1.0, float(top_radius_factor)) / pixel_size
+                if self.use_roi:
+                    y_slice, x_slice = structures.Apertures3D._rectangle_aperture_bbox(
+                        (1, *shape),
+                        (center_y, center_x),
+                        width_px,
+                        length_px,
+                        sigma=None,
+                        angle=angle,
+                        roughness=roughness,
+                    )
+                    local_shape = (
+                        1,
+                        y_slice.stop - y_slice.start,
+                        x_slice.stop - x_slice.start,
+                    )
+                    local_center = (center_y - y_slice.start, center_x - x_slice.start)
+                else:
+                    y_slice = slice(0, shape[0])
+                    x_slice = slice(0, shape[1])
+                    local_shape = (1, *shape)
+                    local_center = (center_y, center_x)
+                inside_hole = structures.Apertures3D._rectangle_aperture_hole_mask(
+                    local_shape,
+                    local_center,
+                    width_px,
+                    length_px,
+                    sigma=None,
+                    angle=angle,
+                    roughness=roughness,
+                    roughness_modes=tuple(modes),
+                    seed=seed,
+                )
+            else:
+                radius_px = radius * max(1.0, float(top_radius_factor)) / pixel_size
+                if self.use_roi:
+                    y_slice, x_slice = structures.Apertures3D._aperture_bbox(
+                        (1, *shape),
+                        (center_y, center_x),
+                        radius_px,
+                        sigma=None,
+                        angle=angle,
+                        ellipticity=ellipticity,
+                        roughness=roughness,
+                    )
+                    local_shape = (
+                        1,
+                        y_slice.stop - y_slice.start,
+                        x_slice.stop - x_slice.start,
+                    )
+                    local_center = (center_y - y_slice.start, center_x - x_slice.start)
+                else:
+                    y_slice = slice(0, shape[0])
+                    x_slice = slice(0, shape[1])
+                    local_shape = (1, *shape)
+                    local_center = (center_y, center_x)
+                inside_hole = structures.Apertures3D._aperture_hole_mask(
+                    local_shape,
+                    local_center,
                     radius_px,
                     sigma=None,
                     angle=angle,
                     ellipticity=ellipticity,
                     roughness=roughness,
+                    roughness_modes=tuple(modes),
+                    seed=seed,
                 )
-                local_shape = (
-                    1,
-                    y_slice.stop - y_slice.start,
-                    x_slice.stop - x_slice.start,
-                )
-                local_center = (center_y - y_slice.start, center_x - x_slice.start)
-            else:
-                y_slice = slice(0, shape[0])
-                x_slice = slice(0, shape[1])
-                local_shape = (1, *shape)
-                local_center = (center_y, center_x)
-            inside_hole = structures.Apertures3D._aperture_hole_mask(
-                local_shape,
-                local_center,
-                radius_px,
-                sigma=None,
-                angle=angle,
-                ellipticity=ellipticity,
-                roughness=roughness,
-                roughness_modes=tuple(modes),
-                seed=seed,
-            )
             supportmask_roi = supportmask[y_slice, x_slice]
             supportmask_roi[inside_hole > 0] = 1
         return supportmask
@@ -1339,7 +1403,8 @@ class IlluminationConfig(_ConfigMixin):
         Centre of the illumination in pixels (row, col).
     illumination_config : dict
         Additional keyword arguments forwarded to the beam profile constructor
-        (e.g. ``focus_distance`` and ``fwhm`` for a Gaussian beam).
+        (e.g. ``distance``, ``fwhm``, and ``alpha_beam=(alpha_y, alpha_x)`` for
+        a Gaussian beam).
     """
 
     XRayConfig: XRayConfig

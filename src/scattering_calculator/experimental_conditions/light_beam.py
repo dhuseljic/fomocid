@@ -53,6 +53,19 @@ def scalar_to_jones(scalar_wavefield, pol):
     return np.einsum("yx,s->yxs", scalar_wavefield, polarization_vector(pol))
 
 
+def _normalize_alpha_beam(alpha_beam: float | ArrayLike) -> tuple[float, float]:
+    """Return beam tilt as ``(alpha_y, alpha_x)`` in radians."""
+    alpha = np.asarray(alpha_beam, dtype=float)
+    if alpha.ndim == 0:
+        return 0.0, float(alpha)
+    if alpha.shape == (2,):
+        return float(alpha[0]), float(alpha[1])
+    raise ValueError(
+        "alpha_beam must be a scalar or a two-value tuple "
+        f"(alpha_y, alpha_x), got shape {alpha.shape}."
+    )
+
+
 def gauss_beam(
     sz: tuple[int, int],
     px_size: float,
@@ -60,6 +73,7 @@ def gauss_beam(
     distance: float,
     fwhm: float,
     wavelength: float,
+    alpha_beam: float | ArrayLike = (0.0, 0.0),
 ) -> NDArray[np.complex128]:
     """Compute the cross-section of a Gaussian beam at a given propagation distance.
 
@@ -78,6 +92,13 @@ def gauss_beam(
         Full-width at half-maximum of the beam at the waist in metres.
     wavelength : float
         Photon wavelength in metres.
+    alpha_beam : float or array-like of two floats, optional
+        Beam tilt in radians. The preferred form is ``(alpha_y, alpha_x)``,
+        where the two values tilt the beam along the sample y and x directions.
+        A scalar is accepted for backward compatibility and is interpreted as
+        ``(0, alpha_beam)``, matching the previous x-direction tilt behavior.
+        ``0`` or ``(0, 0)`` evaluates the same beam cross-section as the
+        historical normal-incidence implementation.
 
     Returns
     -------
@@ -88,16 +109,63 @@ def gauss_beam(
     ycenter = center[0]
     xcenter = center[1]
 
+    alpha_y, alpha_x = _normalize_alpha_beam(alpha_beam)
+
     # Radial distance from beam centre in metres
     y, x = np.meshgrid(
         np.linspace(0, sz[0] - 1, sz[0]), np.linspace(0, sz[1] - 1, sz[1])
     )
     y = y - ycenter
     x = x - xcenter
-    rho = np.sqrt(x**2 + y**2) * px_size
+
+    if alpha_y == 0 and alpha_x == 0:
+        rho = np.sqrt(x**2 + y**2) * px_size
+
+        # Calc waist w(z) as function of distance z
+        z = distance
+        # position with respect to waist
+        w0 = fwhm / (np.sqrt(2 * np.log(2)))
+        # Waist radius
+        zR = np.pi * w0**2 / wavelength
+        # rayleigh range
+        w = w0 * np.sqrt(1 + (z / zR) ** 2)
+
+        # wavevector
+        k = 2 * np.pi / wavelength
+
+        # Transversal gaussian
+        Gauss_trans = np.exp(-((rho / w) ** 2))
+
+        # Longitudinal gaussian
+        if z != 0:
+            # Calc curvature R(z) as function of distance z
+            R = z * (1 + (zR / z) ** 2)
+
+            # Calc Gouy phase
+            Gouy = np.arctan(z / zR)
+
+            Gauss_long = w0 / w * np.exp(-1j * (k * z + k * rho**2 / (2 * R) - Gouy))
+        elif z == 0:
+            Gauss_long = 1
+
+        Gauss = Gauss_trans * Gauss_long
+        Gauss = Gauss / np.max(np.abs(Gauss))  # Normalize to max amplitude of 1
+
+        return Gauss
+
+    y_idx, x_idx = np.meshgrid(
+        np.arange(sz[0], dtype=float),
+        np.arange(sz[1], dtype=float),
+        indexing="ij",
+    )
+    x_m = (x_idx - xcenter) * px_size
+    y_m = (y_idx - ycenter) * px_size
+    x_beam = x_m * np.cos(alpha_x)
+    y_beam = y_m * np.cos(alpha_y)
+    z = distance + x_m * np.sin(alpha_x) + y_m * np.sin(alpha_y)
+    rho = np.sqrt(x_beam**2 + y_beam**2)
 
     # Calc waist w(z) as function of distance z
-    z = distance
     # position with respect to waist
     w0 = fwhm / (np.sqrt(2 * np.log(2)))
     # Waist radius
@@ -112,16 +180,24 @@ def gauss_beam(
     Gauss_trans = np.exp(-((rho / w) ** 2))
 
     # Longitudinal gaussian
-    if z != 0:
+    Gauss_long = np.ones_like(Gauss_trans, dtype=complex)
+    nonzero_z = z != 0
+    if np.any(nonzero_z):
         # Calc curvature R(z) as function of distance z
-        R = z * (1 + (zR / z) ** 2)
+        R = np.empty_like(z, dtype=float)
+        R[nonzero_z] = z[nonzero_z] * (1 + (zR / z[nonzero_z]) ** 2)
 
         # Calc Gouy phase
         Gouy = np.arctan(z / zR)
 
-        Gauss_long = w0 / w * np.exp(-1j * (k * z + k * rho**2 / (2 * R) - Gouy))
-    elif z == 0:
-        Gauss_long = 1
+        Gauss_long[nonzero_z] = (w0 / w[nonzero_z]) * np.exp(
+            -1j
+            * (
+                k * z[nonzero_z]
+                + k * rho[nonzero_z] ** 2 / (2 * R[nonzero_z])
+                - Gouy[nonzero_z]
+            )
+        )
 
     Gauss = Gauss_trans * Gauss_long
     Gauss = Gauss / np.max(np.abs(Gauss))  # Normalize to max amplitude of 1
@@ -286,6 +362,7 @@ class illumination:
         center: ArrayLike,
         distance: float,
         fwhm: float,
+        alpha_beam: float | ArrayLike = (0.0, 0.0),
     ) -> None:
         """Compute the Gaussian beam cross-section and store in ``self.illumination``.
 
@@ -300,6 +377,11 @@ class illumination:
             Propagation distance from the beam waist in metres.
         fwhm : float
             Full-width at half-maximum of the beam at the waist in metres.
+        alpha_beam : float or array-like of two floats, optional
+            Beam tilt in radians as ``(alpha_y, alpha_x)``. A scalar is accepted
+            as the x-direction tilt for backward compatibility. ``0`` or
+            ``(0, 0)`` keeps the historical normal-incidence Gaussian
+            illumination exactly.
 
         Returns
         -------
@@ -313,6 +395,7 @@ class illumination:
             distance,
             fwhm,
             self.beam_parameters.wavelength,
+            alpha_beam=alpha_beam,
         )
 
     def get_illumination_jones(self) -> None:

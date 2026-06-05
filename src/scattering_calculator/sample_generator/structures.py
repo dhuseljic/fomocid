@@ -1074,12 +1074,12 @@ class Structure:
 
         The base tensor is the charge/isotropic contribution for each layer.
         Magnetic XMCD and XMLD terms are only added where they can affect the
-        hologram: inside the aperture support, i.e. pixels belonging to an OH/RH
-        opening in at least one layer. Intersecting aperture funnels are already
-        combined by the multiplied mask and therefore become one connected
-        support ROI. Outside that support the material remains diagonal, which
-        lets the Jones propagator use its fast diagonal path for the
-        gold-covered regions where domains are not visible.
+        hologram: inside the aperture support, i.e. pixels belonging to an
+        OH/RH/slit opening in at least one layer. Intersecting aperture funnels
+        are already combined by the multiplied mask and therefore become one
+        connected support ROI. Outside that support the material remains
+        diagonal, which lets the Jones propagator use its fast diagonal path for
+        the gold-covered regions where domains are not visible.
 
         The 3-D ``mask`` still controls whether material or vacuum is present at
         each layer/pixel. Vacuum pixels are set to an identity dielectric tensor
@@ -1886,6 +1886,130 @@ class Apertures3D:
             )
             self.aperture_design[layer_idx, y_slice, x_slice] *= 1 - hole_mask
 
+    def create_slit_aperture(
+        self,
+        center: tuple[float, float],
+        width: float,
+        length: float,
+        depth: float,
+        use_real_space_coordinates: bool = False,
+        sigma: float | None = None,
+        angle: float = 0.0,
+        roughness: float = 0.0,
+        roughness_modes: tuple[int, int] = (0, 0),
+        seed: int | None = None,
+        use_roi: bool = True,
+        top_radius_factor: float = 2.0,
+        taper_depth: float | None = None,
+    ) -> None:
+        """Create a tapered rectangular slit aperture mask.
+
+        ``width`` is the short side and reuses the aperture radius list in the
+        pipeline configuration. ``length`` is the long side. Both dimensions are
+        scaled by ``top_radius_factor`` at the top surface and taper to the base
+        dimensions over ``taper_depth``.
+        """
+        top_radius_factor = float(top_radius_factor)
+        if top_radius_factor <= 0:
+            raise ValueError(
+                f"top_radius_factor must be positive, got {top_radius_factor}"
+            )
+
+        if use_real_space_coordinates:
+            pixel_size = np.abs(self.x[0, 1, 0] - self.x[0, 0, 0])
+            pixel_width = width / pixel_size
+            pixel_length = length / pixel_size
+            pixel_depth = np.argmin(
+                np.abs(np.append(0, np.cumsum(self.layer_thicknesses)) - depth)
+            )
+            pixel_sigma = None if sigma is None else sigma / pixel_size
+            pixel_center = np.array(center) / self.pixel_size + self.shape[1] // 2
+            pixel_taper_depth = None if taper_depth is None else float(taper_depth)
+        else:
+            pixel_width = width
+            pixel_length = length
+            pixel_depth = depth
+            pixel_sigma = sigma
+            pixel_center = np.array(center)
+            pixel_taper_depth = None if taper_depth is None else float(taper_depth)
+        pixel_depth = int(np.clip(pixel_depth, 0, self.shape[0]))
+        if pixel_depth <= 0:
+            return
+
+        max_width = pixel_width * max(1.0, top_radius_factor)
+        max_length = pixel_length * max(1.0, top_radius_factor)
+        if use_roi:
+            y_slice, x_slice = self._rectangle_aperture_bbox(
+                self.shape,
+                pixel_center,
+                max_width,
+                max_length,
+                sigma=pixel_sigma,
+                angle=angle,
+                roughness=roughness,
+            )
+            local_shape = (
+                self.shape[0],
+                y_slice.stop - y_slice.start,
+                x_slice.stop - x_slice.start,
+            )
+            local_center = (
+                pixel_center[0] - y_slice.start,
+                pixel_center[1] - x_slice.start,
+            )
+        else:
+            y_slice = slice(0, self.shape[1])
+            x_slice = slice(0, self.shape[2])
+            local_shape = self.shape
+            local_center = pixel_center
+
+        layer_edges = np.concatenate(([0.0], np.cumsum(self.layer_thicknesses)))
+        if use_real_space_coordinates:
+            drilled_depth = float(layer_edges[pixel_depth])
+            layer_top_depths = layer_edges[:pixel_depth]
+            taper_limit = drilled_depth if pixel_taper_depth is None else min(
+                max(pixel_taper_depth, 0.0), drilled_depth
+            )
+            depth_fraction = (
+                np.clip(layer_top_depths / taper_limit, 0.0, 1.0)
+                if taper_limit > 0
+                else np.ones(pixel_depth, dtype=float)
+            )
+        else:
+            layer_top_indices = np.arange(0, pixel_depth, dtype=float)
+            taper_limit = (
+                float(pixel_depth)
+                if pixel_taper_depth is None
+                else min(max(pixel_taper_depth, 0.0), float(pixel_depth))
+            )
+            depth_fraction = (
+                np.clip(layer_top_indices / taper_limit, 0.0, 1.0)
+                if taper_limit > 0
+                else np.ones(pixel_depth, dtype=float)
+            )
+        layer_widths = pixel_width * (
+            top_radius_factor + (1.0 - top_radius_factor) * depth_fraction
+        )
+        layer_lengths = pixel_length * (
+            top_radius_factor + (1.0 - top_radius_factor) * depth_fraction
+        )
+        for layer_idx, (layer_width, layer_length) in enumerate(
+            zip(layer_widths, layer_lengths)
+        ):
+            layer_seed = None if seed is None else int(seed) + 104729 * layer_idx
+            hole_mask = self._rectangle_aperture_hole_mask(
+                local_shape,
+                local_center,
+                layer_width,
+                layer_length,
+                pixel_sigma,
+                angle=angle,
+                roughness=roughness,
+                roughness_modes=roughness_modes,
+                seed=layer_seed,
+            )
+            self.aperture_design[layer_idx, y_slice, x_slice] *= 1 - hole_mask
+
     @staticmethod
     def _aperture_bbox(
         shape,
@@ -1935,6 +2059,35 @@ class Apertures3D:
         sigma_pad = 0.0 if sigma is None else 4.0 * abs(float(sigma))
         half_x = half_x * roughness_scale + sigma_pad + 2.0
         half_y = half_y * roughness_scale + sigma_pad + 2.0
+
+        y0 = max(0, int(np.floor(center[0] - half_y)))
+        y1 = min(ny, int(np.ceil(center[0] + half_y)) + 1)
+        x0 = max(0, int(np.floor(center[1] - half_x)))
+        x1 = min(nx, int(np.ceil(center[1] + half_x)) + 1)
+        return slice(y0, y1), slice(x0, x1)
+
+    @staticmethod
+    def _rectangle_aperture_bbox(
+        shape,
+        center,
+        width,
+        length,
+        sigma=None,
+        angle: float = 0.0,
+        roughness: float = 0.0,
+    ) -> tuple[slice, slice]:
+        """Return a tight y/x bounding box for a rectangular slit."""
+        _, ny, nx = shape
+        half_width = max(float(width) / 2.0, 1e-12)
+        half_length = max(float(length) / 2.0, 1e-12)
+        cos_angle = np.cos(angle)
+        sin_angle = np.sin(angle)
+        half_x = abs(half_length * cos_angle) + abs(half_width * sin_angle)
+        half_y = abs(half_length * sin_angle) + abs(half_width * cos_angle)
+        roughness_pad = max(half_width, half_length) * max(0.0, 2.0 * float(roughness))
+        sigma_pad = 0.0 if sigma is None else 4.0 * abs(float(sigma))
+        half_x = half_x + roughness_pad + sigma_pad + 2.0
+        half_y = half_y + roughness_pad + sigma_pad + 2.0
 
         y0 = max(0, int(np.floor(center[0] - half_y)))
         y1 = min(ny, int(np.ceil(center[0] + half_y)) + 1)
@@ -2048,6 +2201,80 @@ class Apertures3D:
                 amplitude**2 for _, amplitude, _ in rough_modes
             )
             target_area = np.pi * radius_y * radius_x * rough_area_factor
+            current_area = np.sum(mask)
+            if current_area > 0:
+                mask *= min(1.0, target_area / current_area)
+
+        return np.clip(mask, 0.0, 1.0)
+
+    @staticmethod
+    def _rectangle_aperture_hole_mask(
+        shape,
+        center,
+        width,
+        length,
+        sigma=None,
+        angle: float = 0.0,
+        roughness: float = 0.0,
+        roughness_modes: tuple[int, int] = (0, 0),
+        seed: int | None = None,
+    ) -> NDArray[np.float64]:
+        """Create a rectangular slit aperture-hole mask on the native grid."""
+        _, ny, nx = shape
+        half_width = max(float(width) / 2.0, 1e-12)
+        half_length = max(float(length) / 2.0, 1e-12)
+        cos_angle = np.cos(angle)
+        sin_angle = np.sin(angle)
+
+        rough_modes = []
+        if roughness > 0:
+            rng = np.random.default_rng(seed)
+            min_mode, max_mode = roughness_modes
+            for mode in range(max(1, int(min_mode)), int(max_mode) + 1):
+                rough_modes.append(
+                    (
+                        mode,
+                        float(rng.normal(scale=roughness / mode)),
+                        float(rng.uniform(0.0, 2.0 * np.pi)),
+                    )
+                )
+
+        dy = np.arange(ny, dtype=float)[:, None] - center[0]
+        dx = np.arange(nx, dtype=float)[None, :] - center[1]
+        xr = cos_angle * dx + sin_angle * dy
+        yr = -sin_angle * dx + cos_angle * dy
+
+        qx = np.abs(xr) - half_length
+        qy = np.abs(yr) - half_width
+        outside = np.sqrt(np.maximum(qx, 0.0) ** 2 + np.maximum(qy, 0.0) ** 2)
+        inside = np.minimum(np.maximum(qx, qy), 0.0)
+        signed_distance = -(outside + inside)
+
+        if rough_modes:
+            polar_angle = np.arctan2(yr / half_width, xr / half_length)
+            rough_offset = np.zeros((ny, nx), dtype=float)
+            rough_scale = min(half_width, half_length)
+            for mode, amplitude, phase in rough_modes:
+                rough_offset += amplitude * np.cos(mode * polar_angle + phase)
+            rough_offset = np.clip(
+                rough_offset, -2.0 * roughness, 2.0 * roughness
+            )
+            signed_distance += rough_offset * rough_scale
+
+        edge_width = max(0.0, float(sigma or 0.0))
+        if edge_width > 0:
+            transition_width = edge_width + 0.5
+            transition = np.clip(
+                0.5 + 0.5 * signed_distance / transition_width,
+                0.0,
+                1.0,
+            )
+            mask = transition * transition * (3.0 - 2.0 * transition)
+        else:
+            mask = np.clip(signed_distance + 0.5, 0.0, 1.0)
+
+        if max(half_width, half_length) < 1.5:
+            target_area = width * length
             current_area = np.sum(mask)
             if current_area > 0:
                 mask *= min(1.0, target_area / current_area)

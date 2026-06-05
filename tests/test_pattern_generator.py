@@ -275,6 +275,31 @@ class ApertureAreaAverageTests(unittest.TestCase):
         self.assertLess(np.min(transmission), 1.0)
         self.assertAlmostEqual(1.0 - np.min(transmission), np.pi * 0.3**2, places=2)
 
+    def test_slit_aperture_uses_width_length_and_tapers(self) -> None:
+        """Test rectangular slit aperture generation with a tapered top."""
+        aperture = Apertures3D(
+            shape=(3, 41, 41),
+            real_space_pixel_size=1.0,
+            layer_thicknesses=[1.0, 1.0, 1.0],
+        )
+        aperture.create_slit_aperture(
+            center=(20.0, 20.0),
+            width=4.0,
+            length=14.0,
+            depth=3,
+            use_real_space_coordinates=False,
+            sigma=0.0,
+            angle=np.deg2rad(20),
+            top_radius_factor=2.0,
+            taper_depth=3.0,
+            use_roi=True,
+        )
+
+        hole_fraction = 1.0 - aperture.return_aperture_mask()
+        self.assertGreater(np.sum(hole_fraction[0]), np.sum(hole_fraction[-1]))
+        self.assertGreater(np.sum(hole_fraction[-1]), 4.0 * 14.0 * 0.7)
+        self.assertLess(np.min(aperture.return_aperture_mask()), 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

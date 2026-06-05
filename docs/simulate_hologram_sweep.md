@@ -495,9 +495,12 @@ not spend most of their time testing failed random attempts.
 ### Aperture Geometry And Roughness
 
 The FTH mask contains one object hole (`OH`) and a random number of reference
-holes (`RH`). Apertures are layer-aware:
+holes (`RH`). It can also contain rectangular slits (`SLIT`). Apertures are
+layer-aware:
 
 - `aperture_top_radius_factors` controls the top/base radius ratio.
+- For `SLIT` apertures, `aperture_radii` is the slit width and
+  `aperture_lengths` is the slit length.
 - The taper is derived from the material stack above the SiN membrane.
 - The two layers closest to the SiN membrane remain cylindrical; if the stack
   above SiN is only two layers, the aperture stays cylindrical.
@@ -561,13 +564,20 @@ The sweep randomizes the Gaussian illumination:
 ```python
 illumination_focus_distance=Uniform(0.0, 2e-3)
 illumination_fwhm=Uniform(5e-6, 50e-6)
+# Optional beam tilt (alpha_y, alpha_x). Keep (0.0, 0.0) for normal incidence.
+# illumination_alpha_beam=(Uniform(-np.deg2rad(2), np.deg2rad(2)), Uniform(-np.deg2rad(2), np.deg2rad(2)))
 illumination_center=(
     Uniform(-2e-6, 2e-6),
     Uniform(-2e-6, 2e-6),
 )
 ```
 
-The center tuple is `(y, x)` in metres.
+The center tuple is `(y, x)` in metres. `illumination_alpha_beam` is
+`(alpha_y, alpha_x)` in radians. It evaluates the Gaussian beam on a sample
+plane tilted in the two sample-plane directions with respect to the beam normal;
+`(0.0, 0.0)` uses the exact historical normal-incidence illumination. For
+backward compatibility, a scalar value is still accepted and interpreted as
+`(0.0, scalar)`.
 
 ### Detector, Measurement, And Artifact Ownership
 
@@ -649,7 +659,7 @@ values actually used after applying sweep ranges and compatibility aliases:
     ├── measurement_config/          # exposure, frames, count normalization
     ├── artifacts_config/            # photon-event shape/splatting controls
     ├── beamstop/                    # effective beamstop geometry
-    ├── illumination/                # beam profile, center, focus, FWHM
+    ├── illumination/                # beam profile, center, focus, FWHM, tilt
     ├── propagator_config/           # propagation method and effective config
     │   ├── propagator_method        # written first
     │   ├── propagate
@@ -680,6 +690,7 @@ Each physical parameter has one canonical saved path. Important examples:
 | Exposure time | `metadata/measurement_config/exposure_time` |
 | Photon-event sigma | `metadata/artifacts_config/sigma_photon` |
 | Illumination FWHM | `metadata/illumination/fwhm_m` |
+| Illumination beam tilt | `metadata/illumination/alpha_beam_rad` (`alpha_y`, `alpha_x`) |
 | Multislice enable flag | `metadata/propagator_config/propagate` |
 | Multislice ROI flag | `metadata/propagator_config/multislice_propagation_roi` |
 
@@ -796,6 +807,7 @@ with h5py.File(path, "r") as h5:
     propagation_padding_mode = m["propagator_config/propagation_padding_mode"][()].decode()
     propagation_absorber_width_px = m["propagator_config/propagation_absorber_width_px"][()]
     propagation_absorber_profile = m["propagator_config/propagation_absorber_profile"][()].decode()
+    illumination_alpha_beam = m["illumination/alpha_beam_rad"][()]
 ```
 
 Some string datasets are stored as bytes, so use `.decode()` when needed.

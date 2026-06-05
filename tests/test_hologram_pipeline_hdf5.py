@@ -97,6 +97,7 @@ def test_write_precomputed_result_uses_pipeline_hdf5_layout(tmp_path: Path) -> N
     aperture_config = {
         "aperture_types": cfg.aperture_types,
         "aperture_radii": cfg.aperture_radii,
+        "aperture_lengths": cfg.aperture_lengths,
         "aperture_centers": cfg.aperture_centers,
         "aperture_sigmas": cfg.aperture_sigmas,
         "aperture_angles": cfg.aperture_angles,
@@ -134,6 +135,7 @@ def test_write_precomputed_result_uses_pipeline_hdf5_layout(tmp_path: Path) -> N
         assert "00000/magnetic_pattern_oh" in h5
         assert "00000/metadata/sample/recipe" in h5
         assert "00000/metadata/sample/aperture/aperture_config" in h5
+        assert "00000/metadata/sample/aperture/aperture_config/apertures_length" in h5
 
 
 def test_build_precomputed_metadata_uses_canonical_groups() -> None:
@@ -179,6 +181,7 @@ def test_build_precomputed_metadata_uses_canonical_groups() -> None:
                 "center": (0.0, 0.0),
                 "distance": 1e-3,
                 "fwhm": 1e-6,
+                "alpha_beam": (0.1, 0.2),
             },
         ),
         propagator_config=SimpleNamespace(
@@ -199,6 +202,7 @@ def test_build_precomputed_metadata_uses_canonical_groups() -> None:
     assert "detector_params/counts_per_photon" in metadata
     assert "measurement_config/exposure_time" in metadata
     assert "detector/detector_params/counts_per_photon" not in metadata
+    assert np.array_equal(metadata["illumination/alpha_beam_rad"], (0.1, 0.2))
 
 
 def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path) -> None:
@@ -207,6 +211,7 @@ def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path
     aperture_config = {
         "aperture_types": cfg.aperture_types,
         "aperture_radii": cfg.aperture_radii,
+        "aperture_lengths": cfg.aperture_lengths,
         "aperture_centers": cfg.aperture_centers,
         "aperture_sigmas": cfg.aperture_sigmas,
         "aperture_angles": cfg.aperture_angles,
@@ -322,6 +327,16 @@ def test_detector_pixel_footprint_config_is_sampled(tmp_path: Path) -> None:
     params = pipeline._sample_params()
     assert params["use_detector_pixel_footprint"] is True
     assert params["detector_pixel_footprint_samples"] == 5
+
+
+def test_illumination_alpha_beam_config_is_sampled(tmp_path: Path) -> None:
+    pipeline = _pipeline(
+        tmp_path,
+        illumination_alpha_beam=(0.1, 0.15),
+    )
+
+    params = pipeline._sample_params()
+    assert params["illumination_alpha_beam"] == (0.1, 0.15)
 
 
 def test_xray_metadata_has_one_canonical_group() -> None:

@@ -139,10 +139,13 @@ class HologramPipelineConfig:
         frame averaging. Default ``False``.
     aperture_method : {"FTH_circular"} or None
         Holography mask layout. ``None`` → fully transparent.
-    aperture_types : list of {"OH", "RH"}
-        Object hole (OH) or reference hole (RH) for each aperture.
+    aperture_types : list of {"OH", "RH", "SLIT"}
+        Object hole (OH), reference hole (RH), or rectangular slit for each
+        aperture.
     aperture_radii : list of float
-        Aperture radii in metres.
+        Aperture radii in metres. For slits, this value is the slit width.
+    aperture_lengths : list of float
+        Slit lengths in metres. Ignored for circular OH/RH apertures.
     aperture_centers : list of (float, float)
         Aperture centres ``(y, x)`` in metres relative to the sample centre.
     aperture_sigmas : list of float
@@ -166,6 +169,10 @@ class HologramPipelineConfig:
         Propagation distance from the Gaussian waist to the sample plane, in metres.
     illumination_fwhm : float
         Gaussian beam FWHM at the waist in metres.
+    illumination_alpha_beam : (float, float)
+        Beam tilt ``(alpha_y, alpha_x)`` in radians. ``(0, 0)`` keeps normal
+        incidence. A scalar value is accepted as an x-direction tilt for
+        backward compatibility.
     pattern_type : {"wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", "saturated_pattern", "skyrmion_pattern", "image_pattern"}
         Which magnetic domain pattern generator to use.
     pattern_config : dict
@@ -319,6 +326,9 @@ class HologramPipelineConfig:
     aperture_radii: list[float] = field(
         default_factory=lambda: [60e-9, 6e-9, 4e-9]
     )  # m
+    aperture_lengths: list[float] = field(
+        default_factory=lambda: [0.0, 0.0, 0.0]
+    )  # m, only used by SLIT apertures
     aperture_centers: list[tuple] = field(
         default_factory=lambda: [
             (0.0, 0.0),
@@ -351,6 +361,7 @@ class HologramPipelineConfig:
     illumination_center: tuple[float, float] = (0.0, 0.0)  # m
     illumination_focus_distance: float = 1e-3  # m
     illumination_fwhm: float = 0.5e-6  # m
+    illumination_alpha_beam: tuple[float, float] | float = (0.0, 0.0)  # rad, (alpha_y, alpha_x)
 
     # Magnetic domain pattern
     pattern_type: str = "wavy_stripe_pattern"
@@ -443,6 +454,13 @@ class HologramPipelineRanges:
     # Illumination
     illumination_focus_distance: float | Uniform | None = None
     illumination_fwhm: float | Uniform | None = None
+    illumination_alpha_beam: (
+        tuple[float | Uniform, float | Uniform]
+        | Callable[[dict[str, Any]], tuple[float, float]]
+        | float
+        | Uniform
+        | None
+    ) = None
     illumination_center: (
         tuple[float | Uniform, float | Uniform]
         | Callable[[dict[str, Any]], tuple[float, float]]
@@ -488,8 +506,9 @@ class HologramPipeline:
         │           ├── magnetic_pattern/
         │           └── aperture/
         │               └── aperture_config/
-        │               ├── apertures_type    ← aperture labels, e.g. OH/RH
-        │               ├── apertures_radius  ← aperture radii in metres
+        │               ├── apertures_type    ← aperture labels, e.g. OH/RH/SLIT
+        │               ├── apertures_radius  ← radii, or slit widths, in metres
+        │               ├── apertures_length  ← slit lengths in metres
         │               ├── apertures_center  ← aperture centres in metres, (y, x)
         │               ├── apertures_sigma   ← aperture edge sigmas in metres
         │               ├── apertures_angle   ← ellipse angles in radians
@@ -706,6 +725,9 @@ class HologramPipeline:
             "distance", 0.0
         )
         metadata["illumination/fwhm_m"] = illumination_values.get("fwhm", 0.0)
+        metadata["illumination/alpha_beam_rad"] = illumination_values.get(
+            "alpha_beam", 0.0
+        )
 
         metadata["sample/use_roi"] = bool(use_roi)
         metadata["sample/magnetic_pattern/use_roi"] = bool(
@@ -961,6 +983,9 @@ class HologramPipeline:
         params["illumination_fwhm"] = _pick(
             rng.illumination_fwhm, cfg.illumination_fwhm, params
         )
+        params["illumination_alpha_beam"] = _pick(
+            rng.illumination_alpha_beam, cfg.illumination_alpha_beam, params
+        )
         params["illumination_center"] = _pick(
             rng.illumination_center, cfg.illumination_center, params
         )
@@ -972,6 +997,7 @@ class HologramPipeline:
             {
                 "aperture_types": cfg.aperture_types,
                 "aperture_radii": cfg.aperture_radii,
+                "aperture_lengths": cfg.aperture_lengths,
                 "aperture_centers": cfg.aperture_centers,
                 "aperture_sigmas": cfg.aperture_sigmas,
                 "aperture_angles": cfg.aperture_angles,
@@ -1277,6 +1303,7 @@ class HologramPipeline:
             aperture_config=dict(
                 apertures_type=p["aperture_config"]["aperture_types"],
                 apertures_radius=p["aperture_config"]["aperture_radii"],
+                apertures_length=p["aperture_config"].get("aperture_lengths"),
                 apertures_center=p["aperture_config"]["aperture_centers"],
                 apertures_sigma=p["aperture_config"]["aperture_sigmas"],
                 apertures_angle=p["aperture_config"]["aperture_angles"],
@@ -1505,6 +1532,7 @@ class HologramPipeline:
                 "center": np.array(p["illumination_center"]),
                 "distance": p["illumination_focus_distance"],
                 "fwhm": p["illumination_fwhm"],
+                "alpha_beam": p["illumination_alpha_beam"],
             },
         )
         illumination_config.setup()
@@ -1514,6 +1542,7 @@ class HologramPipeline:
         metadata["illumination/function"] = str(cfg.illumination_function)
         metadata["illumination/focus_distance_m"] = p["illumination_focus_distance"]
         metadata["illumination/fwhm_m"] = p["illumination_fwhm"]
+        metadata["illumination/alpha_beam_rad"] = p["illumination_alpha_beam"]
         t_stage = mark_stage("illumination", t_stage)
 
         # ---- Hologram simulation loop ------------------------------------
@@ -1825,6 +1854,16 @@ class HologramPipeline:
         aperture_grp.create_dataset(
             "apertures_radius",
             data=np.asarray(aperture_config["aperture_radii"], dtype=np.float64),
+        )
+        aperture_grp.create_dataset(
+            "apertures_length",
+            data=np.asarray(
+                aperture_config.get(
+                    "aperture_lengths",
+                    [0.0] * len(aperture_config["aperture_types"]),
+                ),
+                dtype=np.float64,
+            ),
         )
         aperture_grp.create_dataset(
             "apertures_center",
