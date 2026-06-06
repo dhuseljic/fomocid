@@ -212,6 +212,40 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
 
         self.assertTrue(np.allclose(compact_out, dense_out))
 
+    def test_jones_only_can_apply_zero_order_free_space_phase(self) -> None:
+        """Test that Jones-only propagation can keep longitudinal phase."""
+        field = np.zeros((5, 6, 2), dtype=complex)
+        field[..., 0] = 1.0
+        field[..., 1] = 0.5j
+
+        eps = np.zeros((2, 5, 6, 2, 2), dtype=complex)
+        eps[..., 0, 0] = 1.0
+        eps[..., 1, 1] = 1.0
+
+        wf = object.__new__(wavefronts)
+        wf.aperture_support_regions = None
+        without_phase = wf.propagate_jones_multislice(
+            field,
+            eps,
+            wavelength=7e-9,
+            thicknesses=[3e-9, 5e-9],
+            pixel_size=1e-9,
+            propagate=False,
+            jones_apply_zero_order_phase=False,
+        )
+        with_phase = wf.propagate_jones_multislice(
+            field,
+            eps,
+            wavelength=7e-9,
+            thicknesses=[3e-9, 5e-9],
+            pixel_size=1e-9,
+            propagate=False,
+            jones_apply_zero_order_phase=True,
+        )
+
+        expected_phase = np.exp(-1j * 2 * np.pi / 7e-9 * 3e-9)
+        np.testing.assert_allclose(with_phase, without_phase * expected_phase)
+
     def test_roi_free_space_propagation_keeps_plane_phase_outside_roi(self) -> None:
         """Test that roi free space propagation keeps plane phase outside roi.
 
@@ -255,8 +289,8 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         self.assertTrue(np.allclose(out[outside], expected_outside[outside]))
         self.assertTrue(np.all(np.isfinite(out)))
 
-    def test_roi_free_space_propagation_merges_overlapping_roi_crops(self) -> None:
-        """Test that overlapping roi crops are propagated as one merged crop.
+    def test_roi_free_space_propagation_merge_true_uses_common_crop(self) -> None:
+        """Test that merge-overlaps propagates all ROI boxes as one crop.
 
         Parameters
         ----------
@@ -293,6 +327,52 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         wf = object.__new__(wavefronts)
         wf.propagate_free_space_jones = fake_local_propagator
         regions = (
+            (slice(1, 3), slice(1, 3)),
+            (slice(5, 7), slice(5, 7)),
+        )
+
+        out = wf.propagate_free_space_jones_roi(
+            field,
+            wavelength=wavelength,
+            dz=dz,
+            pixel_size=1e-9,
+            aperture_support_regions=regions,
+            merge_overlaps=True,
+        )
+
+        expected = baseline.copy()
+        expected[slice(1, 7), slice(1, 7), :] += correction
+
+        self.assertEqual(calls, [(6, 6, 2)])
+        self.assertTrue(np.allclose(out, expected))
+
+    def test_roi_free_space_propagation_merges_overlapping_roi_crops(self) -> None:
+        """Test that overlapping roi crops are propagated as one merged crop."""
+        field = np.ones((8, 8, 2), dtype=complex)
+        wavelength = 1e-9
+        dz = 2e-9
+        baseline = field * np.exp(-1j * 2 * np.pi / wavelength * dz)
+        correction = 2.0 + 0.5j
+        calls = []
+
+        def fake_local_propagator(
+            E_crop,
+            wavelength,
+            dz,
+            pixel_size,
+            padding_px=0,
+            padding_mode="edge",
+            absorber_width_px=0,
+            absorber_strength=0.0,
+            absorber_profile="cosine",
+        ):
+            calls.append(E_crop.shape)
+            local_baseline = E_crop * np.exp(-1j * 2 * np.pi / wavelength * dz)
+            return local_baseline + correction
+
+        wf = object.__new__(wavefronts)
+        wf.propagate_free_space_jones = fake_local_propagator
+        regions = (
             (slice(1, 5), slice(1, 5)),
             (slice(3, 7), slice(3, 7)),
         )
@@ -303,7 +383,7 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
             dz=dz,
             pixel_size=1e-9,
             aperture_support_regions=regions,
-            merge_overlaps=True,
+            merge_overlaps=False,
         )
 
         expected = baseline.copy()
@@ -543,6 +623,7 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
             dz=dz,
             pixel_size=1e-9,
             aperture_support_regions=regions,
+            merge_overlaps=False,
         )
 
         expected = baseline.copy()

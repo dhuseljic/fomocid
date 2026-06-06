@@ -1705,6 +1705,9 @@ class SamplePropagatorConfig(_ConfigMixin):
         wavelength = self.IlluminationConfig.beam_params.wavelength
         k0 = 2 * np.pi / wavelength
         propagate = bool(self.propagator_config.get("propagate", False))
+        jones_apply_zero_order_phase = bool(
+            self.propagator_config.get("jones_apply_zero_order_phase", True)
+        )
 
         if hasattr(eps_stack, "base_diagonal"):
             base_diagonal = eps_stack.base_diagonal
@@ -1719,7 +1722,9 @@ class SamplePropagatorConfig(_ConfigMixin):
             phase = -1j * k0 * float(dz)
             background[..., 0] *= np.exp(phase * np.sqrt(base_diagonal[iz, 0]))
             background[..., 1] *= np.exp(phase * np.sqrt(base_diagonal[iz, 1]))
-            if propagate and iz < len(thicknesses) - 1:
+            if iz < len(thicknesses) - 1 and (
+                propagate or jones_apply_zero_order_phase
+            ):
                 background *= np.exp(-1j * k0 * float(dz))
         return background
 
@@ -1778,6 +1783,9 @@ class SamplePropagatorConfig(_ConfigMixin):
                 None,
             ),
             propagate=bool(self.propagator_config.get("propagate", False)),
+            jones_apply_zero_order_phase=bool(
+                self.propagator_config.get("jones_apply_zero_order_phase", True)
+            ),
             propagation_padding_px=int(
                 self.propagator_config.get("propagation_padding_px", 0)
             ),

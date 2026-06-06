@@ -50,9 +50,10 @@ use_roi = True # set True to use a region of interest around the sample for the 
 dielectric_tensor_use_roi = True # set True to only compute the dielectric tensor in a region of interest around the sample, which can greatly speed up simulations with large free-space regions; set False to compute the full dense tensor stack, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
 dielectric_tensor_compact = True  # avoid allocating the full dense tensor stack
 propagate = True  # set True for multislice free-space propagation between layers
+jones_apply_zero_order_phase = True  # when propagate=False, keep the longitudinal exp(-1j*k0*dz) phase between layers without FFT diffraction
 multislice_propagation_roi = True  # if True, propagate aperture ROI crops and add local corrections to the plane-wave baseline
 multislice_propagation_roi_padding_px = 64  # enlarges ROI boxes around apertures and gives the local correction taper room to fade smoothly
-multislice_propagation_roi_merge_overlaps = True  # merge overlapping padded ROI crops before propagation; physical or padded overlaps are always merged even if this is False
+multislice_propagation_roi_merge_overlaps = True  # True = one common crop enclosing all padded aperture ROIs; False = keep disjoint crops separate when possible, while physical/padded overlaps are still auto-merged
 propagation_padding_px = 128  # 0 disables padded free-space propagation
 propagation_padding_mode = "edge"  # "edge", "reflect", "symmetric", or "constant"
 propagation_absorber_width_px = 64  # 0 disables edge absorption
@@ -326,6 +327,7 @@ config = HologramPipelineConfig(
     dielectric_tensor_use_roi=dielectric_tensor_use_roi,
     dielectric_tensor_compact=dielectric_tensor_compact,
     propagate=propagate,
+    jones_apply_zero_order_phase=jones_apply_zero_order_phase,
     multislice_propagation_roi=multislice_propagation_roi,
     multislice_propagation_roi_padding_px=multislice_propagation_roi_padding_px,
     multislice_propagation_roi_merge_overlaps=multislice_propagation_roi_merge_overlaps,

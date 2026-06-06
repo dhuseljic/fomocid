@@ -40,6 +40,7 @@ class wavefronts:
         multislice_propagation_roi=False,
         multislice_propagation_roi_padding_px=0,
         multislice_propagation_roi_merge_overlaps=True,
+        jones_apply_zero_order_phase=True,
         farfield_oversampling=1,
         farfield_background_jones=None,
     ):
@@ -79,6 +80,11 @@ class wavefronts:
             Retained for API compatibility. Physical aperture support overlaps
             and padded propagation-box overlaps are always merged. If ``False``,
             only disjoint padded boxes may remain separate.
+        jones_apply_zero_order_phase : bool
+            If ``True`` and ``propagate=False``, apply the zero-spatial-frequency
+            free-space phase ``exp(-1j * k0 * dz)`` between material slices.
+            This keeps the longitudinal phase advance while skipping transverse
+            FFT diffraction.
         farfield_oversampling : Any
             Integer factor used to extend the complex exit wave before the
             far-field FFT. Values above ``1`` use ``farfield_background_jones``
@@ -126,6 +132,7 @@ class wavefronts:
             multislice_propagation_roi_merge_overlaps=(
                 self.multislice_propagation_roi_merge_overlaps
             ),
+            jones_apply_zero_order_phase=jones_apply_zero_order_phase,
         )
         self.exit_wave_for_farfield = self._build_farfield_exit_wave(
             self.exit_wave,
@@ -183,6 +190,7 @@ class wavefronts:
         multislice_propagation_roi=False,
         multislice_propagation_roi_padding_px=0,
         multislice_propagation_roi_merge_overlaps=True,
+        jones_apply_zero_order_phase=True,
     ):
         """
         Multislice propagation through a dielectric tensor stack.
@@ -232,8 +240,8 @@ class wavefronts:
                 )
 
             # Free-space propagation between slices
-            if propagate:
-                if iz < Nz - 1:
+            if iz < Nz - 1:
+                if propagate:
                     if multislice_propagation_roi and self.aperture_support_regions:
                         E_in = self.propagate_free_space_jones_roi(
                             E_in,
@@ -261,6 +269,9 @@ class wavefronts:
                             absorber_strength=propagation_absorber_strength,
                             absorber_profile=propagation_absorber_profile,
                         )
+                elif jones_apply_zero_order_phase:
+                    k0 = 2 * np.pi / wavelength
+                    E_in = E_in * np.exp(-1j * k0 * float(dz))
 
         return E_in
 
@@ -596,15 +607,17 @@ class wavefronts:
         Outside the ROI boxes the field is assumed locally plane-wave-like and
         receives only the zero-spatial-frequency angular-spectrum phase.
         Each ROI contributes only its deviation from the plane-wave baseline.
-        Padded ROI boxes that overlap are always merged before propagation.
-        Otherwise the same output pixels would receive multiple independent
-        local FFT corrections, which can create nonphysical bright overlap
-        artifacts. The local correction is also tapered smoothly to zero at
-        artificial ROI crop borders, so the result returns to the plane-wave
-        baseline without a hard rectangular paste edge. ``merge_overlaps`` is
-        retained for API compatibility; when ``False``, disjoint padded crops
-        stay separate. This is faster than a global FFT but intentionally
-        approximate because true free-space propagation couples all pixels.
+        If ``merge_overlaps`` is ``True``, all padded aperture boxes are
+        enclosed in one common propagation crop. If ``False``, disjoint padded
+        crops stay separate, but physical aperture/funnel overlaps and padded
+        crop overlaps are still merged before propagation. Otherwise the same
+        output pixels would receive multiple independent local FFT corrections,
+        which can create nonphysical bright overlap artifacts. The local
+        correction is also tapered smoothly to zero at artificial ROI crop
+        borders, so the result returns to the plane-wave baseline without a hard
+        rectangular paste edge. This is faster than a global FFT but
+        intentionally approximate because true free-space propagation couples
+        all pixels.
 
         Parameters
         ----------
@@ -672,7 +685,10 @@ class wavefronts:
             E_in.shape[:2],
             roi_padding_px,
         )
-        roi_regions = self._merge_overlapping_regions(roi_regions)
+        if merge_overlaps:
+            roi_regions = self._bounding_region(roi_regions)
+        else:
+            roi_regions = self._merge_overlapping_regions(roi_regions)
         for region in roi_regions:
             region_key = (*region, slice(None))
             local_out = self.propagate_free_space_jones(
@@ -786,6 +802,26 @@ class wavefronts:
         return tuple(
             (slice(y0, y1), slice(x0, x1)) for y0, y1, x0, x1 in merged
         )
+
+    @staticmethod
+    def _bounding_region(regions):
+        """Return one y/x region enclosing all input regions."""
+        boxes = [
+            (
+                int(y_slice.start or 0),
+                int(y_slice.stop),
+                int(x_slice.start or 0),
+                int(x_slice.stop),
+            )
+            for y_slice, x_slice in regions
+        ]
+        if not boxes:
+            return ()
+        y0 = min(box[0] for box in boxes)
+        y1 = max(box[1] for box in boxes)
+        x0 = min(box[2] for box in boxes)
+        x1 = max(box[3] for box in boxes)
+        return ((slice(y0, y1), slice(x0, x1)),)
 
     @staticmethod
     def _roi_correction_window(local_shape, full_shape, region, taper_px):

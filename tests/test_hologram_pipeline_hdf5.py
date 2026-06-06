@@ -227,6 +227,7 @@ def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path
         "sample/dielectric_tensor/compact": True,
         "propagator_config/propagator_method": "Jones",
         "propagator_config/propagate": False,
+        "propagator_config/jones_apply_zero_order_phase": True,
     }
 
     with h5py.File(tmp_path / "metadata.h5", "w") as h5:
@@ -239,6 +240,7 @@ def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path
         assert "00000/metadata/sample/dielectric_tensor/compact" in h5
         assert "00000/metadata/propagator_config/propagator_method" in h5
         assert "00000/metadata/propagator_config/propagate" in h5
+        assert "00000/metadata/propagator_config/jones_apply_zero_order_phase" in h5
         assert list(h5["00000/metadata/propagator_config"].keys())[0] == (
             "propagator_method"
         )

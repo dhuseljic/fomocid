@@ -43,11 +43,17 @@ part of the simulation at a time:
 - [`tutorial_hologram_generation_and_artifacts.ipynb`](../tutorials/tutorial_hologram_generation_and_artifacts.ipynb)
 - [`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb)
 - [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb)
+- [`Scattering_simulator_CK_mumax.ipynb`](../tutorials/Scattering_simulator_CK_mumax.ipynb)
 
 Use the [coherent-scattering tutorial map](coherent_scattering_tutorials.md)
 to choose the right notebook, and the
 [hologram sweep reference](simulate_hologram_sweep.md) for the scripted
 pipeline and HDF5 output layout.
+
+The Mumax notebook is the path for CK-style single simulations driven by a
+Mumax/OOMMF OVF magnetization file. It memory-maps the OVF data, checks that
+the material recipe has one magnetic propagated layer per OVF `z` cell, and
+visualizes CL-CR exit waves plus ideal/detected FTH difference reconstructions.
 
 ## Script entrypoints
 

@@ -79,6 +79,10 @@ python tutorials/simulate_hologram_sweep.py
 ```
 
 For the notebook-first path, start with [the coherent-scattering tutorial map](docs/coherent_scattering_tutorials.md), then open the focused notebooks under `tutorials/`.
+For micromagnetic inputs, use `tutorials/Scattering_simulator_CK_mumax.ipynb`;
+it reads Mumax/OOMMF OVF files from `DATA_ROOT/Data/mumax_files/`, checks the
+recipe against the OVF `z` stack, and shows exit-wave and FTH reconstruction
+diagnostics.
 
 ## Repository Layout
 

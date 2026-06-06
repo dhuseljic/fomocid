@@ -208,8 +208,16 @@ class HologramPipelineConfig:
     propagate : bool
         If ``True``, propagate the Jones field through free space between
         material layers using each layer thickness and the sample pixel size.
-        If ``False``, apply only local Jones transmission per layer. Default
-        ``False``.
+        If ``False``, skip transverse FFT diffraction and use the
+        ``jones_apply_zero_order_phase`` option for the longitudinal phase.
+        Default ``False``.
+    jones_apply_zero_order_phase : bool
+        If ``True`` and ``propagate=False``, multiply the Jones field by the
+        zero-spatial-frequency free-space phase ``exp(-1j * k0 * dz)`` between
+        material slices. This is the default Jones-only approximation because
+        it preserves the layer-to-layer longitudinal phase without paying for
+        multislice FFT propagation. Set ``False`` only when reproducing older
+        Jones-only results.
     propagation_padding_px : int
         Number of pixels to pad on each side during each free-space
         propagation step. Padding is cropped away after propagation and reduces
@@ -247,14 +255,15 @@ class HologramPipelineConfig:
         before it is added back to the full field, which avoids hard rectangular
         paste edges. Default ``0``.
     multislice_propagation_roi_merge_overlaps : bool
-        Retained as the user-facing ROI merge preference. Aperture supports
-        that overlap in the physical material mask are always merged before
-        padding, regardless of this flag, because intersecting funnels are one
-        hole system. Padded boxes that overlap are also merged even if this is
+        User-facing ROI merge preference. If ``True``, all padded aperture
+        support boxes are enclosed in one common multislice propagation crop.
+        If ``False``, disjoint padded boxes from physically separate aperture
+        supports may remain separate for speed. Aperture supports that overlap
+        in the physical material mask are always merged before padding,
+        regardless of this flag, because intersecting funnels are one hole
+        system. Padded boxes that overlap are also merged even if this is
         ``False``; otherwise the same pixels would receive multiple local
-        diffraction corrections. If ``False``, only disjoint padded boxes from
-        physically separate aperture supports may remain separate. Default
-        ``True``.
+        diffraction corrections. Default ``True``.
     farfield_oversampling : int
         Factor used to extend the complex exit wave before the far-field FFT.
         Values above ``1`` fill the larger field with the configured
@@ -372,6 +381,7 @@ class HologramPipelineConfig:
     dielectric_tensor_use_roi: bool = True
     dielectric_tensor_compact: bool = True
     propagate: bool = False
+    jones_apply_zero_order_phase: bool = True
     propagation_padding_px: int = 0
     propagation_padding_mode: str = "edge"
     propagation_absorber_width_px: int = 0
@@ -1566,6 +1576,7 @@ class HologramPipeline:
                 propagator_method="Jones",
                 propagator_config={
                     "propagate": cfg.propagate,
+                    "jones_apply_zero_order_phase": cfg.jones_apply_zero_order_phase,
                     "propagation_padding_px": cfg.propagation_padding_px,
                     "propagation_padding_mode": cfg.propagation_padding_mode,
                     "propagation_absorber_width_px": cfg.propagation_absorber_width_px,

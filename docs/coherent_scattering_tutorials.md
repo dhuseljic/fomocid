@@ -31,6 +31,33 @@ result is saved with the same canonical HDF5 structure as a scripted sweep.
 | Hologram generation and artifacts | [`tutorial_hologram_generation_and_artifacts.ipynb`](../tutorials/tutorial_hologram_generation_and_artifacts.ipynb) | Ideal/detected holograms, detector artifacts, beamstop/noise effects, CR-CL/CR+CL channels, and FTH reconstruction. |
 | Pipeline usage | [`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb) | `HologramPipelineConfig`, `HologramPipelineRanges`, running sweeps, HDF5 layout, reading outputs, masks, magnetic patterns, and CR/CL exit waves. |
 | Multislice and ROI modes | [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb) | `propagate=True/False`, aperture ROI modes, Jones/tensor ROI, multislice ROI, padding/absorbers, and practical mode choices. |
+| CK workflow with Mumax OVF input | [`Scattering_simulator_CK_mumax.ipynb`](../tutorials/Scattering_simulator_CK_mumax.ipynb) | CK-style single-simulation workflow where the magnetic layer count and 3-D magnetization stack come from a memory-mapped Mumax/OOMMF `.ovf` file in `DATA_ROOT/Data/mumax_files/`. Includes recipe compatibility checks, Mumax-to-sample interpolation, CL-CR exit-wave visualization, and ideal/detected FTH difference reconstructions. |
+
+## Mumax OVF Workflow
+
+[`Scattering_simulator_CK_mumax.ipynb`](../tutorials/Scattering_simulator_CK_mumax.ipynb)
+is the CK-style notebook for micromagnetic input. It uses
+`scattering_calculator.utils.mumax.read_mumax_ovf(..., mmap=True)` so the
+header and binary vector field are exposed quickly as a lazy array shaped
+`(znodes, ynodes, xnodes, 3)`.
+
+The notebook expects the user to set `MUMAX_FILE_NAME` in the OVF reader cell.
+The file is read from `DATA_ROOT / "Data" / "mumax_files"`. Folder listing is
+optional (`LIST_AVAILABLE_OVF=True`) because scanning large external data
+folders can be slower than opening the OVF header itself.
+
+The sample recipe must contain exactly one propagated magnetic layer per Mumax
+`z` cell. For example, if the OVF header reports `znodes=43`, the recipe must
+produce 43 magneto-optic layers that can receive those slices. The notebook
+prints the OVF-to-sample layer mapping and raises a clear error when the recipe
+and OVF stack are incompatible.
+
+The output inspection section uses the current `HologramConfig` stores:
+`exit_waves`, `ideal_holograms`, `detected_holograms`, and
+`reconstructions`. It plots CR/CL exit-wave amplitude and phase, the direct
+`CL - CR` complex exit-wave difference, ideal/detected CR-CL and CR+CL
+holograms, and FTH reconstructions of the ideal and detected CR-CL difference
+channels.
 
 ## Scripted Sweep
 
@@ -52,18 +79,21 @@ The practical mode choices are:
 
 - **Jones-only with aperture ROIs**: `propagate=False`, `use_roi=True`,
   `dielectric_tensor_use_roi=True`, `dielectric_tensor_compact=True`.
-  This is the fastest default for thin stacks.
+  This is the fastest default for thin stacks. With the default
+  `jones_apply_zero_order_phase=True`, it still keeps the rank-zero
+  inter-layer free-space phase `exp(-1j * k0 * dz)` while skipping transverse
+  FFT diffraction.
 - **Full-field multislice**: `propagate=True`,
   `multislice_propagation_roi=False`. This keeps free-space propagation
   physically conservative because the FFT is applied to the full field.
 - **Multislice with Jones/tensor ROI only**: `propagate=True`, `use_roi=True`,
   `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=False`.
   This reduces local tensor/Jones work while keeping full-field free-space FFTs.
-- **ROI multislice, default merged crops**: `propagate=True`, `use_roi=True`,
+- **ROI multislice, default common crop**: `propagate=True`, `use_roi=True`,
   `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=True`,
-  `multislice_propagation_roi_merge_overlaps=True`. This is fastest for large
-  sweeps when the aperture regions are small, and overlapping padded crops are
-  treated as one local propagation problem.
+  `multislice_propagation_roi_merge_overlaps=True`. This uses one common crop
+  enclosing all padded aperture boxes, so apertures can diffract into each
+  other inside the local ROI without paying for a full-field FFT.
 - **ROI multislice, separate-crop opt-out**:
   `multislice_propagation_roi_merge_overlaps=False`. This can be faster when
   padded aperture boxes are well separated. Intersecting aperture funnels are
@@ -74,7 +104,7 @@ The practical mode choices are:
 - **Vertical x-z aperture diagnostics**: the multislice/ROI tutorial includes a
   didactic x-z wavefront view through each aperture for every propagation mode:
   Jones-only, full-field multislice, Jones/tensor ROI with full multislice, ROI
-  multislice with separate crops, and ROI multislice with merged crops. It
+  multislice with separate crops, and ROI multislice with a common crop. It
   rebuilds the tutorial aperture stack, uses tight crops around each top
   aperture opening, marks the aperture wall, and shows amplitude/phase through
   the stack. This is a visualization aid, not an extra HDF5 output generated by
@@ -96,17 +126,19 @@ ROI, the solver still carries a field forward:
 - `multislice_propagation_roi=True` runs the inter-slice FFT propagator only in
   padded aperture boxes. The solver starts from the zero-spatial-frequency
   plane-wave phase everywhere, then adds each ROI crop's local diffraction
-  correction relative to that baseline. Aperture funnels that overlap in the
-  actual material mask are always merged into one ROI, regardless of
-  `multislice_propagation_roi_merge_overlaps`, because they are one physical
-  hole system. Padded boxes that overlap are also merged before propagation, even if
-  `multislice_propagation_roi_merge_overlaps=False`, because otherwise their
-  local corrections would be added more than once in shared pixels. Each local
-  correction is smoothly tapered to zero across the ROI padding before it is
-  added back to the full field, which suppresses rectangular crop-edge bands.
-  Set the flag to `False` only for the faster separate-crop approximation
-  between disjoint padded boxes. Pixels outside all boxes keep only the
-  plane-wave phase, not a full diffraction calculation.
+  correction relative to that baseline. With
+  `multislice_propagation_roi_merge_overlaps=True`, all padded aperture boxes
+  are enclosed in one common crop. With the flag set to `False`, disjoint
+  padded boxes may remain separate for speed. Aperture funnels that overlap in
+  the actual material mask are always merged into one ROI, regardless of the
+  flag, because they are one physical hole system. Padded boxes that overlap are
+  also merged before propagation, even when the flag is `False`, because
+  otherwise their local corrections would be added more than once in shared
+  pixels. Each local correction is smoothly tapered to zero across the ROI
+  padding before it is added back to the full field, which suppresses
+  rectangular crop-edge bands. Set the flag to `False` only for the faster
+  separate-crop approximation between disjoint padded boxes. Pixels outside all
+  boxes keep only the plane-wave phase, not a full diffraction calculation.
 
 Use full-field multislice, `propagate=True` with
 `multislice_propagation_roi=False`, when diffraction between ROI and non-ROI

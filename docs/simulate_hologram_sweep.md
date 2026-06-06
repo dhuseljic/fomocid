@@ -144,15 +144,20 @@ advanced outside the ROI boxes by the zero-spatial-frequency plane-wave phase,
 `exp(-i k0 dz)`. The local angular-spectrum FFT is then run in each padded
 aperture ROI crop. The solver adds each crop's local correction,
 `local_propagated - plane_wave_baseline`, into the full field. By default,
-aperture supports that overlap in the actual material mask are always merged
-before padding; this is mandatory because intersecting funnels form one physical
-hole system. Padded boxes that overlap are also merged before propagation, even
-if `multislice_propagation_roi_merge_overlaps=False`; otherwise the same pixels
-can receive multiple local FFT corrections and become nonphysically bright. The
-local correction is smoothly tapered across the ROI padding before it is added
-back to the full field, which reduces vertical/horizontal bands from hard
-rectangular crop edges. Set it to `False` only when you explicitly want the
-faster separate-crop approximation between disjoint padded boxes.
+`multislice_propagation_roi_merge_overlaps=True` encloses all padded aperture
+boxes in one common local propagation crop, so apertures can diffract into one
+another inside that crop without paying for a full-field FFT. If you set the
+flag to `False`, physically separate and disjoint padded boxes may remain
+separate for speed. Aperture supports that overlap in the actual material mask
+are always merged before padding; this is mandatory because intersecting
+funnels form one physical hole system. Padded boxes that overlap are also
+merged before propagation, even when the flag is `False`; otherwise the same
+pixels can receive multiple local FFT corrections and become nonphysically
+bright. The local correction is smoothly tapered across the ROI padding before
+it is added back to the full field, which reduces vertical/horizontal bands
+from hard rectangular crop edges. Set the flag to `False` only when you
+explicitly want the faster separate-crop approximation between disjoint padded
+boxes.
 Outside all boxes, no diffractive redistribution is computed. This is the
 strongest ROI approximation because true free-space propagation is nonlocal:
 diffracted light can move between ROI and non-ROI pixels.
@@ -172,6 +177,7 @@ the script:
 
 ```python
 propagate = True
+jones_apply_zero_order_phase = True
 multislice_propagation_roi = False
 multislice_propagation_roi_padding_px = 64
 multislice_propagation_roi_merge_overlaps = True
@@ -188,7 +194,12 @@ material layers with an angular-spectrum free-space propagator using the actual
 sample pixel size and each layer thickness. This is more physical for thick
 or strongly structured aperture stacks, but it is slower because it adds FFTs
 between layers. When `propagate=False`, the simulator applies only the local
-Jones transmission for each layer, which is the faster historical mode.
+Jones transmission for each layer, which is the faster historical mode. By
+default, `jones_apply_zero_order_phase=True` still multiplies the field by the
+rank-zero free-space factor `exp(-1j * k0 * dz)` between layers. This preserves
+the longitudinal phase advance without evaluating transverse FFT diffraction.
+Set it to `False` only when reproducing older Jones-only calculations that
+omitted this inter-layer phase.
 
 `multislice_propagation_roi=False` keeps the current full-field free-space
 propagation. If set to `True`, the free-space FFT between slices is evaluated
@@ -220,14 +231,16 @@ the faster separate-crop approximation between disjoint padded boxes.
 Common operating modes:
 
 - **Jones-only with aperture ROI**: `propagate=False`, `use_roi=True`,
-  `dielectric_tensor_use_roi=True`, `dielectric_tensor_compact=True`.
+  `dielectric_tensor_use_roi=True`, `dielectric_tensor_compact=True`,
+  `jones_apply_zero_order_phase=True`.
 - **Full-field multislice**: `propagate=True`,
   `multislice_propagation_roi=False`.
 - **Multislice with Jones/tensor ROI only**: `propagate=True`, `use_roi=True`,
   `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=False`.
-- **ROI multislice, default merged crops**: `propagate=True`, `use_roi=True`,
+- **ROI multislice, default common crop**: `propagate=True`, `use_roi=True`,
   `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=True`,
-  `multislice_propagation_roi_merge_overlaps=True`.
+  `multislice_propagation_roi_merge_overlaps=True`. This uses one common crop
+  enclosing all padded aperture boxes.
 - **ROI multislice, separate-crop opt-out**: same as ROI multislice, but set
   `multislice_propagation_roi_merge_overlaps=False` after checking that the
   padded boxes are disjoint and after validating the approximation against a
@@ -663,6 +676,7 @@ values actually used after applying sweep ranges and compatibility aliases:
     ├── propagator_config/           # propagation method and effective config
     │   ├── propagator_method        # written first
     │   ├── propagate
+    │   ├── jones_apply_zero_order_phase
     │   └── ...
 ```
 
@@ -692,6 +706,7 @@ Each physical parameter has one canonical saved path. Important examples:
 | Illumination FWHM | `metadata/illumination/fwhm_m` |
 | Illumination beam tilt | `metadata/illumination/alpha_beam_rad` (`alpha_y`, `alpha_x`) |
 | Multislice enable flag | `metadata/propagator_config/propagate` |
+| Jones-only rank-zero phase flag | `metadata/propagator_config/jones_apply_zero_order_phase` |
 | Multislice ROI flag | `metadata/propagator_config/multislice_propagation_roi` |
 
 The hierarchy follows ownership:

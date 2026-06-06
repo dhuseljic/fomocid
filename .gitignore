@@ -3,6 +3,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .ipynb_checkpoints/
+.notebook_cache/
 .DS_Store
 .venv/
 build/
