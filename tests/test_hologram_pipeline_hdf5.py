@@ -228,9 +228,9 @@ def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path
         "sample/use_roi": True,
         "sample/magnetic_pattern/use_roi": True,
         "sample/dielectric_tensor/compact": True,
-        "propagator_config/propagator_method": "Jones",
         "propagator_config/propagate": False,
         "propagator_config/jones_apply_zero_order_phase": True,
+        "propagator_config/propagator_method": "Jones",
     }
 
     with h5py.File(tmp_path / "metadata.h5", "w") as h5:

@@ -1866,7 +1866,26 @@ class HologramPipeline:
         """Write the canonical, ordered metadata hierarchy for one sample."""
         meta_grp = sample_grp.create_group("metadata", track_order=True)
         self._write_aperture_metadata(meta_grp, aperture_config)
-        for key, value in metadata.items():
+
+        metadata_items = list(metadata.items())
+        prop_method_items = [
+            item
+            for item in metadata_items
+            if item[0] == "propagator_config/propagator_method"
+        ]
+        prop_config_items = [
+            item
+            for item in metadata_items
+            if item[0].startswith("propagator_config/")
+            and item[0] != "propagator_config/propagator_method"
+        ]
+        other_items = [
+            item
+            for item in metadata_items
+            if not item[0].startswith("propagator_config/")
+        ]
+
+        for key, value in prop_method_items + prop_config_items + other_items:
             if key.startswith("sample/aperture/aperture_config/apertures_"):
                 continue
             parts = key.split("/")

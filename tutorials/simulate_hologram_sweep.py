@@ -45,7 +45,7 @@ output_path = output_folder / "simulation_sweep.h5"
 
 
 # Pipeline settings that are fixed across all runs in the sweep. These can be overridden in the ranges below to create mixed sampling, but any field not mentioned in the ranges will always use these values.
-propagator_method = "Jones"  # "Jones" = full 2-component matrix interaction; "Scalar" = faster scalar eigenmode approximation, exact when the selected polarization is a local eigenvector
+propagator_method = "Scalar"  # "Jones" = full 2-component matrix interaction; "Scalar" = faster scalar eigenmode approximation, exact when the selected polarization is a local eigenvector
 pipeline_random_seed = 0  # set to None for non-reproducible random sweeps
 use_roi = True # set True to use a region of interest around the sample for the whole pipeline, which can greatly speed up simulations with large free-space regions; set False to use the full grid, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
 dielectric_tensor_use_roi = True # set True to only compute local Jones tensor patches or Scalar refractive-index patches around aperture regions; set False to compute the full dense interaction stack
@@ -700,7 +700,7 @@ ranges = HologramPipelineRanges(
     xray_coherence_length=random_coherence_length,
     # Random illumination geometry
     illumination_focus_distance=Uniform(0.0, 2e-3),
-    illumination_fwhm=Uniform(5e-6, 50e-6),
+    illumination_fwhm=Uniform(2e-6, 100e-6),
     # illumination_alpha_beam=(Uniform(-np.deg2rad(2), np.deg2rad(2)), Uniform(-np.deg2rad(2), np.deg2rad(2))),
     illumination_center=(
         Uniform(-2e-6, 2e-6),
