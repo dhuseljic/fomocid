@@ -20,6 +20,10 @@ from scattering_calculator.simulation_pipelines.pipelines.hologram_pipeline impo
     HologramPipelineRanges,
 )
 from scattering_calculator.simulation_pipelines.simulation_configuration import (
+    HologramConfig,
+    XRayConfig,
+)
+from scattering_calculator.simulation_pipelines.simulation_configuration import (
     DetectorConfig,
     MagneticPatternConfig,
 )
@@ -74,6 +78,38 @@ def test_detector_center_can_be_sampled_from_ranges(tmp_path: Path) -> None:
     params = pipeline._sample_params()
 
     assert params["detector_center"] == (57, 55)
+
+
+def test_hologram_config_supports_linear_polarization_differences() -> None:
+    cfg = HologramConfig(
+        ideal_holograms={
+            "LH": np.full((2, 2), 3.0),
+            "LV": np.full((2, 2), 1.0),
+        },
+        detected_holograms={
+            "LH": np.full((2, 2), 4.0),
+            "LV": np.full((2, 2), 2.0),
+        },
+        exit_waves={
+            "LH": np.full((2, 2), 5.0 + 1.0j),
+            "LV": np.full((2, 2), 1.0 + 0.5j),
+        },
+    )
+
+    cfg.compute_differences("LH", "LV", key="linear_diff")
+    cfg.compute_sums("LH", "LV", key="linear_sum")
+
+    np.testing.assert_allclose(cfg.ideal_holograms["linear_diff"], 2.0)
+    np.testing.assert_allclose(cfg.detected_holograms["linear_sum"], 6.0)
+    np.testing.assert_allclose(cfg.exit_waves["linear_diff"], 4.0 + 0.5j)
+
+
+def test_xray_config_accepts_preferred_linear_polarization_labels() -> None:
+    horizontal = XRayConfig(energy=778.0, photon_flux=1e8, pol="LH")
+    vertical = XRayConfig(energy=778.0, photon_flux=1e8, pol="LV")
+
+    assert horizontal.setup().pol == "LH"
+    assert vertical.setup().pol == "LV"
 
 
 def test_write_precomputed_result_requires_single_sample(tmp_path: Path) -> None:

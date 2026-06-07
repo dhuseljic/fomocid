@@ -97,8 +97,9 @@ class XRayConfig(_ConfigMixin):
         Photon energy in eV.
     photon_flux : float
         Photon flux in photons per pulse.
-    polarization : {"CR", "CL", "x", "y"}
-        Polarization state of the beam.
+    polarization : {"CR", "CL", "LH", "LV"}
+        Polarization state of the beam. Legacy aliases ``"x"`` and ``"y"``
+        are accepted for horizontal and vertical linear polarization.
     coherence_length : tuple of float
         Transverse coherence length in metres as ``(y, x)``.
 
@@ -112,7 +113,7 @@ class XRayConfig(_ConfigMixin):
 
     energy: float  # eV
     photon_flux: float  # photons/s
-    pol: Literal["CR", "CL", "x", "y"] = "CR"
+    pol: Literal["CR", "CL", "LH", "LV", "x", "y"] = "CR"
     coherence_length: tuple[float, float] = (10e-6, 10e-6)  # m, (y, x)
 
     def __post_init__(self) -> None:
@@ -146,9 +147,9 @@ class XRayConfig(_ConfigMixin):
             raise ValueError(
                 f"coherence_length must be positive, got {self.coherence_length}"
             )
-        if self.pol not in ["CR", "CL", "x", "y"]:
+        if self.pol not in ["CR", "CL", "LH", "LV", "x", "y"]:
             raise ValueError(
-                f"Polarisation must be in CR, CL, x or, got {self.polarization}"
+                f"Polarisation must be one of CR, CL, LH, LV, x, or y; got {self.pol}"
             )
 
     def setup(self) -> light_beam.beam_parameters:
@@ -1495,15 +1496,16 @@ class IlluminationConfig(_ConfigMixin):
 
         Parameters
         ----------
-        pol : {"CR", "CL", "x", "y"}
-            New polarisation state.
+        pol : {"CR", "CL", "LH", "LV"}
+            New polarisation state. Legacy aliases ``"x"`` and ``"y"`` are
+            accepted for horizontal and vertical linear polarization.
 
         Returns
         -------
         None
             The function completes in place.
         """
-        self.XRayConfig.polarization = pol
+        self.XRayConfig.pol = pol
         self.illumination.beam_parameters.pol = pol
         self.illumination.get_illumination_jones()
 
@@ -2092,7 +2094,7 @@ class HologramConfig(_ConfigMixin):
     sample_y: NDArray[np.float64] | None = None
 
     _VALID_HELICITIES: tuple = field(
-        default=("CR", "CL", "x", "y"), init=False, repr=False
+        default=("CR", "CL", "LH", "LV", "x", "y"), init=False, repr=False
     )
 
     def __post_init__(self) -> None:
@@ -2324,14 +2326,23 @@ class HologramConfig(_ConfigMixin):
         }
 
     def difference(
-        self, source: Literal["ideal", "detected", "exit_wave"] = "detected"
+        self,
+        source: Literal["ideal", "detected", "exit_wave"] = "detected",
+        positive: str = "CR",
+        negative: str = "CL",
+        key: str = "diff",
     ) -> np.ndarray:
-        """Compute CR − CL, store as ``"diff"`` in the source store, and return it.
+        """Compute a polarization difference and store it in the source store.
 
         Parameters
         ----------
         source : {"ideal", "detected", "exit_wave"}
             Which store to use.
+        positive, negative : str
+            Polarization keys used for ``positive - negative``. Defaults to
+            ``"CR"`` and ``"CL"`` for the historical helicity difference.
+        key : str
+            Store key for the result. Defaults to ``"diff"``.
 
         Returns
         -------
@@ -2339,23 +2350,32 @@ class HologramConfig(_ConfigMixin):
             Return value produced by the function.
         """
         store = self._get_store(source)
-        if "CR" not in store or "CL" not in store:
+        if positive not in store or negative not in store:
             raise ValueError(
-                f"Both 'CR' and 'CL' entries are required for a difference "
+                f"Both {positive!r} and {negative!r} entries are required for a difference "
                 f"(source={source!r})."
             )
-        store["diff"] = store["CR"] - store["CL"]
-        return store["diff"]
+        store[key] = store[positive] - store[negative]
+        return store[key]
 
     def sum(
-        self, source: Literal["ideal", "detected", "exit_wave"] = "detected"
+        self,
+        source: Literal["ideal", "detected", "exit_wave"] = "detected",
+        left: str = "CR",
+        right: str = "CL",
+        key: str = "sum",
     ) -> np.ndarray:
-        """Compute CR + CL, store as ``"sum"`` in the source store, and return it.
+        """Compute a polarization sum and store it in the source store.
 
         Parameters
         ----------
         source : {"ideal", "detected", "exit_wave"}
             Which store to use.
+        left, right : str
+            Polarization keys used for ``left + right``. Defaults to ``"CR"``
+            and ``"CL"`` for the historical helicity sum.
+        key : str
+            Store key for the result. Defaults to ``"sum"``.
 
         Returns
         -------
@@ -2363,21 +2383,28 @@ class HologramConfig(_ConfigMixin):
             Return value produced by the function.
         """
         store = self._get_store(source)
-        if "CR" not in store or "CL" not in store:
+        if left not in store or right not in store:
             raise ValueError(
-                f"Both 'CR' and 'CL' entries are required for a sum "
+                f"Both {left!r} and {right!r} entries are required for a sum "
                 f"(source={source!r})."
             )
-        store["sum"] = store["CR"] + store["CL"]
-        return store["sum"]
+        store[key] = store[left] + store[right]
+        return store[key]
 
-    def compute_differences(self):
-        """Run the compute differences operation.
+    def compute_differences(
+        self,
+        positive: str = "CR",
+        negative: str = "CL",
+        key: str = "diff",
+    ):
+        """Compute the selected polarization difference for every populated store.
 
         Parameters
         ----------
-        None
-            This function takes no explicit input parameters.
+        positive, negative : str
+            Polarization keys used for ``positive - negative``.
+        key : str
+            Store key for the result.
 
         Returns
         -------
@@ -2385,15 +2412,22 @@ class HologramConfig(_ConfigMixin):
             Return value produced by the function.
         """
         for source in ["ideal", "detected", "exit_wave"]:
-            self.difference(source)
+            self.difference(source, positive=positive, negative=negative, key=key)
 
-    def compute_sums(self):
-        """Run the compute sums operation.
+    def compute_sums(
+        self,
+        left: str = "CR",
+        right: str = "CL",
+        key: str = "sum",
+    ):
+        """Compute the selected polarization sum for every populated store.
 
         Parameters
         ----------
-        None
-            This function takes no explicit input parameters.
+        left, right : str
+            Polarization keys used for ``left + right``.
+        key : str
+            Store key for the result.
 
         Returns
         -------
@@ -2401,7 +2435,7 @@ class HologramConfig(_ConfigMixin):
             Return value produced by the function.
         """
         for source in ["ideal", "detected", "exit_wave"]:
-            self.sum(source)
+            self.sum(source, left=left, right=right, key=key)
 
     def compute_reconstructions(self):
         """Run the compute reconstructions operation.

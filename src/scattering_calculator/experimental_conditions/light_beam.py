@@ -15,7 +15,10 @@ def polarization_vector(pol):
     Parameters
     ----------
     pol : str or float
-        Polarization type: "CR" (circular right), "CL" (circular left), "x" (linear horizontal), "y" (linear vertical), or angle in radians for linear polarization at that angle.
+        Polarization type: "CR" (circular right), "CL" (circular left),
+        "LH" (linear horizontal), "LV" (linear vertical), or angle in radians
+        for linear polarization at that angle. Legacy aliases "x" and "y" are
+        accepted for backwards compatibility.
 
     Returns
     -------
@@ -27,9 +30,9 @@ def polarization_vector(pol):
         return np.array([1, -1j]) / np.sqrt(2)
     elif pol == "CL":
         return np.array([1, 1j]) / np.sqrt(2)
-    elif pol == "x":
+    elif pol in ("LH", "x"):
         return np.array([1, 0])
-    elif pol == "y":
+    elif pol in ("LV", "y"):
         return np.array([0, 1])
     else:
         return np.array([np.sin(pol), np.cos(pol)])
@@ -43,7 +46,9 @@ def scalar_to_jones(scalar_wavefield, pol):
     scalar_wavefield : ndarray of shape (Ny, Nx)
         Input scalar wavefield.
     pol : int or str
-        Polarization index (0 for Ex, 1 for Ey) or polarization type ("CR", "CL", "x", "y", or angle in radians).
+        Polarization index (0 for Ex, 1 for Ey) or polarization type
+        ("CR", "CL", "LH", "LV", or angle in radians). Legacy aliases
+        "x" and "y" are accepted for backwards compatibility.
 
     Returns
     -------
@@ -227,7 +232,8 @@ class beam_parameters:
     illumination : complex ndarray
         Beam cross-section set by :meth:`gauss_beam`.
     pol : str
-        Polarization type, e.g. "CR", "CL", "x", "y", or angle in radians.
+        Polarization type, e.g. "CR", "CL", "LH", "LV", or angle in radians.
+        Legacy aliases "x" and "y" are accepted for linear polarization.
     """
 
     def __init__(

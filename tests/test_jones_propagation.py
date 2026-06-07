@@ -24,6 +24,17 @@ from scattering_calculator.sample_generator.structures import CompactDielectricT
 
 
 class JonesFreeSpacePropagationTests(unittest.TestCase):
+    def test_linear_polarization_labels_and_legacy_aliases(self) -> None:
+        """LH/LV are the preferred linear labels; x/y remain aliases."""
+        np.testing.assert_allclose(
+            light_beam.polarization_vector("LH"),
+            light_beam.polarization_vector("x"),
+        )
+        np.testing.assert_allclose(
+            light_beam.polarization_vector("LV"),
+            light_beam.polarization_vector("y"),
+        )
+
     def test_farfield_oversampling_uses_background_extended_field(self) -> None:
         """Test that far-field oversampling FFTs a background-filled field."""
         field = np.zeros((4, 4, 2), dtype=complex)
@@ -254,13 +265,13 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
     def test_scalar_matches_jones_for_diagonal_eigenmode(self) -> None:
         """Scalar propagation matches Jones for a linear diagonal eigenmode."""
         scalar_in = np.ones((5, 6), dtype=complex)
-        jones_in = light_beam.scalar_to_jones(scalar_in, "x")
+        jones_in = light_beam.scalar_to_jones(scalar_in, "LH")
         eps = np.zeros((2, 5, 6, 2, 2), dtype=complex)
         eps[0, ..., 0, 0] = 4.0
         eps[0, ..., 1, 1] = 5.0
         eps[1, ..., 0, 0] = 6.0
         eps[1, ..., 1, 1] = 7.0
-        beam = SimpleNamespace(wavelength=3e-9, pol="x")
+        beam = SimpleNamespace(wavelength=3e-9, pol="LH")
 
         jones = wavefronts(
             beam_parameters=beam,
@@ -364,7 +375,7 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
 
         Structure.calculate_final_scalar_refractive_index(
             sample,
-            "x",
+            "LH",
             use_aperture_roi=False,
             compact=True,
         )
@@ -412,12 +423,12 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         """Scalar ROI free-space propagation follows Jones for a linear eigenmode."""
         scalar_in = np.ones((16, 18), dtype=complex)
         scalar_in[7:9, 8:10] = 4.0
-        jones_in = light_beam.scalar_to_jones(scalar_in, "x")
+        jones_in = light_beam.scalar_to_jones(scalar_in, "LH")
         eps = np.zeros((2, 16, 18, 2, 2), dtype=complex)
         eps[..., 0, 0] = 1.0
         eps[..., 1, 1] = 1.0
         region = (slice(6, 11), slice(7, 12))
-        beam = SimpleNamespace(wavelength=1e-9, pol="x")
+        beam = SimpleNamespace(wavelength=1e-9, pol="LH")
 
         jones = wavefronts(
             beam_parameters=beam,
@@ -451,11 +462,11 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
         """Scalar and Jones use the same free-space propagation convention."""
         rng = np.random.default_rng(3)
         scalar_in = rng.normal(size=(12, 14)) + 1j * rng.normal(size=(12, 14))
-        jones_in = light_beam.scalar_to_jones(scalar_in, "x")
+        jones_in = light_beam.scalar_to_jones(scalar_in, "LH")
         eps = np.zeros((2, 12, 14, 2, 2), dtype=complex)
         eps[..., 0, 0] = 1.0
         eps[..., 1, 1] = 1.0
-        beam = SimpleNamespace(wavelength=2e-9, pol="x")
+        beam = SimpleNamespace(wavelength=2e-9, pol="LH")
 
         jones = wavefronts(
             beam_parameters=beam,
