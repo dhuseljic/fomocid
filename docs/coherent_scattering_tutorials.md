@@ -52,6 +52,11 @@ produce 43 magneto-optic layers that can receive those slices. The notebook
 prints the OVF-to-sample layer mapping and raises a clear error when the recipe
 and OVF stack are incompatible.
 
+The lateral Mumax field is treated as periodic. During interpolation the OVF
+unit cell is wrapped in `x` and `y`, so a Mumax simulation smaller than the
+object hole is tiled across the full scattering grid instead of being padded
+with zero magnetization.
+
 The output inspection section uses the current `HologramConfig` stores:
 `exit_waves`, `ideal_holograms`, `detected_holograms`, and
 `reconstructions`. It plots CR/CL exit-wave amplitude and phase, the direct
@@ -83,6 +88,19 @@ The practical mode choices are:
   `jones_apply_zero_order_phase=True`, it still keeps the rank-zero
   inter-layer free-space phase `exp(-1j * k0 * dz)` while skipping transverse
   FFT diffraction.
+- **Scalar eigenmode interaction**: set `propagator_method="Scalar"` to replace
+  the two-component Jones interaction with a scalar refractive-index
+  interaction. It skips dielectric-tensor construction, uses the database
+  channels `[n_total, n_circ, n_lin]` directly with the aperture mask and
+  magnetization to build `final_scalar_refractive_index`, and propagates one
+  scalar 2-D field for the selected polarization. It is exact relative to Jones
+  when that polarization is a local eigenvector of the interaction matrix. Keep
+  `scalar_refractive_index_lazy=True` to compute scalar ROI patches layer by
+  layer during propagation instead of precomputing the whole compact scalar
+  stack. Scalar and Jones use the same `exp(-i kz dz)` free-space propagation
+  convention in both full-field and ROI multislice modes. Keep
+  `propagator_method="Jones"` when polarization mixing/rotation is physically
+  important.
 - **Full-field multislice**: `propagate=True`,
   `multislice_propagation_roi=False`. This keeps free-space propagation
   physically conservative because the FFT is applied to the full field.
@@ -126,7 +144,9 @@ ROI, the solver still carries a field forward:
 - `multislice_propagation_roi=True` runs the inter-slice FFT propagator only in
   padded aperture boxes. The solver starts from the zero-spatial-frequency
   plane-wave phase everywhere, then adds each ROI crop's local diffraction
-  correction relative to that baseline. With
+  correction relative to that baseline. Jones and Scalar use the same
+  angular-spectrum sign convention: local crops use `exp(-i kz dz)`, and the
+  outside baseline is the `kz = k0` limit of that operator. With
   `multislice_propagation_roi_merge_overlaps=True`, all padded aperture boxes
   are enclosed in one common crop. With the flag set to `False`, disjoint
   padded boxes may remain separate for speed. Aperture funnels that overlap in

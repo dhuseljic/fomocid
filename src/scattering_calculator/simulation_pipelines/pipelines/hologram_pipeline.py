@@ -270,6 +270,20 @@ class HologramPipelineConfig:
         illumination multiplied by the uniform background stack and ROI
         free-space factors, then paste the simulated central exit wave into the
         middle. Default ``1``.
+    propagator_method : {"Jones", "Scalar"}
+        Light-matter interaction method. ``"Jones"`` uses the full
+        two-component Jones matrix formalism. ``"Scalar"`` skips dielectric
+        tensor construction, builds a complex refractive-index stack directly
+        from the database channels ``[n_total, n_circ, n_lin]``, and propagates
+        one scalar eigenmode. It is faster and matches Jones propagation when
+        the configured polarization is an eigenvector of the local interaction.
+        Default ``"Jones"``.
+    scalar_refractive_index_lazy : bool
+        Scalar-mode memory option. If ``True``, compute scalar aperture ROI
+        patches layer by layer during propagation instead of precomputing all
+        scalar patches for the full stack. This mirrors the compact Jones
+        memory-saving path while avoiding dielectric tensor allocation.
+        Default ``True``.
     oversampling : int
         Oversampling factor relative to the Nyquist limit from the detector.
         ``real_space_pixel_size = detector_resolution / oversampling``.
@@ -391,6 +405,8 @@ class HologramPipelineConfig:
     multislice_propagation_roi_padding_px: int = 0
     multislice_propagation_roi_merge_overlaps: bool = True
     farfield_oversampling: int = 1
+    propagator_method: str = "Jones"
+    scalar_refractive_index_lazy: bool = True
 
     # Simulation grid
     oversampling: int = 2
@@ -749,16 +765,29 @@ class HologramPipeline:
         metadata["sample/dielectric_tensor/compact"] = bool(
             dielectric_tensor_compact
         )
-        metadata["propagator_config/propagator_method"] = str(
-            propagator_config.propagator_method
-        )
-        for key, value in propagator_config.propagator_config.items():
-            metadata[f"propagator_config/{key}"] = value
+        metadata.update(cls._propagator_metadata(propagator_config))
         metadata.update(cls._xray_metadata(xray_config))
         metadata["detector/save_detected_no_beamstop"] = bool(
             save_detected_hologram_without_beamstop
         )
         return metadata
+
+    @staticmethod
+    def _propagator_metadata(
+        propagator_config: SamplePropagatorConfig,
+    ) -> dict[str, Any]:
+        """Return propagation metadata grouped under ``propagator_config/``."""
+        values: dict[str, Any] = {
+            "propagator_method": str(propagator_config.propagator_method)
+        }
+        values.update(
+            {
+                key: value
+                for key, value in propagator_config.propagator_config.items()
+                if key != "propagator_method"
+            }
+        )
+        return {f"propagator_config/{key}": value for key, value in values.items()}
 
     # ------------------------------------------------------------------
     # Parameter sampling
@@ -1520,17 +1549,34 @@ class HologramPipeline:
         metadata.update(aperture_metadata)
         t_stage = mark_stage("front aperture", t_stage)
 
-        sample_config.sample_structure.calculate_final_dielectric_tensor(
-            use_aperture_roi=cfg.use_roi and cfg.dielectric_tensor_use_roi,
-            compact=cfg.dielectric_tensor_compact,
-        )
-        metadata["sample/dielectric_tensor/use_roi"] = bool(
-            cfg.use_roi and cfg.dielectric_tensor_use_roi
-        )
-        metadata["sample/dielectric_tensor/compact"] = bool(
-            cfg.dielectric_tensor_compact
-        )
-        t_stage = mark_stage("dielectric tensor", t_stage)
+        if cfg.propagator_method == "Scalar":
+            sample_config.sample_structure.calculate_final_scalar_refractive_index(
+                pol="CR",
+                use_aperture_roi=cfg.use_roi and cfg.dielectric_tensor_use_roi,
+                compact=True,
+                lazy=cfg.scalar_refractive_index_lazy,
+            )
+            metadata["sample/dielectric_tensor/skipped_for_scalar"] = True
+            metadata["sample/scalar_refractive_index/use_roi"] = bool(
+                cfg.use_roi and cfg.dielectric_tensor_use_roi
+            )
+            metadata["sample/scalar_refractive_index/compact"] = True
+            metadata["sample/scalar_refractive_index/lazy"] = bool(
+                cfg.scalar_refractive_index_lazy
+            )
+            t_stage = mark_stage("scalar refractive index setup", t_stage)
+        else:
+            sample_config.sample_structure.calculate_final_dielectric_tensor(
+                use_aperture_roi=cfg.use_roi and cfg.dielectric_tensor_use_roi,
+                compact=cfg.dielectric_tensor_compact,
+            )
+            metadata["sample/dielectric_tensor/use_roi"] = bool(
+                cfg.use_roi and cfg.dielectric_tensor_use_roi
+            )
+            metadata["sample/dielectric_tensor/compact"] = bool(
+                cfg.dielectric_tensor_compact
+            )
+            t_stage = mark_stage("dielectric tensor", t_stage)
 
         # ---- Illumination config -----------------------------------------
         illumination_config = IlluminationConfig(
@@ -1573,10 +1619,16 @@ class HologramPipeline:
             propagator_config = SamplePropagatorConfig(
                 SampleConfig=sample_config,
                 IlluminationConfig=illumination_config,
-                propagator_method="Jones",
+                propagator_method=cfg.propagator_method,
                 propagator_config={
+                    "propagator_method": cfg.propagator_method,
                     "propagate": cfg.propagate,
                     "jones_apply_zero_order_phase": cfg.jones_apply_zero_order_phase,
+                    "scalar_apply_zero_order_phase": cfg.jones_apply_zero_order_phase,
+                    "scalar_refractive_index_lazy": cfg.scalar_refractive_index_lazy,
+                    "dielectric_tensor_use_roi": (
+                        cfg.use_roi and cfg.dielectric_tensor_use_roi
+                    ),
                     "propagation_padding_px": cfg.propagation_padding_px,
                     "propagation_padding_mode": cfg.propagation_padding_mode,
                     "propagation_absorber_width_px": cfg.propagation_absorber_width_px,
@@ -1593,7 +1645,9 @@ class HologramPipeline:
                 },
             )
             propagator_config.setup()
-            t_stage = mark_stage(f"{pol} Jones propagation", t_stage)
+            t_stage = mark_stage(
+                f"{pol} {cfg.propagator_method} propagation", t_stage
+            )
 
             detector_config.assign_propagated_wavefront(propagator_config)
             detector_config.detect_hologram()
@@ -1625,11 +1679,7 @@ class HologramPipeline:
             t_stage = mark_stage(f"{pol} detector noise", t_stage)
 
         metadata.update(sample_config.get_metadata(prefix="sample/"))
-        metadata["propagator_config/propagator_method"] = str(
-            propagator_config.propagator_method
-        )
-        for key, value in propagator_config.propagator_config.items():
-            metadata[f"propagator_config/{key}"] = value
+        metadata.update(self._propagator_metadata(propagator_config))
         metadata.update(self._xray_metadata(xray_config))
         metadata["detector/save_detected_no_beamstop"] = bool(
             cfg.save_detected_hologram_without_beamstop

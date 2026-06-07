@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from scattering_calculator.experimental_conditions import detector, light_beam
 from scattering_calculator.sample_generator import pattern_generator
 from scattering_calculator.sample_generator import structures
-from scattering_calculator.beam_propagator import Jones_propagator
+from scattering_calculator.beam_propagator import Jones_propagator, simple_propagation
 
 
 class _ConfigMixin:
@@ -1654,11 +1654,14 @@ class SamplePropagatorConfig(_ConfigMixin):
     ----------
     SampleConfig : SampleConfig
         Sample configuration used to build the sample structure and compute the
-        refractive index distribution for propagation.
+        optical interaction stack for propagation.
     IlluminationConfig : IlluminationConfig
         Illumination configuration used to define the incident beam properties.
-    propagator_method : {"Jones"} or None
-        Which beam propagation method to use. ``None`` produces an empty
+    propagator_method : {"Jones", "Scalar"} or None
+        Which beam propagation method to use. ``"Jones"`` consumes the full
+        dielectric tensor stack. ``"Scalar"`` consumes a complex
+        refractive-index stack built directly from the material database
+        channels for the selected polarization. ``None`` produces an empty
         propagator that returns the input wavefield unchanged.
     propagator_config : dict
         Reserved for future extension.
@@ -1666,7 +1669,7 @@ class SamplePropagatorConfig(_ConfigMixin):
 
     SampleConfig: SampleConfig
     IlluminationConfig: IlluminationConfig
-    propagator_method: Literal["Jones"] | None = "Jones"
+    propagator_method: Literal["Jones", "Scalar"] | None = "Jones"
     propagator_config: dict = field(default_factory=dict)
 
     def _illumination_jones_for_shape(self, shape: tuple[int, int]) -> np.ndarray:
@@ -1728,6 +1731,39 @@ class SamplePropagatorConfig(_ConfigMixin):
                 background *= np.exp(-1j * k0 * float(dz))
         return background
 
+    def _background_exit_scalar(self, shape: tuple[int, int]) -> np.ndarray:
+        """Build the scalar background exit wave on an extended grid."""
+        pol = light_beam.polarization_vector(self.IlluminationConfig.beam_params.pol)
+        background_jones = self._illumination_jones_for_shape(shape)
+        background = np.einsum("...s,s->...", background_jones, np.conjugate(pol))
+        self.SampleConfig.sample_structure.calculate_final_scalar_refractive_index(
+            self.IlluminationConfig.beam_params.pol,
+            use_aperture_roi=bool(
+                self.propagator_config.get("dielectric_tensor_use_roi", True)
+            ),
+            compact=True,
+            lazy=bool(
+                self.propagator_config.get("scalar_refractive_index_lazy", True)
+            ),
+        )
+        scalar_stack = self.SampleConfig.sample_structure.final_scalar_refractive_index
+        wavelength = self.IlluminationConfig.beam_params.wavelength
+        k0 = 2 * np.pi / wavelength
+        propagate = bool(self.propagator_config.get("propagate", False))
+        scalar_apply_zero_order_phase = bool(
+            self.propagator_config.get(
+                "scalar_apply_zero_order_phase",
+                self.propagator_config.get("jones_apply_zero_order_phase", True),
+            )
+        )
+        for iz, dz in enumerate(self.SampleConfig.sample_structure.layer_thicknesses):
+            background *= np.exp(-1j * k0 * float(dz) * scalar_stack.base_index[iz])
+            if iz < len(self.SampleConfig.sample_structure.layer_thicknesses) - 1 and (
+                propagate or scalar_apply_zero_order_phase
+            ):
+                background *= np.exp(-1j * k0 * float(dz))
+        return background
+
     def setup(self) -> Jones_propagator.wavefronts:
         """Build the beam propagator object based on the current sample and illumination.
 
@@ -1743,6 +1779,8 @@ class SamplePropagatorConfig(_ConfigMixin):
         """
         if self.propagator_method == "Jones":
             self.wavefront = self._jones_propagation()
+        elif self.propagator_method == "Scalar":
+            self.wavefront = self._scalar_propagation()
         elif self.propagator_method is None:
             return None
         else:
@@ -1819,6 +1857,82 @@ class SamplePropagatorConfig(_ConfigMixin):
         )
         return wavefront
 
+    def _scalar_propagation(self):
+        """Propagate the configured beam using the scalar eigenmode approximation."""
+        farfield_oversampling = int(
+            self.propagator_config.get("farfield_oversampling", 1)
+        )
+        farfield_background_scalar = None
+        if farfield_oversampling > 1:
+            ny, nx = self.IlluminationConfig.shape
+            farfield_background_scalar = self._background_exit_scalar(
+                (ny * farfield_oversampling, nx * farfield_oversampling)
+            )
+
+        scalar_apply_zero_order_phase = bool(
+            self.propagator_config.get(
+                "scalar_apply_zero_order_phase",
+                self.propagator_config.get("jones_apply_zero_order_phase", True),
+            )
+        )
+        self.SampleConfig.sample_structure.calculate_final_scalar_refractive_index(
+            self.IlluminationConfig.beam_params.pol,
+            use_aperture_roi=bool(
+                self.propagator_config.get("dielectric_tensor_use_roi", True)
+            ),
+            compact=True,
+            lazy=bool(
+                self.propagator_config.get("scalar_refractive_index_lazy", True)
+            ),
+        )
+        scalar_stack = self.SampleConfig.sample_structure.final_scalar_refractive_index
+
+        wavefront = simple_propagation.scalar_wavefronts(
+            beam_parameters=self.IlluminationConfig.beam_params,
+            refractive_index_stack=scalar_stack,
+            layer_thicknesses=self.SampleConfig.sample_structure.layer_thicknesses,
+            real_space_pixel_size=self.SampleConfig.real_space_pixel_size,
+            E_in=self.IlluminationConfig.illumination.illumination_jones,
+            aperture_support_regions=getattr(
+                self.SampleConfig.sample_structure,
+                "aperture_support_regions",
+                None,
+            ),
+            propagate=bool(self.propagator_config.get("propagate", False)),
+            scalar_apply_zero_order_phase=scalar_apply_zero_order_phase,
+            propagation_padding_px=int(
+                self.propagator_config.get("propagation_padding_px", 0)
+            ),
+            propagation_padding_mode=str(
+                self.propagator_config.get("propagation_padding_mode", "edge")
+            ),
+            propagation_absorber_width_px=int(
+                self.propagator_config.get("propagation_absorber_width_px", 0)
+            ),
+            propagation_absorber_strength=float(
+                self.propagator_config.get("propagation_absorber_strength", 0.0)
+            ),
+            propagation_absorber_profile=str(
+                self.propagator_config.get("propagation_absorber_profile", "cosine")
+            ),
+            multislice_propagation_roi=bool(
+                self.propagator_config.get("multislice_propagation_roi", False)
+            ),
+            multislice_propagation_roi_padding_px=int(
+                self.propagator_config.get(
+                    "multislice_propagation_roi_padding_px", 0
+                )
+            ),
+            multislice_propagation_roi_merge_overlaps=bool(
+                self.propagator_config.get(
+                    "multislice_propagation_roi_merge_overlaps", True
+                )
+            ),
+            farfield_oversampling=farfield_oversampling,
+            farfield_background_scalar=farfield_background_scalar,
+        )
+        return wavefront
+
     def return_wavefront(self) -> Jones_propagator.wavefronts:
         """Return the configured wavefront object.
 
@@ -1847,13 +1961,15 @@ class SamplePropagatorConfig(_ConfigMixin):
         result : np.ndarray
             Return value produced by the function.
         """
-        amp = (
-            np.abs(self.wavefront.exit_wave[..., 0]) ** 2
-            + np.abs(self.wavefront.exit_wave[..., 1]) ** 2
-        ) / np.sqrt(2)
-        phase = np.angle(self.wavefront.exit_wave[..., 0])
-
-        self.exit_wavefield = amp * np.exp(1j * phase)
+        if self.wavefront.exit_wave.ndim == 2:
+            self.exit_wavefield = self.wavefront.exit_wave
+        else:
+            amp = (
+                np.abs(self.wavefront.exit_wave[..., 0]) ** 2
+                + np.abs(self.wavefront.exit_wave[..., 1]) ** 2
+            ) / np.sqrt(2)
+            phase = np.angle(self.wavefront.exit_wave[..., 0])
+            self.exit_wavefield = amp * np.exp(1j * phase)
 
     def return_scalar_wavefield(self) -> np.ndarray:
         """Return the scalar exit wavefield after sample propagation.

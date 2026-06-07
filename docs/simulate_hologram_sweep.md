@@ -58,7 +58,10 @@ For each sample, the pipeline:
 2. Builds the x-ray, detector, beamstop, sample, magnetic pattern, aperture, and illumination configs.
 3. Generates an OH-local magnetic pattern when ROI mode is enabled.
 4. Builds the holography support mask and detector beamstop.
-5. Computes the dielectric tensor and Jones propagation for CR and CL polarization.
+5. Computes the light-matter interaction for CR and CL polarization. Jones mode
+   builds `final_dielectric_tensor`, a compact/dense `(Nz, Ny, Nx, 2, 2)`
+   dielectric-tensor stack. Scalar mode builds `final_scalar_refractive_index`,
+   a compact/dense `(Nz, Ny, Nx)` complex refractive-index stack.
 6. Creates ideal holograms, applies detector effects/noise, and saves everything to HDF5.
 
 Timing for each stage is printed when `verbose=True`.
@@ -95,6 +98,7 @@ regions that matter:
 use_roi = True
 dielectric_tensor_use_roi = True
 dielectric_tensor_compact = True
+scalar_refractive_index_lazy = True
 ```
 
 `use_roi=True` enables OH-local magnetic patterns and local aperture/dielectric
@@ -106,15 +110,25 @@ is most useful for labyrinth or stripe-like patterns. Set it to `False` when
 you want the full simulated field to contain the generated texture everywhere.
 
 `dielectric_tensor_use_roi=True` creates aperture support regions and computes
-magnetic/vacuum dielectric corrections only inside local aperture boxes. These
-same support regions are also used by the Jones propagation fast path. If this
-is disabled, Jones propagation has no aperture ROI boxes to use.
+magnetic/vacuum optical corrections only inside local aperture boxes. In Jones
+mode those corrections are dielectric-tensor patches. In Scalar mode the same
+regions become scalar refractive-index patches. These support regions are also
+used by the Jones and Scalar propagation fast paths. If this is disabled, the
+propagators have no aperture ROI boxes to use.
 
 `dielectric_tensor_compact=True` avoids allocating the full dense
 `(Nz, Ny, Nx, 2, 2)` tensor stack. The simulator stores constant per-layer
 diagonal terms plus aperture ROI patches, then evaluates those patches during
 Jones propagation. Set it to `False` if you need `final_dielectric_tensor` to be
 a materialized dense array for debugging or downstream inspection.
+
+`scalar_refractive_index_lazy=True` is the Scalar-mode counterpart. Scalar mode
+already avoids dielectric tensors; this flag also avoids precomputing every
+scalar ROI patch. Instead, `final_scalar_refractive_index` stores the base
+layer indices plus the mask, magnetization, and ROI boxes, then builds only the
+current layer's scalar refractive-index patches during propagation. Set it to
+`False` only when you want the compact scalar patches precomputed for
+inspection or benchmarking.
 
 #### What is approximated outside ROIs?
 
@@ -143,7 +157,10 @@ material slices, and only when `propagate=True`. The full field is first
 advanced outside the ROI boxes by the zero-spatial-frequency plane-wave phase,
 `exp(-i k0 dz)`. The local angular-spectrum FFT is then run in each padded
 aperture ROI crop. The solver adds each crop's local correction,
-`local_propagated - plane_wave_baseline`, into the full field. By default,
+`local_propagated - plane_wave_baseline`, into the full field. Jones and Scalar
+use the same propagation convention here: local FFT crops use
+`exp(-i kz dz)`, while the outside baseline is the `kz = k0` limit of the same
+operator. By default,
 `multislice_propagation_roi_merge_overlaps=True` encloses all padded aperture
 boxes in one common local propagation crop, so apertures can diffract into one
 another inside that crop without paying for a full-field FFT. If you set the
@@ -177,6 +194,8 @@ the script:
 
 ```python
 propagate = True
+propagator_method = "Jones"
+scalar_refractive_index_lazy = True
 jones_apply_zero_order_phase = True
 multislice_propagation_roi = False
 multislice_propagation_roi_padding_px = 64
@@ -189,17 +208,34 @@ propagation_absorber_profile = "cosine"
 farfield_oversampling = 1
 ```
 
-When `propagate=True`, the Jones field is propagated between consecutive
-material layers with an angular-spectrum free-space propagator using the actual
-sample pixel size and each layer thickness. This is more physical for thick
-or strongly structured aperture stacks, but it is slower because it adds FFTs
+`propagator_method="Jones"` is the default full two-component Jones-matrix
+light-matter interaction. `propagator_method="Scalar"` is the faster scalar
+alternative: it skips dielectric-tensor construction and builds a compact
+scalar refractive-index stack, `final_scalar_refractive_index`, directly from
+the database channels
+`[n_total, n_circ, n_lin]`, the aperture mask, and the magnetization. In the
+eigenmode case, where the chosen polarization is a local eigenvector of the
+interaction matrix, this scalar refractive-index interaction matches Jones
+propagation while avoiding two-component matrix propagation. Use Jones when the
+sample can rotate or mix polarization components in a way you need to keep.
+With `scalar_refractive_index_lazy=True`, the scalar ROI patches are computed
+layer by layer while propagating instead of being allocated for the whole stack
+before propagation. Scalar and Jones use the same free-space phase convention
+for full-field and ROI multislice propagation, so Scalar ROI crops should not
+introduce a phase jump relative to the plane-wave baseline.
+
+When `propagate=True`, the field is propagated between consecutive material
+layers with an angular-spectrum free-space propagator using the actual sample
+pixel size and each layer thickness. This is more physical for thick or
+strongly structured aperture stacks, but it is slower because it adds FFTs
 between layers. When `propagate=False`, the simulator applies only the local
-Jones transmission for each layer, which is the faster historical mode. By
+material transmission for each layer, which is the faster historical mode. By
 default, `jones_apply_zero_order_phase=True` still multiplies the field by the
-rank-zero free-space factor `exp(-1j * k0 * dz)` between layers. This preserves
-the longitudinal phase advance without evaluating transverse FFT diffraction.
-Set it to `False` only when reproducing older Jones-only calculations that
-omitted this inter-layer phase.
+rank-zero free-space factor `exp(-1j * k0 * dz)` between layers. For scalar
+propagation the same setting is forwarded as `scalar_apply_zero_order_phase`.
+This preserves the longitudinal phase advance without evaluating transverse
+FFT diffraction. Set it to `False` only when reproducing older calculations
+that omitted this inter-layer phase.
 
 `multislice_propagation_roi=False` keeps the current full-field free-space
 propagation. If set to `True`, the free-space FFT between slices is evaluated
@@ -233,6 +269,14 @@ Common operating modes:
 - **Jones-only with aperture ROI**: `propagate=False`, `use_roi=True`,
   `dielectric_tensor_use_roi=True`, `dielectric_tensor_compact=True`,
   `jones_apply_zero_order_phase=True`.
+- **Scalar eigenmode interaction**: set `propagator_method="Scalar"` when the
+  selected polarization is expected to remain a local eigenmode. This skips
+  dielectric-tensor construction, uses the database refractive-index channels
+  directly, and can be substantially faster than Jones while matching it for
+  diagonal or circular-eigenmode stacks. Keep
+  `scalar_refractive_index_lazy=True` to compute scalar patches layer by layer
+  and minimize memory allocation. The scalar free-space propagator uses the
+  same `exp(-i kz dz)` angular-spectrum convention as Jones.
 - **Full-field multislice**: `propagate=True`,
   `multislice_propagation_roi=False`.
 - **Multislice with Jones/tensor ROI only**: `propagate=True`, `use_roi=True`,

@@ -15,6 +15,11 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from scattering_calculator.beam_propagator.Jones_propagator import wavefronts
+from scattering_calculator.beam_propagator.simple_propagation import (
+    calculate_scalar_refractive_index_stack,
+    scalar_wavefronts,
+)
+from scattering_calculator.experimental_conditions import light_beam
 from scattering_calculator.sample_generator.structures import CompactDielectricTensorStack
 
 
@@ -245,6 +250,253 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
 
         expected_phase = np.exp(-1j * 2 * np.pi / 7e-9 * 3e-9)
         np.testing.assert_allclose(with_phase, without_phase * expected_phase)
+
+    def test_scalar_matches_jones_for_diagonal_eigenmode(self) -> None:
+        """Scalar propagation matches Jones for a linear diagonal eigenmode."""
+        scalar_in = np.ones((5, 6), dtype=complex)
+        jones_in = light_beam.scalar_to_jones(scalar_in, "x")
+        eps = np.zeros((2, 5, 6, 2, 2), dtype=complex)
+        eps[0, ..., 0, 0] = 4.0
+        eps[0, ..., 1, 1] = 5.0
+        eps[1, ..., 0, 0] = 6.0
+        eps[1, ..., 1, 1] = 7.0
+        beam = SimpleNamespace(wavelength=3e-9, pol="x")
+
+        jones = wavefronts(
+            beam_parameters=beam,
+            eps_stack=eps,
+            layer_thicknesses=[1e-9, 2e-9],
+            real_space_pixel_size=1e-9,
+            E_in=jones_in,
+            propagate=False,
+            jones_apply_zero_order_phase=False,
+        )
+        scalar = scalar_wavefronts(
+            beam_parameters=beam,
+            eps_stack=eps,
+            layer_thicknesses=[1e-9, 2e-9],
+            real_space_pixel_size=1e-9,
+            E_in=jones_in,
+            propagate=False,
+            scalar_apply_zero_order_phase=False,
+        )
+
+        np.testing.assert_allclose(jones.exit_wave[..., 0], scalar.exit_wave)
+        np.testing.assert_allclose(jones.exit_wave[..., 1], 0.0)
+        np.testing.assert_allclose(jones.hologram, scalar.hologram)
+
+    def test_scalar_index_stack_uses_refractive_indices_and_mask(self) -> None:
+        """Scalar propagation stack is built without dielectric tensors."""
+        sample = SimpleNamespace()
+        sample.mask = np.ones((1, 3, 4), dtype=float)
+        sample.magnetization = np.zeros((1, 3, 4, 3), dtype=float)
+        sample.magnetization[0, :, :, 2] = 0.5
+        sample.layer_refractive_indices = np.array(
+            [[2.0 + 0.1j, 0.2 + 0.03j, 0.0j]],
+            dtype=complex,
+        )
+
+        stack = calculate_scalar_refractive_index_stack(
+            sample,
+            "CR",
+            use_aperture_roi=False,
+            lazy=False,
+        )
+        dense = stack.materialize()
+
+        expected_material = (
+            sample.layer_refractive_indices[0, 0]
+            + 0.5 * sample.layer_refractive_indices[0, 1]
+        )
+        np.testing.assert_allclose(dense[0, 0, 0], expected_material)
+        self.assertFalse(hasattr(sample, "final_dielectric_tensor"))
+
+        sample.mask[0, 1, 2] = 0.0
+        stack = calculate_scalar_refractive_index_stack(
+            sample,
+            "CR",
+            use_aperture_roi=False,
+            lazy=False,
+        )
+        np.testing.assert_allclose(stack.materialize()[0, 1, 2], 1.0)
+
+    def test_lazy_scalar_index_stack_matches_precomputed_stack(self) -> None:
+        """Lazy scalar patches match the precomputed compact representation."""
+        sample = SimpleNamespace()
+        sample.mask = np.ones((2, 4, 5), dtype=float)
+        sample.mask[:, 1:3, 2:4] = 0.4
+        sample.magnetization = np.zeros((2, 4, 5, 3), dtype=float)
+        sample.magnetization[:, 1:3, 2:4, 2] = 0.7
+        sample.layer_refractive_indices = np.array(
+            [[2.0 + 0.1j, 0.03j, 0.0], [1.5 + 0.05j, -0.02j, 0.0]],
+            dtype=complex,
+        )
+
+        lazy_stack = calculate_scalar_refractive_index_stack(
+            sample,
+            "CR",
+            use_aperture_roi=True,
+            lazy=True,
+        )
+        precomputed_stack = calculate_scalar_refractive_index_stack(
+            sample,
+            "CR",
+            use_aperture_roi=True,
+            lazy=False,
+        )
+
+        self.assertTrue(hasattr(lazy_stack, "layer_patches"))
+        np.testing.assert_allclose(
+            lazy_stack.materialize(),
+            precomputed_stack.materialize(),
+        )
+
+    def test_structure_can_store_final_scalar_refractive_index_stack(self) -> None:
+        """Structure exposes a scalar analogue to final_dielectric_tensor."""
+        sample = SimpleNamespace()
+        sample.mask = np.ones((1, 2, 2), dtype=float)
+        sample.magnetization = np.zeros((1, 2, 2, 3), dtype=float)
+        sample.layer_refractive_indices = np.array(
+            [[1.5 + 0.01j, 0.0j, 0.0j]],
+            dtype=complex,
+        )
+        from scattering_calculator.sample_generator.structures import Structure
+
+        Structure.calculate_final_scalar_refractive_index(
+            sample,
+            "x",
+            use_aperture_roi=False,
+            compact=True,
+        )
+
+        self.assertTrue(hasattr(sample, "final_scalar_refractive_index"))
+        self.assertEqual(sample.final_scalar_refractive_index.shape, (1, 2, 2))
+        np.testing.assert_allclose(
+            sample.final_scalar_refractive_index.materialize(),
+            np.full((1, 2, 2), 1.5 + 0.01j),
+        )
+
+    def test_scalar_matches_jones_for_circular_eigenmode(self) -> None:
+        """Scalar propagation matches Jones for a circular eigenpolarization."""
+        scalar_in = np.ones((4, 5), dtype=complex)
+        jones_in = light_beam.scalar_to_jones(scalar_in, "CR")
+        eps = np.zeros((1, 4, 5, 2, 2), dtype=complex)
+        eps[..., 0, 0] = 4.0
+        eps[..., 1, 1] = 4.0
+        eps[..., 0, 1] = 0.2j
+        eps[..., 1, 0] = -0.2j
+        beam = SimpleNamespace(wavelength=2e-9, pol="CR")
+
+        jones = wavefronts(
+            beam_parameters=beam,
+            eps_stack=eps,
+            layer_thicknesses=[1.5e-9],
+            real_space_pixel_size=1e-9,
+            E_in=jones_in,
+            propagate=False,
+        )
+        scalar = scalar_wavefronts(
+            beam_parameters=beam,
+            eps_stack=eps,
+            layer_thicknesses=[1.5e-9],
+            real_space_pixel_size=1e-9,
+            E_in=jones_in,
+            propagate=False,
+        )
+
+        expected_jones = light_beam.scalar_to_jones(scalar.exit_wave, "CR")
+        np.testing.assert_allclose(jones.exit_wave, expected_jones)
+        np.testing.assert_allclose(jones.hologram, scalar.hologram, atol=1e-10)
+
+    def test_scalar_roi_free_space_matches_jones_for_diagonal_eigenmode(self) -> None:
+        """Scalar ROI free-space propagation follows Jones for a linear eigenmode."""
+        scalar_in = np.ones((16, 18), dtype=complex)
+        scalar_in[7:9, 8:10] = 4.0
+        jones_in = light_beam.scalar_to_jones(scalar_in, "x")
+        eps = np.zeros((2, 16, 18, 2, 2), dtype=complex)
+        eps[..., 0, 0] = 1.0
+        eps[..., 1, 1] = 1.0
+        region = (slice(6, 11), slice(7, 12))
+        beam = SimpleNamespace(wavelength=1e-9, pol="x")
+
+        jones = wavefronts(
+            beam_parameters=beam,
+            eps_stack=eps,
+            layer_thicknesses=[0.0, 3e-9],
+            real_space_pixel_size=1e-9,
+            E_in=jones_in,
+            aperture_support_regions=(region,),
+            propagate=True,
+            propagation_padding_px=2,
+            multislice_propagation_roi=True,
+            multislice_propagation_roi_padding_px=2,
+        )
+        scalar = scalar_wavefronts(
+            beam_parameters=beam,
+            eps_stack=eps,
+            layer_thicknesses=[0.0, 3e-9],
+            real_space_pixel_size=1e-9,
+            E_in=jones_in,
+            aperture_support_regions=(region,),
+            propagate=True,
+            propagation_padding_px=2,
+            multislice_propagation_roi=True,
+            multislice_propagation_roi_padding_px=2,
+        )
+
+        np.testing.assert_allclose(jones.exit_wave[..., 0], scalar.exit_wave)
+        np.testing.assert_allclose(jones.exit_wave[..., 1], 0.0)
+
+    def test_scalar_full_free_space_matches_jones_for_linear_eigenmode(self) -> None:
+        """Scalar and Jones use the same free-space propagation convention."""
+        rng = np.random.default_rng(3)
+        scalar_in = rng.normal(size=(12, 14)) + 1j * rng.normal(size=(12, 14))
+        jones_in = light_beam.scalar_to_jones(scalar_in, "x")
+        eps = np.zeros((2, 12, 14, 2, 2), dtype=complex)
+        eps[..., 0, 0] = 1.0
+        eps[..., 1, 1] = 1.0
+        beam = SimpleNamespace(wavelength=2e-9, pol="x")
+
+        jones = wavefronts(
+            beam_parameters=beam,
+            eps_stack=eps,
+            layer_thicknesses=[0.0, 4e-9],
+            real_space_pixel_size=1e-9,
+            E_in=jones_in,
+            propagate=True,
+            propagation_padding_px=2,
+        )
+        scalar = scalar_wavefronts(
+            beam_parameters=beam,
+            eps_stack=eps,
+            layer_thicknesses=[0.0, 4e-9],
+            real_space_pixel_size=1e-9,
+            E_in=jones_in,
+            propagate=True,
+            propagation_padding_px=2,
+        )
+
+        np.testing.assert_allclose(jones.exit_wave[..., 0], scalar.exit_wave)
+        np.testing.assert_allclose(jones.exit_wave[..., 1], 0.0)
+
+    def test_scalar_roi_free_space_keeps_uniform_phase_continuous(self) -> None:
+        """Scalar ROI propagation does not introduce a plane-wave phase jump."""
+        field = np.ones((14, 16), dtype=complex)
+        region = (slice(4, 9), slice(5, 11))
+        wf = scalar_wavefronts.__new__(scalar_wavefronts)
+
+        out = wf.propagate_free_space_scalar_roi(
+            field,
+            wavelength=2e-9,
+            dz=5e-9,
+            pixel_size=1e-9,
+            aperture_support_regions=(region,),
+            roi_padding_px=2,
+            padding_px=2,
+        )
+
+        expected = np.exp(-1j * 2 * np.pi / 2e-9 * 5e-9)
+        np.testing.assert_allclose(out, expected)
 
     def test_roi_free_space_propagation_keeps_plane_phase_outside_roi(self) -> None:
         """Test that roi free space propagation keeps plane phase outside roi.

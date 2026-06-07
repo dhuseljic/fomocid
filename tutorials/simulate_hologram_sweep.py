@@ -45,13 +45,15 @@ output_path = output_folder / "simulation_sweep.h5"
 
 
 # Pipeline settings that are fixed across all runs in the sweep. These can be overridden in the ranges below to create mixed sampling, but any field not mentioned in the ranges will always use these values.
+propagator_method = "Jones"  # "Jones" = full 2-component matrix interaction; "Scalar" = faster scalar eigenmode approximation, exact when the selected polarization is a local eigenvector
 pipeline_random_seed = 0  # set to None for non-reproducible random sweeps
 use_roi = True # set True to use a region of interest around the sample for the whole pipeline, which can greatly speed up simulations with large free-space regions; set False to use the full grid, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
-dielectric_tensor_use_roi = True # set True to only compute the dielectric tensor in a region of interest around the sample, which can greatly speed up simulations with large free-space regions; set False to compute the full dense tensor stack, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
-dielectric_tensor_compact = True  # avoid allocating the full dense tensor stack
-propagate = True  # set True for multislice free-space propagation between layers
-jones_apply_zero_order_phase = True  # when propagate=False, keep the longitudinal exp(-1j*k0*dz) phase between layers without FFT diffraction
-multislice_propagation_roi = True  # if True, propagate aperture ROI crops and add local corrections to the plane-wave baseline
+dielectric_tensor_use_roi = True # set True to only compute local Jones tensor patches or Scalar refractive-index patches around aperture regions; set False to compute the full dense interaction stack
+dielectric_tensor_compact = True  # Jones: avoid allocating the full dense tensor stack
+scalar_refractive_index_lazy = True  # Scalar: compute compact refractive-index ROI patches layer by layer during propagation instead of precomputing every layer patch
+propagate = True  # set True for multislice free-space propagation between layers; Jones and Scalar both use exp(-1j*kz*dz)
+jones_apply_zero_order_phase = True  # when propagate=False, keep the longitudinal exp(-1j*k0*dz) phase between layers without FFT diffraction; Scalar receives the same zero-order phase option
+multislice_propagation_roi = True  # if True, propagate aperture ROI crops and add local corrections to the plane-wave baseline exp(-1j*k0*dz)
 multislice_propagation_roi_padding_px = 64  # enlarges ROI boxes around apertures and gives the local correction taper room to fade smoothly
 multislice_propagation_roi_merge_overlaps = True  # True = one common crop enclosing all padded aperture ROIs; False = keep disjoint crops separate when possible, while physical/padded overlaps are still auto-merged
 propagation_padding_px = 128  # 0 disables padded free-space propagation
@@ -326,6 +328,8 @@ config = HologramPipelineConfig(
     magnetic_pattern_use_roi=True,
     dielectric_tensor_use_roi=dielectric_tensor_use_roi,
     dielectric_tensor_compact=dielectric_tensor_compact,
+    propagator_method=propagator_method,
+    scalar_refractive_index_lazy=scalar_refractive_index_lazy,
     propagate=propagate,
     jones_apply_zero_order_phase=jones_apply_zero_order_phase,
     multislice_propagation_roi=multislice_propagation_roi,

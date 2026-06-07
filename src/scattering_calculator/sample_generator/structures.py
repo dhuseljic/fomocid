@@ -1115,6 +1115,51 @@ class Structure:
             return
         self.final_dielectric_tensor = compact_stack.materialize()
 
+    def calculate_final_scalar_refractive_index(
+        self,
+        pol,
+        use_aperture_roi: bool = True,
+        compact: bool = True,
+        lazy: bool = True,
+    ) -> None:
+        """Build the spatially resolved scalar refractive-index stack.
+
+        This is the scalar analogue of :meth:`calculate_final_dielectric_tensor`.
+        Instead of constructing a ``(Nz, Ny, Nx, 2, 2)`` dielectric tensor stack,
+        it combines the database refractive-index channels ``[n_total, n_circ,
+        n_lin]`` with the selected polarization, magnetization, and aperture
+        mask to create a complex ``(Nz, Ny, Nx)`` refractive-index stack.
+
+        Parameters
+        ----------
+        pol : str or float
+            Polarization used by the scalar eigenmode approximation.
+        use_aperture_roi : bool
+            If ``True``, store spatially varying magnetic/vacuum corrections in
+            local aperture patches, mirroring the compact dielectric tensor
+            representation.
+        compact : bool
+            If ``True``, store constant per-layer scalar indices plus aperture
+            ROI patches. If ``False``, materialize the dense ``(Nz, Ny, Nx)``
+            scalar index stack.
+        lazy : bool
+            If ``True`` and ``compact`` is also ``True``, compute scalar ROI
+            patches layer by layer during propagation instead of precomputing
+            all layer patches up front.
+        """
+        from scattering_calculator.beam_propagator import simple_propagation
+
+        compact_stack = simple_propagation.calculate_scalar_refractive_index_stack(
+            self,
+            pol,
+            use_aperture_roi=use_aperture_roi,
+            lazy=lazy and compact,
+        )
+        if compact:
+            self.final_scalar_refractive_index = compact_stack
+            return
+        self.final_scalar_refractive_index = compact_stack.materialize()
+
     def calculate_compact_dielectric_tensor(
         self,
         use_aperture_roi: bool = True,

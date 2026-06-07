@@ -48,6 +48,8 @@ def test_pipeline_config_does_not_duplicate_per_sample_configs(tmp_path: Path) -
         assert "_pipeline_config/detector_quantum_efficiency" not in h5
         assert "_pipeline_config/recipe" not in h5
         assert "_pipeline_config/propagate" not in h5
+        assert "_pipeline_config/propagator_method" not in h5
+        assert "_pipeline_config/propagator_config/propagator_method" not in h5
         assert sorted(h5["_pipeline_config"].keys()) == ["n_samples", "oversampling"]
 
 
@@ -199,6 +201,7 @@ def test_build_precomputed_metadata_uses_canonical_groups() -> None:
     assert "sample/aperture/aperture_method" in metadata
     assert "sample/dielectric_tensor/compact" in metadata
     assert "propagator_config/propagator_method" in metadata
+    assert "propagator_method" not in metadata
     assert "detector_params/counts_per_photon" in metadata
     assert "measurement_config/exposure_time" in metadata
     assert "detector/detector_params/counts_per_photon" not in metadata
@@ -244,6 +247,7 @@ def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path
         assert list(h5["00000/metadata/propagator_config"].keys())[0] == (
             "propagator_method"
         )
+        assert "00000/metadata/propagator_method" not in h5
         assert "00000/metadata/use_roi" not in h5
         assert "00000/metadata/aperture" not in h5
         assert "00000/metadata/dielectric_tensor" not in h5
