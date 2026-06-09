@@ -26,7 +26,7 @@ from scattering_calculator.sample_generator import structures
 #################################################################
 #### HOW MANY SIMULATIONS TO RUN? ####
 #################################################################
-nr_simulations = 2  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 20  # increase to e.g. 1000 for a full training dataset
 
 # --- Material stack ---
 recipe = "[Au(140)Cr(60)]x5/SiN(200)/Pt(20)Al(20)Co(20)"
