@@ -26,14 +26,14 @@ from scattering_calculator.sample_generator import structures
 #################################################################
 #### HOW MANY SIMULATIONS TO RUN? ####
 #################################################################
-nr_simulations = 20  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 3  # increase to e.g. 1000 for a full training dataset
 
 # --- Material stack ---
-recipe = "[Au(140)Cr(60)]x5/SiN(200)/Pt(20)Al(20)Co(20)"
+recipe = "[Au(200)Cr(60)]x5/SiN(200)/Pt(10)Al(10)Co(10)"
 
 # simulation sampling options; these can be overridden in the ranges below to create mixed sampling
 oversampling=2 # sampling of the sample relative to the dector-based sampling; e.g. oversampling=2 means the sample grid has 2x finer pixel size than the detector-projected pixel size in the sample plane; this is separate from farfield_oversampling, which controls the hologram sampling relative to the detector
-farfield_oversampling = 2  # >1 extends the exit wave with the physical background before the far-field FFT
+farfield_oversampling = 1  # >1 extends the exit wave with the physical background before the far-field FFT
 detector_pixel_footprint_samples = 2  # sub-samples per detector-pixel axis when footprint averaging is enabled
 
 # %%
@@ -45,8 +45,8 @@ output_path = output_folder / "simulation_sweep.h5"
 
 
 # Pipeline settings that are fixed across all runs in the sweep. These can be overridden in the ranges below to create mixed sampling, but any field not mentioned in the ranges will always use these values.
-propagator_method = "Scalar"  # "Jones" = full 2-component matrix interaction; "Scalar" = faster scalar eigenmode approximation, exact when the selected polarization is a local eigenvector
 pipeline_random_seed = 0  # set to None for non-reproducible random sweeps
+propagator_method = "Scalar"  # "Jones" = full 2-component matrix interaction; "Scalar" = faster scalar eigenmode approximation, exact when the selected polarization is a local eigenvector
 use_roi = True # set True to use a region of interest around the sample for the whole pipeline, which can greatly speed up simulations with large free-space regions; set False to use the full grid, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
 dielectric_tensor_use_roi = True # set True to only compute local Jones tensor patches or Scalar refractive-index patches around aperture regions; set False to compute the full dense interaction stack
 dielectric_tensor_compact = True  # Jones: avoid allocating the full dense tensor stack
@@ -55,7 +55,7 @@ propagate = True  # set True for multislice free-space propagation between layer
 jones_apply_zero_order_phase = True  # when propagate=False, keep the longitudinal exp(-1j*k0*dz) phase between layers without FFT diffraction; Scalar receives the same zero-order phase option
 multislice_propagation_roi = True  # if True, propagate aperture ROI crops and add local corrections to the plane-wave baseline exp(-1j*k0*dz)
 multislice_propagation_roi_padding_px = 64  # enlarges ROI boxes around apertures and gives the local correction taper room to fade smoothly
-multislice_propagation_roi_merge_overlaps = True  # True = one common crop enclosing all padded aperture ROIs; False = keep disjoint crops separate when possible, while physical/padded overlaps are still auto-merged
+multislice_propagation_roi_merge_overlaps = False # True = one common crop enclosing all padded aperture ROIs; False = keep disjoint crops separate when possible, while physical/padded overlaps are still auto-merged
 propagation_padding_px = 128  # 0 disables padded free-space propagation
 propagation_padding_mode = "edge"  # "edge", "reflect", "symmetric", or "constant"
 propagation_absorber_width_px = 64  # 0 disables edge absorption
