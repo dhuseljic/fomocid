@@ -15,6 +15,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from scattering_calculator.beam_propagator.Jones_propagator import wavefronts
+from scattering_calculator.beam_propagator.free_space_sampling import (
+    propagation_sampling_limit,
+    required_fixed_grid_substeps,
+)
 from scattering_calculator.beam_propagator.simple_propagation import (
     calculate_scalar_refractive_index_stack,
     scalar_wavefronts,
@@ -129,6 +133,67 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
 
         self.assertEqual(out.shape, field.shape)
         self.assertTrue(np.all(np.isfinite(out)))
+
+    def test_sampling_limit_uses_transverse_pixel_count(self) -> None:
+        limit = propagation_sampling_limit((12, 20), pixel_size=2.0, wavelength=0.5)
+
+        self.assertEqual(limit, 96.0)
+        self.assertEqual(
+            required_fixed_grid_substeps(
+                (12, 20), pixel_size=2.0, wavelength=0.5, dz=192.1
+            ),
+            3,
+        )
+
+    def test_scalar_long_distance_auto_substeps_fixed_grid_propagation(self) -> None:
+        rng = np.random.default_rng(4)
+        field = rng.normal(size=(8, 8)) + 1j * rng.normal(size=(8, 8))
+        wavelength = 1.0
+        pixel_size = 1.0
+        dz = 20.0
+        substeps = required_fixed_grid_substeps(
+            field.shape, pixel_size, wavelength, dz
+        )
+        self.assertGreater(substeps, 1)
+
+        wf = scalar_wavefronts.__new__(scalar_wavefronts)
+        out = wf.propagate_free_space_scalar(
+            field,
+            wavelength=wavelength,
+            dz=dz,
+            pixel_size=pixel_size,
+        )
+
+        expected = field
+        step_dz = dz / substeps
+        for _ in range(substeps):
+            H = wf._free_space_kernel(*field.shape, wavelength, step_dz, pixel_size)
+            expected = np.fft.ifft2(np.fft.fft2(expected) * H)
+
+        np.testing.assert_allclose(out, expected, atol=1e-12)
+
+    def test_single_fft_fresnel_reports_changed_output_sampling(self) -> None:
+        field = np.ones((6, 10, 2), dtype=complex)
+        wavelength = 2.0
+        dz = 30.0
+        pixel_size = 0.5
+
+        out, output_pixel_size = wavefronts.propagate_free_space_jones_fresnel_single_fft(
+            field,
+            wavelength=wavelength,
+            dz=dz,
+            pixel_size=pixel_size,
+        )
+
+        self.assertEqual(out.shape, field.shape)
+        self.assertTrue(np.all(np.isfinite(out)))
+        np.testing.assert_allclose(
+            output_pixel_size,
+            (
+                wavelength * abs(dz) / (field.shape[0] * pixel_size),
+                wavelength * abs(dz) / (field.shape[1] * pixel_size),
+            ),
+        )
 
     def test_edge_absorber_is_one_in_the_center(self) -> None:
         """Test that edge absorber is one in the center.

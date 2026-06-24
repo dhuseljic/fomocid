@@ -130,6 +130,86 @@ H_evanescent = exp(-alpha |dz|)
 with zero real `kz` phase. This damps sub-wavelength spatial frequencies rather
 than amplifying them.
 
+## Long-Distance Vacuum Sampling
+
+The fixed-grid transfer-function step above keeps the same transverse pixel
+size before and after propagation. The nanofocusing-optics multislice paper
+*Multislice does it all--calculating the performance of nanofocusing X-ray
+optics* states the relevant long-distance condition as: "When subsequently
+propagating a wavefield in vacuum over a distance longer than
+`Nt (Delta x)^2 / lambda`, sampling considerations dictate the use of an
+alternative propagation approach."
+
+For a vacuum distance `dz`, the code therefore checks the multislice sampling
+limit
+
+```text
+z_max = Nt dx^2 / lambda
+```
+
+where `Nt = min(Nx, Ny)`, `dx` is the transverse pixel size, and `lambda` is
+the wavelength. If `|dz| > z_max`, scalar and Jones full-field propagation split
+that distance into
+
+```text
+n_steps = ceil(|dz| / z_max)
+```
+
+fixed-grid substeps of length
+
+```text
+dz_step = dz / n_steps
+```
+
+before continuing. Each substep still uses
+
+```text
+E_{m+1}(x, y) =
+    IFFT2( FFT2(E_m(x, y)) exp[-i kz(kx, ky) dz_step] )
+```
+
+so the regular multislice stack remains shape-preserving and the next material
+slice is still sampled on the same `(x, y)` grid.
+
+The code also exposes the paper's long-distance one-FFT Fresnel form as an
+explicit propagation option:
+
+```text
+psi_{j+1}(u_x lambda z, u_y lambda z)
+  = F{ psi_j(x, y) exp[-i pi (x^2 + y^2) / (lambda z)] }
+    * i/(lambda z) * exp[-i pi lambda z (u_x^2 + u_y^2)]
+```
+
+through `propagate_free_space_scalar_fresnel_single_fft` and
+`propagate_free_space_jones_fresnel_single_fft`. These methods return both the
+propagated field and the new output sampling
+
+```text
+dy_out = lambda |z| / (Ny dx)
+dx_out = lambda |z| / (Nx dx)
+```
+
+The changed sampling follows directly from the Fourier coordinates
+
+```text
+u_x = n_x / (Nx dx)
+u_y = n_y / (Ny dx)
+```
+
+and the output-plane coordinates
+
+```text
+x_out = u_x lambda z
+y_out = u_y lambda z
+```
+
+so adjacent output pixels are separated by `lambda |z| / (N dx)`. This is why
+the regular in-stack multislice propagator does not silently switch to the
+one-FFT formula: doing so would put `psi_{j+1}` on a different transverse grid
+from the next dielectric slice. The explicit Fresnel methods are intended for
+standalone long vacuum propagation or for optical chains where the caller
+resamples the next element onto the returned grid.
+
 ## Boundary Padding And Absorbers
 
 FFT propagation is periodic by construction. To reduce wraparound artifacts,

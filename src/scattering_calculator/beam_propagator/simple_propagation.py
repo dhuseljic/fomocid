@@ -9,6 +9,10 @@ import scipy as scp
 from scipy.ndimage import find_objects, label
 
 from scattering_calculator.experimental_conditions import light_beam
+from scattering_calculator.beam_propagator.free_space_sampling import (
+    fresnel_single_fft,
+    required_fixed_grid_substeps,
+)
 from scattering_calculator.utils import image_transformator
 
 
@@ -499,9 +503,15 @@ class scalar_wavefronts:
                 absorber_profile,
             )
 
-        H = self._free_space_kernel(*E_work.shape, wavelength, dz, pixel_size)
-        F = scp.fft.fft2(E_work, workers=-1)
-        E_out = scp.fft.ifft2(F * H, workers=-1)
+        substeps = required_fixed_grid_substeps(
+            E_work.shape, pixel_size, wavelength, dz
+        )
+        step_dz = dz / substeps
+        E_out = E_work
+        for _ in range(substeps):
+            H = self._free_space_kernel(*E_out.shape, wavelength, step_dz, pixel_size)
+            F = scp.fft.fft2(E_out, workers=-1)
+            E_out = scp.fft.ifft2(F * H, workers=-1)
 
         if absorber_width_px > 0 and absorber_strength > 0:
             E_out = E_out * self._edge_absorber(
@@ -517,6 +527,18 @@ class scalar_wavefronts:
                 padding_px : padding_px + E_in.shape[1],
             ]
         return E_out
+
+    @staticmethod
+    def propagate_free_space_scalar_fresnel_single_fft(E_in, wavelength, dz, pixel_size):
+        """Long-distance Fresnel propagation with changed output sampling.
+
+        Returns ``(E_out, (dy_out, dx_out))``. This method implements the
+        one-FFT Fresnel formula used when ``abs(dz)`` exceeds the fixed-grid
+        sampling limit. The regular multislice path does not call this directly
+        because material slices are sampled on the original grid; it instead
+        splits long fixed-grid propagation distances into safe substeps.
+        """
+        return fresnel_single_fft(E_in, wavelength, dz, pixel_size, axes=(0, 1))
 
     def propagate_free_space_scalar_roi(
         self,
