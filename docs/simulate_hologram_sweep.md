@@ -19,6 +19,13 @@ For notebook-first learning, use the focused notebooks under `tutorials/`:
 - [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb)
   explains `propagate=True/False`, aperture ROI modes, Jones/tensor ROI,
   multislice ROI, padding, absorbers, and recommended operating modes.
+- [`tutorial_tilted_magnetic_layer_multislice.ipynb`](../tutorials/tutorial_tilted_magnetic_layer_multislice.ipynb)
+  demonstrates tilted multilayers, fixed beam-direction contrast, and optional
+  local-momentum vector contrast where XMCD follows the local light direction
+  during multislice propagation.
+- [`light_propagation_modes.md`](light_propagation_modes.md)
+  derives the no-propagation approximation, multislice angular-spectrum
+  propagation, final far-field FFT, and detector q-space projection.
 - [`coherent_scattering_tutorials.md`](coherent_scattering_tutorials.md)
   maps all coherent-scattering notebooks by topic.
 
@@ -152,6 +159,16 @@ as the spatially uniform diagonal background response for that layer. During the
 Jones step, outside-ROI pixels are still multiplied by this constant per-layer
 transmission; they are not zeroed.
 
+`dielectric_tensor_local_k_projection=True` disables compact/ROI tensor storage
+for Jones mode and stores a direction-independent vector dielectric response
+instead. At every material slice the propagator estimates the local wavevector
+direction from the current Jones field, projects the magnetic response onto
+that direction, and then applies the resulting local Jones matrix. This is the
+most physical mode for thick tilted samples or aperture stacks where the light
+has diffracted before it reaches a magnetic layer. It is also more expensive,
+because the projected tensor image is rebuilt for each slice from the evolving
+field.
+
 `multislice_propagation_roi=True` affects only free-space propagation between
 material slices, and only when `propagate=True`. The full field is first
 advanced outside the ROI boxes by the zero-spatial-frequency plane-wave phase,
@@ -236,6 +253,29 @@ propagation the same setting is forwarded as `scalar_apply_zero_order_phase`.
 This preserves the longitudinal phase advance without evaluating transverse
 FFT diffraction. Set it to `False` only when reproducing older calculations
 that omitted this inter-layer phase.
+
+For the propagation equations, including the no-propagation approximation,
+full-field multislice FFTs, ROI multislice corrections, final Fraunhofer FFT,
+and detector q-space projection, see
+[`light_propagation_modes.md`](light_propagation_modes.md).
+
+### Vector Contrast And Local Momentum
+
+For the derivation of charge, XMCD, XMLD, scalar refractive-index propagation,
+Jones dielectric tensors, fixed beam-direction projection, and local-k vector
+contrast, see
+[`optical_contrast_formalisms.md`](optical_contrast_formalisms.md). The short
+version for this sweep script is:
+
+- `propagator_method="Scalar"` uses one effective complex refractive index for
+  the selected polarization eigenmode.
+- `propagator_method="Jones"` propagates the two-component transverse field
+  through a dielectric tensor.
+- tilted Jones illumination can project XMCD onto the nominal beam direction,
+  so contrast follows `m . k` instead of lab-frame `mz`;
+- `dielectric_tensor_local_k_projection=True` recomputes `k` from local Jones
+  phase gradients before every material slice, so multislice diffraction can
+  change the vector contrast through the stack.
 
 `multislice_propagation_roi=False` keeps the current full-field free-space
 propagation. If set to `True`, the free-space FFT between slices is evaluated
@@ -749,6 +789,9 @@ Each physical parameter has one canonical saved path. Important examples:
 | Aperture geometry | `metadata/sample/aperture/aperture_config/...` |
 | Magnetic-pattern method/config | `metadata/sample/magnetic_pattern/...` |
 | Dielectric-tensor compact flag | `metadata/sample/dielectric_tensor/compact` |
+| Fixed beam projection flag | `metadata/sample/dielectric_tensor/beam_direction_projected` |
+| Fixed beam direction | `metadata/sample/dielectric_tensor/beam_direction_xyz` |
+| Local-k projection flag | `metadata/sample/dielectric_tensor/local_k_projected` |
 | Detector distance | `metadata/detector/sample_to_detector_distance` |
 | Readout-noise sigma | `metadata/detector_params/readout_noise_sigma` |
 | Quantum efficiency | `metadata/detector_params/quantum_efficiency` |

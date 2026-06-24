@@ -43,6 +43,7 @@ part of the simulation at a time:
 - [`tutorial_hologram_generation_and_artifacts.ipynb`](../tutorials/tutorial_hologram_generation_and_artifacts.ipynb)
 - [`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb)
 - [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb)
+- [`tutorial_tilted_magnetic_layer_multislice.ipynb`](../tutorials/tutorial_tilted_magnetic_layer_multislice.ipynb)
 - [`tutorial_cobalt_l_edge_energy_sweep.ipynb`](../tutorials/tutorial_cobalt_l_edge_energy_sweep.ipynb)
 - [`Scattering_simulator_CK_mumax.ipynb`](../tutorials/Scattering_simulator_CK_mumax.ipynb)
 
@@ -50,6 +51,17 @@ Use the [coherent-scattering tutorial map](coherent_scattering_tutorials.md)
 to choose the right notebook, and the
 [hologram sweep reference](simulate_hologram_sweep.md) for the scripted
 pipeline and HDF5 output layout.
+Use the [optical contrast formalisms](optical_contrast_formalisms.md) chapter
+for the scalar refractive-index equations, Jones dielectric tensors, charge,
+XMCD, XMLD, and vector/local-momentum contrast.
+Use the [light propagation modes](light_propagation_modes.md) chapter for
+no-propagation, multislice propagation, final far-field FFTs, and detector
+q-space projection.
+
+The tilted magnetic layer notebook is the focused reference for vector XMCD
+contrast: it compares a fixed beam-direction `m . k` projection with the
+local-k mode that estimates the light momentum from Jones phase gradients
+during multislice propagation.
 
 The Mumax notebook is the path for CK-style single simulations driven by a
 Mumax/OOMMF OVF magnetization file. It memory-maps the OVF data, checks that

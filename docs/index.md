@@ -19,6 +19,12 @@ Start here:
 - Read the [tutorial guide](tutorials.md)
 - Use the [coherent-scattering tutorial map](coherent_scattering_tutorials.md)
   for FTH simulation notebooks and pipeline usage
+- Read the [optical contrast formalisms](optical_contrast_formalisms.md) for
+  the scalar refractive-index model, Jones dielectric tensors, XMCD/XMLD
+  equations, and vector contrast with local light momentum
+- Read the [light propagation modes](light_propagation_modes.md) for the
+  no-propagation approximation, multislice FFT propagation, final Fraunhofer
+  propagation, and detector q-space projection
 - Read the [hologram sweep reference](simulate_hologram_sweep.md) for scripted
   HDF5 dataset generation
 - Use the [configuration reference](configuration.md) when editing YAML configs
@@ -32,6 +38,8 @@ Start here:
 configuration
 tutorials
 coherent_scattering_tutorials
+optical_contrast_formalisms
+light_propagation_modes
 simulate_hologram_sweep
 roadmap
 contributing

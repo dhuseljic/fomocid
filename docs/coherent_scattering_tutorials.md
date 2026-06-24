@@ -31,6 +31,7 @@ result is saved with the same canonical HDF5 structure as a scripted sweep.
 | Hologram generation and artifacts | [`tutorial_hologram_generation_and_artifacts.ipynb`](../tutorials/tutorial_hologram_generation_and_artifacts.ipynb) | Ideal/detected holograms, detector artifacts, beamstop/noise effects, CR-CL/CR+CL channels, and FTH reconstruction. |
 | Pipeline usage | [`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb) | `HologramPipelineConfig`, `HologramPipelineRanges`, running sweeps, HDF5 layout, reading outputs, masks, magnetic patterns, and CR/CL exit waves. |
 | Multislice and ROI modes | [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb) | `propagate=True/False`, aperture ROI modes, Jones/tensor ROI, multislice ROI, padding/absorbers, and practical mode choices. |
+| Tilted magnetic layer multislice | [`tutorial_tilted_magnetic_layer_multislice.ipynb`](../tutorials/tutorial_tilted_magnetic_layer_multislice.ipynb) | Tilted multilayers, fixed beam-direction XMCD projection, local-k vector contrast, and x-z/y-z diagnostics of how local momentum modifies `m . k`. |
 | Co L-edge energy sweep | [`tutorial_cobalt_l_edge_energy_sweep.ipynb`](../tutorials/tutorial_cobalt_l_edge_energy_sweep.ipynb) | Fixed-sample energy scan across the Cobalt L3/L2 edges, XMCD exit-wave `log(CR/CL)`, holograms, object-hole-cropped FTH reconstructions, and total intensity versus energy. |
 | CK workflow with Mumax OVF input | [`Scattering_simulator_CK_mumax.ipynb`](../tutorials/Scattering_simulator_CK_mumax.ipynb) | CK-style single-simulation workflow where the magnetic layer count and 3-D magnetization stack come from a memory-mapped Mumax/OOMMF `.ovf` file in `DATA_ROOT/Data/mumax_files/`. Includes recipe compatibility checks, Mumax-to-sample interpolation, CL-CR exit-wave visualization, and ideal/detected FTH difference reconstructions. |
 
@@ -78,6 +79,10 @@ simulation. The script uses:
 
 The prose reference for the sweep script is
 [`docs/simulate_hologram_sweep.md`](simulate_hologram_sweep.md).
+The optical theory reference is
+[`docs/optical_contrast_formalisms.md`](optical_contrast_formalisms.md).
+The propagation and detector-projection theory reference is
+[`docs/light_propagation_modes.md`](light_propagation_modes.md).
 
 ## Choosing ROI And Multislice Modes
 
@@ -108,6 +113,14 @@ The practical mode choices are:
 - **Multislice with Jones/tensor ROI only**: `propagate=True`, `use_roi=True`,
   `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=False`.
   This reduces local tensor/Jones work while keeping full-field free-space FFTs.
+- **Tilted/vector XMCD contrast**: for Jones propagation with tilted
+  illumination, the dielectric tensor can be projected onto the beam direction
+  so the circular term follows `m . k` rather than lab-frame `mz`. Set
+  `dielectric_tensor_local_k_projection=True` when the propagation direction
+  should be recomputed from the local Jones phase gradients before every
+  material slice. This is slower, but it lets multislice diffraction and
+  aperture steering change the local vector contrast. The full equations are in
+  [`optical_contrast_formalisms.md`](optical_contrast_formalisms.md#vector-contrast-and-tensor-projection).
 - **ROI multislice, default common crop**: `propagate=True`, `use_roi=True`,
   `dielectric_tensor_use_roi=True`, `multislice_propagation_roi=True`,
   `multislice_propagation_roi_merge_overlaps=True`. This uses one common crop
@@ -167,6 +180,8 @@ pixels is important.
 
 For a deeper explanation and runnable comparisons, use
 [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb).
+For the propagation equations and detector q-space projection, see
+[`light_propagation_modes.md`](light_propagation_modes.md).
 
 ## Reading HDF5 Outputs
 
