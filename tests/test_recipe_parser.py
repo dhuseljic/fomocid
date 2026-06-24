@@ -230,6 +230,41 @@ class RecipeParserTests(unittest.TestCase):
         self.assertLess(np.min(n_stack[material_slice].real), 2.0)
         self.assertGreater(np.max(n_stack[material_slice].real), 2.0)
 
+    def test_tilted_fixed_volume_center_offset_moves_slab(self) -> None:
+        """Test lab-frame centre offsets move the voxelized slab."""
+        params = material_params(
+            refractive_indices={
+                "Co": np.array([2.0 + 0.0j, 0.0j, 0.0j]),
+            }
+        )
+        structure = Structure(
+            name="offset-fixed-volume",
+            material_params=params,
+            sample_shape=[0, 3, 5],
+            real_space_pixel_size=1.0,
+        )
+        structure.add_layer("Co", thickness=2.0)
+        structure.mask = np.ones((1, 3, 5), dtype=float)
+        structure.magnetization = np.zeros((1, 3, 5, 3), dtype=float)
+        structure.set_sample_tilt(
+            theta=0.0,
+            voxel_size=1.0,
+            simulation_z_extent=6.0,
+            center_offset=(0.5, 1.5, 1.0),
+        )
+
+        film_y, film_x, film_depth = structure.tilted_material_coordinate_grids()
+        fractions, thicknesses = structure._tilted_layer_fractions()
+
+        self.assertEqual(thicknesses, [1.0] * 6)
+        np.testing.assert_allclose(film_y[:, 1, 2], -0.5)
+        np.testing.assert_allclose(film_x[:, 1, 2], -1.5)
+
+        z_centers = (np.arange(6, dtype=float) - 6 / 2 + 0.5)
+        occupied = fractions[:, 1, 2, 0] > 0.5
+        np.testing.assert_array_equal(z_centers[occupied], np.array([0.5, 1.5]))
+        np.testing.assert_allclose(film_depth[:, 1, 2], z_centers)
+
     def test_ninety_degree_tilt_requires_and_uses_fixed_volume(self) -> None:
         """Test that 90 degree tilt works with an explicit simulation volume."""
         params = material_params(

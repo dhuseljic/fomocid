@@ -832,6 +832,7 @@ class Structure:
         self.sample_tilt_voxel_size: float | None = None
         self.sample_tilt_antialias_samples: int = 3
         self.sample_tilt_simulation_z_extent: float | None = None
+        self.sample_tilt_center_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
         if self.sample_shape[0] == 0:
             self.sample_shape[0] = len(self.layer_names)
@@ -851,13 +852,15 @@ class Structure:
         voxel_size: float | None = None,
         antialias_samples: int = 3,
         simulation_z_extent: float | None = None,
+        center_offset: ArrayLike | None = None,
     ) -> None:
         """Configure a tilted material stack relative to simulation z slices.
 
         ``theta`` is in radians. ``theta=0`` preserves the original one-slice-
         per-layer representation. Non-zero values voxelize the multilayer into
         z planes parallel to light propagation and add vacuum before/after the
-        tilted film as needed.
+        tilted film as needed. ``center_offset`` shifts the film centre in lab
+        ``(y, x, z)`` coordinates relative to the simulation-volume centre.
         """
         if axis not in ("x", "y"):
             raise ValueError(f"tilt axis must be 'x' or 'y', got {axis!r}")
@@ -867,20 +870,37 @@ class Structure:
             raise ValueError(
                 f"simulation_z_extent must be positive, got {simulation_z_extent}"
             )
+        if center_offset is None:
+            center_offset_tuple = (0.0, 0.0, 0.0)
+        else:
+            center_offset_arr = np.asarray(center_offset, dtype=float)
+            if center_offset_arr.shape != (3,):
+                raise ValueError(
+                    "center_offset must contain three values in lab (y, x, z) "
+                    f"coordinates, got shape {center_offset_arr.shape}."
+                )
+            if not np.all(np.isfinite(center_offset_arr)):
+                raise ValueError(f"center_offset must be finite, got {center_offset!r}.")
+            center_offset_tuple = tuple(float(v) for v in center_offset_arr)
         self.sample_tilt_theta = float(theta)
         self.sample_tilt_axis = axis
         self.sample_tilt_voxel_size = voxel_size
         self.sample_tilt_antialias_samples = max(1, int(antialias_samples))
         self.sample_tilt_simulation_z_extent = simulation_z_extent
+        self.sample_tilt_center_offset = center_offset_tuple
         if hasattr(self, "_propagation_layer_thicknesses"):
             delattr(self, "_propagation_layer_thicknesses")
 
     def _tilted_layer_fractions(self) -> tuple[NDArray[np.float64], list[float]]:
         """Return fractional layer occupancy for tilted sample voxels."""
         theta = float(getattr(self, "sample_tilt_theta", 0.0))
+        center_offset = getattr(self, "sample_tilt_center_offset", (0.0, 0.0, 0.0))
+        offset_y, offset_x, offset_z = (float(v) for v in center_offset)
+        has_center_offset = not np.allclose((offset_y, offset_x, offset_z), 0.0)
         if (
             np.isclose(theta, 0.0)
             and self.sample_tilt_simulation_z_extent is None
+            and not has_center_offset
         ):
             nz = len(self.layer_thicknesses)
             fractions = np.zeros((*self.mask.shape, nz), dtype=float)
@@ -898,12 +918,12 @@ class Structure:
         if self.sample_tilt_axis == "x":
             lateral = (
                 np.arange(nx, dtype=float) - nx / 2 + 0.5
-            ) * self.real_space_pixel_size
+            ) * self.real_space_pixel_size - offset_x
             lateral_shape = (1, 1, nx)
         else:
             lateral = (
                 np.arange(ny, dtype=float) - ny / 2 + 0.5
-            ) * self.real_space_pixel_size
+            ) * self.real_space_pixel_size - offset_y
             lateral_shape = (1, ny, 1)
         if self.sample_tilt_simulation_z_extent is None:
             if abs(cos_theta) < 1e-9:
@@ -929,7 +949,7 @@ class Structure:
         sample_weight = 1.0 / (n_samples * n_samples)
         lateral_grid = lateral.reshape(lateral_shape)
         for z_offset in offsets * dz:
-            z_sample = (z_centers + z_offset)[:, None, None]
+            z_sample = (z_centers + z_offset - offset_z)[:, None, None]
             for lateral_offset in offsets * self.real_space_pixel_size:
                 material_depth = (
                     material_depth_offset
@@ -961,26 +981,30 @@ class Structure:
         ny, nx = self.sample_shape[1], self.sample_shape[2]
         y = (np.arange(ny, dtype=float) - ny / 2 + 0.5) * self.real_space_pixel_size
         x = (np.arange(nx, dtype=float) - nx / 2 + 0.5) * self.real_space_pixel_size
+        center_offset = getattr(self, "sample_tilt_center_offset", (0.0, 0.0, 0.0))
+        offset_y, offset_x, offset_z = (float(v) for v in center_offset)
+        has_center_offset = not np.allclose((offset_y, offset_x, offset_z), 0.0)
 
         if (
             np.isclose(theta, 0.0)
             and self.sample_tilt_simulation_z_extent is None
+            and not has_center_offset
         ):
             z_centers = np.cumsum(self.layer_thicknesses) - 0.5 * np.asarray(
                 self.layer_thicknesses
             )
-            film_y = np.broadcast_to(y[None, :, None], (len(z_centers), ny, nx))
-            film_x = np.broadcast_to(x[None, None, :], (len(z_centers), ny, nx))
+            film_y = np.broadcast_to(y[None, :, None] - offset_y, (len(z_centers), ny, nx))
+            film_x = np.broadcast_to(x[None, None, :] - offset_x, (len(z_centers), ny, nx))
             material_depth = np.broadcast_to(
-                z_centers[:, None, None], (len(z_centers), ny, nx)
+                z_centers[:, None, None] - offset_z, (len(z_centers), ny, nx)
             )
             return film_y, film_x, material_depth
 
         if self.sample_tilt_axis == "x":
-            lateral = (np.arange(nx, dtype=float) - nx / 2 + 0.5) * self.real_space_pixel_size
+            lateral = (np.arange(nx, dtype=float) - nx / 2 + 0.5) * self.real_space_pixel_size - offset_x
             shifts = lateral * sin_theta
         else:
-            lateral = (np.arange(ny, dtype=float) - ny / 2 + 0.5) * self.real_space_pixel_size
+            lateral = (np.arange(ny, dtype=float) - ny / 2 + 0.5) * self.real_space_pixel_size - offset_y
             shifts = lateral * sin_theta
 
         if self.sample_tilt_simulation_z_extent is None:
@@ -998,9 +1022,9 @@ class Structure:
             z_centers = (np.arange(nz, dtype=float) - nz / 2 + 0.5) * dz
             material_depth_offset = 0.5 * total_thickness
 
-        z_grid = z_centers[:, None, None]
-        y_grid = y[None, :, None]
-        x_grid = x[None, None, :]
+        z_grid = z_centers[:, None, None] - offset_z
+        y_grid = y[None, :, None] - offset_y
+        x_grid = x[None, None, :] - offset_x
         if self.sample_tilt_axis == "x":
             film_x = x_grid * cos_theta - z_grid * sin_theta
             film_y = np.broadcast_to(y_grid, (nz, ny, nx))
