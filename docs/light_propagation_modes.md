@@ -133,12 +133,12 @@ than amplifying them.
 ## Long-Distance Vacuum Sampling
 
 The fixed-grid transfer-function step above keeps the same transverse pixel
-size before and after propagation. The nanofocusing-optics multislice paper
-*Multislice does it all--calculating the performance of nanofocusing X-ray
-optics* states the relevant long-distance condition as: "When subsequently
-propagating a wavefield in vacuum over a distance longer than
+size before and after propagation. Li, Wojcik, and Jacobsen's nanofocusing
+multislice paper states the relevant long-distance condition as: "When
+subsequently propagating a wavefield in vacuum over a distance longer than
 `Nt (Delta x)^2 / lambda`, sampling considerations dictate the use of an
-alternative propagation approach."
+alternative propagation approach." See the references for the full Optics
+Express citation.
 
 For a vacuum distance `dz`, the code therefore checks the multislice sampling
 limit
@@ -463,3 +463,11 @@ is sufficient for the geometry.
 
 The final Fraunhofer FFT and detector q-space projection are always used to
 turn the exit wave into an ideal detector hologram.
+
+## References
+
+Kenan Li, Michael Wojcik, and Chris Jacobsen, "Multislice does it
+all--calculating the performance of nanofocusing X-ray optics," *Optics
+Express* **25**(3), 1831 (2017). DOI:
+[`10.1364/OE.25.001831`](https://doi.org/10.1364/OE.25.001831). Optica page:
+[`oe-25-3-1831`](https://opg.optica.org/abstract.cfm?URI=oe-25-3-1831).
