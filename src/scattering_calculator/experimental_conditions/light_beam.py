@@ -71,6 +71,20 @@ def _normalize_alpha_beam(alpha_beam: float | ArrayLike) -> tuple[float, float]:
     )
 
 
+def beam_direction_from_alpha(alpha_beam: float | ArrayLike) -> NDArray[np.float64]:
+    """Return the propagation direction ``(x, y, z)`` for a beam tilt.
+
+    ``alpha_beam`` follows the illumination convention ``(alpha_y, alpha_x)``
+    in radians. A scalar remains the backward-compatible x-direction tilt.
+    """
+    alpha_y, alpha_x = _normalize_alpha_beam(alpha_beam)
+    direction = np.array([np.tan(alpha_x), np.tan(alpha_y), 1.0], dtype=float)
+    norm = np.linalg.norm(direction)
+    if not np.isfinite(norm) or norm == 0.0:
+        raise ValueError(f"Invalid alpha_beam {alpha_beam!r}; beam direction is undefined.")
+    return direction / norm
+
+
 def gauss_beam(
     sz: tuple[int, int],
     px_size: float,
@@ -116,9 +130,12 @@ def gauss_beam(
 
     alpha_y, alpha_x = _normalize_alpha_beam(alpha_beam)
 
-    # Radial distance from beam centre in metres
+    # Radial distance from beam centre in metres. Keep array shape as
+    # (rows, cols) for rectangular fields.
     y, x = np.meshgrid(
-        np.linspace(0, sz[0] - 1, sz[0]), np.linspace(0, sz[1] - 1, sz[1])
+        np.arange(sz[0], dtype=float),
+        np.arange(sz[1], dtype=float),
+        indexing="ij",
     )
     y = y - ycenter
     x = x - xcenter
@@ -397,7 +414,8 @@ class illumination:
         self.illumination = gauss_beam(
             self.shape,
             self.pixel_size,
-            center / self.pixel_size + self.shape[0] // 2,
+            np.asarray(center, dtype=float) / self.pixel_size
+            + np.array([self.shape[0] / 2, self.shape[1] / 2]),
             distance,
             fwhm,
             self.beam_parameters.wavelength,

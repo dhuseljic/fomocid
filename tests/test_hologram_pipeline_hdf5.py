@@ -80,6 +80,25 @@ def test_detector_center_can_be_sampled_from_ranges(tmp_path: Path) -> None:
     assert params["detector_center"] == (57, 55)
 
 
+def test_local_k_projection_can_be_sampled_from_ranges(tmp_path: Path) -> None:
+    pipeline = HologramPipeline(
+        config=HologramPipelineConfig(
+            recipe="SiN(80)",
+            dielectric_tensor_local_k_projection=False,
+        ),
+        ranges=HologramPipelineRanges(
+            dielectric_tensor_local_k_projection=True,
+        ),
+        output_path=tmp_path / "output.h5",
+        n_samples=1,
+        verbose=False,
+    )
+
+    params = pipeline._sample_params()
+
+    assert params["dielectric_tensor_local_k_projection"] is True
+
+
 def test_hologram_config_supports_linear_polarization_differences() -> None:
     cfg = HologramConfig(
         ideal_holograms={
@@ -242,6 +261,14 @@ def test_build_precomputed_metadata_uses_canonical_groups() -> None:
     assert "measurement_config/exposure_time" in metadata
     assert "detector/detector_params/counts_per_photon" not in metadata
     assert np.array_equal(metadata["illumination/alpha_beam_rad"], (0.1, 0.2))
+    assert metadata["sample/dielectric_tensor/beam_direction_projected"] is True
+    expected_direction = np.array([np.tan(0.2), np.tan(0.1), 1.0])
+    expected_direction = expected_direction / np.linalg.norm(expected_direction)
+    assert np.allclose(
+        metadata["sample/dielectric_tensor/beam_direction_xyz"],
+        expected_direction,
+    )
+    assert metadata["sample/dielectric_tensor/compact"] is False
 
 
 def test_metadata_hierarchy_groups_sample_and_propagator_settings(tmp_path: Path) -> None:
@@ -296,6 +323,7 @@ def test_sample_detector_metadata_uses_sibling_config_groups() -> None:
     detector_config = DetectorConfig(
         use_detector_pixel_footprint=True,
         detector_pixel_footprint_samples=5,
+        ignore_flat_detector_curvature=True,
     )
     metadata = HologramPipeline._detector_metadata(detector_config)
 
@@ -304,6 +332,7 @@ def test_sample_detector_metadata_uses_sibling_config_groups() -> None:
     assert "artifacts_config/sigma_photon" in metadata
     assert metadata["detector/use_detector_pixel_footprint"] is True
     assert metadata["detector/detector_pixel_footprint_samples"] == 5
+    assert metadata["detector/ignore_flat_detector_curvature"] is True
     assert "detector/measurement_config/exposure_time" not in metadata
     assert "detector/artifacts_config/sigma_photon" not in metadata
     assert "artifacts_config/counts_per_photon" not in metadata
@@ -364,11 +393,13 @@ def test_detector_pixel_footprint_config_is_sampled(tmp_path: Path) -> None:
         tmp_path,
         use_detector_pixel_footprint=True,
         detector_pixel_footprint_samples=5,
+        ignore_flat_detector_curvature=True,
     )
 
     params = pipeline._sample_params()
     assert params["use_detector_pixel_footprint"] is True
     assert params["detector_pixel_footprint_samples"] == 5
+    assert params["ignore_flat_detector_curvature"] is True
 
 
 def test_illumination_alpha_beam_config_is_sampled(tmp_path: Path) -> None:

@@ -281,6 +281,58 @@ class DetectorBeamstopTests(unittest.TestCase):
         self.assertAlmostEqual(result[0, 0], expected_corner)
         self.assertLess(result[0, 0], result[2, 2])
 
+    def test_detector_q_coordinates_can_ignore_flat_detector_curvature(self) -> None:
+        """Test the optional linear detector-position to q-space mapping."""
+        layout = detector_layout(
+            pixel_size=1.0,
+            detector_shape=(1, 3),
+            distance_sample_detector=2.0,
+            detector_center=(0, 1),
+        )
+        beam = SimpleNamespace(wavevector=10.0)
+
+        layout.calc_q_space_coordinates(beam)
+        curved = np.asarray(layout.detqx).copy()
+
+        layout.calc_q_space_coordinates(
+            beam,
+            ignore_flat_detector_curvature=True,
+        )
+        linear = np.asarray(layout.detqx)
+
+        self.assertAlmostEqual(curved[0, 2], 10.0 * np.sin(np.arctan(0.5)))
+        self.assertAlmostEqual(linear[0, 2], 5.0)
+        self.assertGreater(linear[0, 2], curved[0, 2])
+
+    def test_linear_projection_broadcasts_sparse_detector_coordinates(self) -> None:
+        """Test linear q mapping produces homogeneous map_coordinates input."""
+        layout = detector_layout(
+            pixel_size=1.0,
+            detector_shape=(5, 7),
+            distance_sample_detector=10.0,
+            detector_center=(2, 3),
+        )
+        layout.calc_q_space_coordinates(SimpleNamespace(wavevector=1.0))
+        projected = detector_hologram(
+            detector_layout=layout,
+            hologram=np.ones((5, 7), dtype=float),
+            beam_parameters=SimpleNamespace(wavevector=1.0, coherence_length=None),
+            real_space_pixel_size=10.0,
+            beamstop=SimpleNamespace(beamstop=np.zeros((5, 7), dtype=float)),
+            measurement_config={"number_frames": 1},
+            detector_params={
+                "readout_noise_average": 0.0,
+                "readout_noise_sigma": 0.0,
+            },
+        )
+
+        result = projected.gnomonic_projection(
+            ignore_flat_detector_curvature=True,
+        )
+
+        self.assertEqual(result.shape, (5, 7))
+        self.assertTrue(np.all(np.isfinite(result)))
+
 
 if __name__ == "__main__":
     unittest.main()

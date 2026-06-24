@@ -24,6 +24,27 @@ from scattering_calculator.sample_generator.structures import CompactDielectricT
 
 
 class JonesFreeSpacePropagationTests(unittest.TestCase):
+    def test_local_wavevector_directions_follow_phase_gradient(self) -> None:
+        """Local k estimation follows the simulator's tilted-phase convention."""
+        wavelength = 2.0e-9
+        pixel_size = 1.0e-9
+        alpha_x = 0.2
+        k0 = 2 * np.pi / wavelength
+        x = np.arange(9, dtype=float)[None, :] * pixel_size
+        scalar = np.exp(-1j * k0 * np.sin(alpha_x) * x)
+        field = np.zeros((7, 9, 2), dtype=complex)
+        field[..., 0] = scalar
+
+        k_map = wavefronts.local_wavevector_directions(field, wavelength, pixel_size)
+
+        np.testing.assert_allclose(k_map[:, 1:-1, 0], np.sin(alpha_x), atol=2e-2)
+        np.testing.assert_allclose(k_map[:, 1:-1, 1], 0.0, atol=1e-12)
+        np.testing.assert_allclose(
+            k_map[:, 1:-1, 2],
+            np.sqrt(1.0 - np.sin(alpha_x) ** 2),
+            atol=2e-2,
+        )
+
     def test_linear_polarization_labels_and_legacy_aliases(self) -> None:
         """LH/LV are the preferred linear labels; x/y remain aliases."""
         np.testing.assert_allclose(

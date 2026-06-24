@@ -35,6 +35,7 @@ recipe = "[Au(200)Cr(60)]x5/SiN(200)/Pt(10)Al(10)Co(10)"
 oversampling=2 # sampling of the sample relative to the dector-based sampling; e.g. oversampling=2 means the sample grid has 2x finer pixel size than the detector-projected pixel size in the sample plane; this is separate from farfield_oversampling, which controls the hologram sampling relative to the detector
 farfield_oversampling = 1  # >1 extends the exit wave with the physical background before the far-field FFT
 detector_pixel_footprint_samples = 2  # sub-samples per detector-pixel axis when footprint averaging is enabled
+ignore_flat_detector_curvature = False  # False = include flat-detector q distortion; True = use linear qx=k*x/z, qy=k*y/z mapping
 
 # %%
 # ===================
@@ -46,10 +47,11 @@ output_path = output_folder / "simulation_sweep.h5"
 
 # Pipeline settings that are fixed across all runs in the sweep. These can be overridden in the ranges below to create mixed sampling, but any field not mentioned in the ranges will always use these values.
 pipeline_random_seed = 0  # set to None for non-reproducible random sweeps
-propagator_method = "Scalar"  # "Jones" = full 2-component matrix interaction; "Scalar" = faster scalar eigenmode approximation, exact when the selected polarization is a local eigenvector
+propagator_method = "Scalar"  # "Jones" = full 2-component matrix interaction with beam-direction-projected magnetic contrast; "Scalar" = faster scalar eigenmode approximation
 use_roi = True # set True to use a region of interest around the sample for the whole pipeline, which can greatly speed up simulations with large free-space regions; set False to use the full grid, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
 dielectric_tensor_use_roi = True # set True to only compute local Jones tensor patches or Scalar refractive-index patches around aperture regions; set False to compute the full dense interaction stack
-dielectric_tensor_compact = True  # Jones: avoid allocating the full dense tensor stack
+dielectric_tensor_compact = True  # Jones: avoid allocating the full dense tensor stack for normal incidence; tilted-beam Jones projection uses a dense tensor
+dielectric_tensor_local_k_projection = False  # Jones only: recompute local k from the Jones-field phase gradient slice by slice, so XMCD follows local m dot k
 scalar_refractive_index_lazy = True  # Scalar: compute compact refractive-index ROI patches layer by layer during propagation instead of precomputing every layer patch
 propagate = True  # set True for multislice free-space propagation between layers; Jones and Scalar both use exp(-1j*kz*dz)
 jones_apply_zero_order_phase = True  # when propagate=False, keep the longitudinal exp(-1j*k0*dz) phase between layers without FFT diffraction; Scalar receives the same zero-order phase option
@@ -297,6 +299,7 @@ config = HologramPipelineConfig(
     artifacts_config=artifacts_config,
     use_detector_pixel_footprint=use_detector_pixel_footprint,
     detector_pixel_footprint_samples=detector_pixel_footprint_samples,
+    ignore_flat_detector_curvature=ignore_flat_detector_curvature,
     # Beamstop
     beamstop_method=beamstop_method,
     beamstop_distance=beamstop_distance,
@@ -328,6 +331,7 @@ config = HologramPipelineConfig(
     magnetic_pattern_use_roi=True,
     dielectric_tensor_use_roi=dielectric_tensor_use_roi,
     dielectric_tensor_compact=dielectric_tensor_compact,
+    dielectric_tensor_local_k_projection=dielectric_tensor_local_k_projection,
     propagator_method=propagator_method,
     scalar_refractive_index_lazy=scalar_refractive_index_lazy,
     propagate=propagate,
@@ -885,6 +889,7 @@ with h5py.File(output_path, "r") as h5:
         aperture_shape=sample_shape_saved,
         real_space_pixel_size=real_space_pixel_size_saved,
         aperture_thicknesses=layer_thicknesses_saved,
+        aperture_layer_names=layer_names_saved,
         aperture_config=aperture_config_saved,
         use_roi=use_roi,
     )

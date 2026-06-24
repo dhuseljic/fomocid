@@ -368,6 +368,7 @@ class DetectorConfigRange:
     detector_noise_rms: float | Uniform = 0.0  # counts
     artifacts_method: str | None | Choice = None
     artifacts_config: dict = field(default_factory=dict)
+    ignore_flat_detector_curvature: bool | Choice = False
 
     def sample(self) -> DetectorConfig:
         """Sample one :class:`DetectorConfig` from the defined ranges.
@@ -391,6 +392,7 @@ class DetectorConfigRange:
             detector_noise_rms=_s(self.detector_noise_rms),
             artifacts_method=_s(self.artifacts_method),
             artifacts_config=self.artifacts_config,
+            ignore_flat_detector_curvature=_s(self.ignore_flat_detector_curvature),
         )
 
 

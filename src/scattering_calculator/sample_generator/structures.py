@@ -18,7 +18,7 @@ from pathlib import Path
 import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Literal, Tuple
 
 
 @dataclass(frozen=True)
@@ -111,6 +111,111 @@ class CompactDielectricTensorStack:
         result : NDArray[np.complex128]
             Return value produced by the function.
         """
+        return np.stack([self.materialize_layer(iz) for iz in range(len(self))])
+
+
+@dataclass(frozen=True)
+class DynamicProjectedDielectricTensorStack:
+    """Magnetic response stack projected onto a local beam direction at runtime."""
+
+    eps_iso: NDArray[np.complex128]
+    gyrotropic_vector: NDArray[np.complex128]
+    linear_tensor: NDArray[np.complex128]
+    beam_direction: NDArray[np.float64]
+    aperture_support_regions: tuple[tuple[slice, slice], ...] | None = None
+
+    @property
+    def shape(self) -> tuple[int, int, int, int, int]:
+        """Dense Jones tensor shape produced after projection."""
+        return (*self.eps_iso.shape, 2, 2)
+
+    @property
+    def ndim(self) -> int:
+        """NumPy-like ndim for compatibility with propagation checks."""
+        return 5
+
+    @property
+    def dtype(self) -> np.dtype:
+        """Complex dtype of projected dielectric tensors."""
+        return self.eps_iso.dtype
+
+    @property
+    def base_diagonal(self) -> NDArray[np.complex128]:
+        """Nominal diagonal response used for background estimates."""
+        base = np.empty((self.eps_iso.shape[0], 2), dtype=self.eps_iso.dtype)
+        for layer_idx in range(self.eps_iso.shape[0]):
+            layer = self.materialize_layer(layer_idx)
+            base[layer_idx, 0] = layer[0, 0, 0, 0]
+            base[layer_idx, 1] = layer[0, 0, 1, 1]
+        return base
+
+    def __len__(self) -> int:
+        """Return number of propagation slices."""
+        return self.eps_iso.shape[0]
+
+    def _constant_direction_map(self) -> NDArray[np.float64]:
+        """Return a constant direction map for one layer."""
+        ny, nx = self.eps_iso.shape[1:3]
+        return np.broadcast_to(self.beam_direction, (ny, nx, 3))
+
+    @staticmethod
+    def _transverse_basis(
+        k_map: NDArray[np.float64],
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        """Return local transverse basis vectors for a ``(..., 3)`` direction map."""
+        k_map = np.asarray(k_map, dtype=float)
+        norm = np.linalg.norm(k_map, axis=-1, keepdims=True)
+        k = np.divide(k_map, norm, out=np.zeros_like(k_map), where=norm > 0)
+        lab_x = np.array([1.0, 0.0, 0.0])
+        lab_y = np.array([0.0, 1.0, 0.0])
+        use_y = np.abs(np.einsum("...i,i->...", k, lab_x)) > 0.95
+        reference = np.broadcast_to(lab_x, k.shape).copy()
+        reference[use_y] = lab_y
+        e1 = reference - np.einsum("...i,...i->...", reference, k)[..., None] * k
+        e1_norm = np.linalg.norm(e1, axis=-1, keepdims=True)
+        e1 = np.divide(e1, e1_norm, out=np.zeros_like(e1), where=e1_norm > 0)
+        e2 = np.cross(k, e1)
+        e2_norm = np.linalg.norm(e2, axis=-1, keepdims=True)
+        e2 = np.divide(e2, e2_norm, out=np.zeros_like(e2), where=e2_norm > 0)
+        return e1, e2, k
+
+    def project_layer(
+        self,
+        layer_idx: int,
+        k_map: NDArray[np.float64] | None = None,
+    ) -> NDArray[np.complex128]:
+        """Project one layer onto the local transverse Jones basis."""
+        if k_map is None:
+            k_map = self._constant_direction_map()
+        k_map = np.asarray(k_map, dtype=float)
+        if k_map.shape != (*self.eps_iso.shape[1:3], 3):
+            raise ValueError(
+                "k_map must have shape (Ny, Nx, 3), got "
+                f"{k_map.shape} for layer shape {self.eps_iso.shape[1:3]}."
+            )
+        e1, e2, k = self._transverse_basis(k_map)
+        eps_iso = self.eps_iso[layer_idx]
+        g = self.gyrotropic_vector[layer_idx]
+        q = self.linear_tensor[layer_idx]
+
+        gk = np.einsum("...i,...i->...", g, k)
+        q11 = np.einsum("...i,...ij,...j->...", e1, q, e1)
+        q22 = np.einsum("...i,...ij,...j->...", e2, q, e2)
+        q12 = np.einsum("...i,...ij,...j->...", e1, q, e2)
+
+        eps = np.zeros((*eps_iso.shape, 2, 2), dtype=self.eps_iso.dtype)
+        eps[..., 0, 0] = eps_iso + q11 - q22
+        eps[..., 1, 1] = eps_iso - q11 + q22
+        eps[..., 0, 1] = 1.0j * gk + 2.0 * q12
+        eps[..., 1, 0] = -1.0j * gk + 2.0 * q12
+        return eps
+
+    def materialize_layer(self, layer_idx: int) -> NDArray[np.complex128]:
+        """Return one layer projected along the nominal beam direction."""
+        return self.project_layer(layer_idx)
+
+    def materialize(self) -> NDArray[np.complex128]:
+        """Return a dense tensor stack projected along the nominal direction."""
         return np.stack([self.materialize_layer(iz) for iz in range(len(self))])
 
 
@@ -722,12 +827,508 @@ class Structure:
         self.mask: NDArray[np.float64] | None = (
             None  # Optional: store sample mask for aperture function
         )
+        self.sample_tilt_theta: float = 0.0
+        self.sample_tilt_axis: Literal["x", "y"] = "x"
+        self.sample_tilt_voxel_size: float | None = None
+        self.sample_tilt_antialias_samples: int = 3
+        self.sample_tilt_simulation_z_extent: float | None = None
 
         if self.sample_shape[0] == 0:
             self.sample_shape[0] = len(self.layer_names)
 
         self.calc_real_space_coordinates()
         self.get_extent_real_space()
+
+    @property
+    def propagation_layer_thicknesses(self) -> list[float]:
+        """Return layer thicknesses for the current propagation stack."""
+        return getattr(self, "_propagation_layer_thicknesses", self.layer_thicknesses)
+
+    def set_sample_tilt(
+        self,
+        theta: float = 0.0,
+        axis: Literal["x", "y"] = "x",
+        voxel_size: float | None = None,
+        antialias_samples: int = 3,
+        simulation_z_extent: float | None = None,
+    ) -> None:
+        """Configure a tilted material stack relative to simulation z slices.
+
+        ``theta`` is in radians. ``theta=0`` preserves the original one-slice-
+        per-layer representation. Non-zero values voxelize the multilayer into
+        z planes parallel to light propagation and add vacuum before/after the
+        tilted film as needed.
+        """
+        if axis not in ("x", "y"):
+            raise ValueError(f"tilt axis must be 'x' or 'y', got {axis!r}")
+        if voxel_size is not None and voxel_size <= 0:
+            raise ValueError(f"tilt voxel_size must be positive, got {voxel_size}")
+        if simulation_z_extent is not None and simulation_z_extent <= 0:
+            raise ValueError(
+                f"simulation_z_extent must be positive, got {simulation_z_extent}"
+            )
+        self.sample_tilt_theta = float(theta)
+        self.sample_tilt_axis = axis
+        self.sample_tilt_voxel_size = voxel_size
+        self.sample_tilt_antialias_samples = max(1, int(antialias_samples))
+        self.sample_tilt_simulation_z_extent = simulation_z_extent
+        if hasattr(self, "_propagation_layer_thicknesses"):
+            delattr(self, "_propagation_layer_thicknesses")
+
+    def _tilted_layer_fractions(self) -> tuple[NDArray[np.float64], list[float]]:
+        """Return fractional layer occupancy for tilted sample voxels."""
+        theta = float(getattr(self, "sample_tilt_theta", 0.0))
+        if (
+            np.isclose(theta, 0.0)
+            and self.sample_tilt_simulation_z_extent is None
+        ):
+            nz = len(self.layer_thicknesses)
+            fractions = np.zeros((*self.mask.shape, nz), dtype=float)
+            for layer_idx in range(nz):
+                fractions[layer_idx, ..., layer_idx] = 1.0
+            return fractions, list(self.layer_thicknesses)
+
+        cos_theta = float(np.cos(theta))
+        sin_theta = float(np.sin(theta))
+        layer_edges = np.concatenate(([0.0], np.cumsum(self.layer_thicknesses)))
+        total_thickness = float(layer_edges[-1])
+        dz = self.sample_tilt_voxel_size or min(self.layer_thicknesses)
+
+        ny, nx = self.sample_shape[1], self.sample_shape[2]
+        if self.sample_tilt_axis == "x":
+            lateral = (
+                np.arange(nx, dtype=float) - nx / 2 + 0.5
+            ) * self.real_space_pixel_size
+            lateral_shape = (1, 1, nx)
+        else:
+            lateral = (
+                np.arange(ny, dtype=float) - ny / 2 + 0.5
+            ) * self.real_space_pixel_size
+            lateral_shape = (1, ny, 1)
+        if self.sample_tilt_simulation_z_extent is None:
+            if abs(cos_theta) < 1e-9:
+                raise ValueError(
+                    "simulation_z_extent is required for sample_tilt_theta near 90 degrees."
+                )
+            shifts = lateral * sin_theta
+            z_min = (0.0 - np.max(shifts)) / cos_theta
+            z_max = (total_thickness - np.min(shifts)) / cos_theta
+            nz = int(np.ceil((z_max - z_min) / dz))
+            z_edges = z_min + np.arange(nz + 1, dtype=float) * dz
+            material_depth_offset = 0.0
+        else:
+            nz = int(np.ceil(float(self.sample_tilt_simulation_z_extent) / dz))
+            z_edges = (np.arange(nz + 1, dtype=float) - nz / 2.0) * dz
+            material_depth_offset = 0.5 * total_thickness
+        z_centers = 0.5 * (z_edges[:-1] + z_edges[1:])
+        thicknesses = np.diff(z_edges).astype(float).tolist()
+
+        fractions = np.zeros((nz, ny, nx, len(self.layer_thicknesses)), dtype=float)
+        n_samples = max(1, int(self.sample_tilt_antialias_samples))
+        offsets = (np.arange(n_samples, dtype=float) + 0.5) / n_samples - 0.5
+        sample_weight = 1.0 / (n_samples * n_samples)
+        lateral_grid = lateral.reshape(lateral_shape)
+        for z_offset in offsets * dz:
+            z_sample = (z_centers + z_offset)[:, None, None]
+            for lateral_offset in offsets * self.real_space_pixel_size:
+                material_depth = (
+                    material_depth_offset
+                    + z_sample * cos_theta
+                    + (lateral_grid + lateral_offset) * sin_theta
+                )
+                for layer_idx, (z0, z1) in enumerate(zip(layer_edges[:-1], layer_edges[1:])):
+                    inside = (material_depth >= z0) & (material_depth < z1)
+                    fractions[..., layer_idx] += inside * sample_weight
+        return fractions, thicknesses
+
+    def tilted_material_coordinate_grids(
+        self,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        """Return coordinates attached to the tilted material stack.
+
+        Returns
+        -------
+        film_y, film_x, material_depth : ndarray
+            Arrays of shape ``(Nz, Ny, Nx)``. ``film_x`` and ``film_y`` are
+            coordinates parallel to the film planes; ``material_depth`` is the
+            coordinate normal to the film, increasing through the layer stack.
+        """
+        theta = float(getattr(self, "sample_tilt_theta", 0.0))
+        cos_theta = float(np.cos(theta))
+        sin_theta = float(np.sin(theta))
+        total_thickness = float(np.sum(self.layer_thicknesses))
+        dz = self.sample_tilt_voxel_size or min(self.layer_thicknesses)
+        ny, nx = self.sample_shape[1], self.sample_shape[2]
+        y = (np.arange(ny, dtype=float) - ny / 2 + 0.5) * self.real_space_pixel_size
+        x = (np.arange(nx, dtype=float) - nx / 2 + 0.5) * self.real_space_pixel_size
+
+        if (
+            np.isclose(theta, 0.0)
+            and self.sample_tilt_simulation_z_extent is None
+        ):
+            z_centers = np.cumsum(self.layer_thicknesses) - 0.5 * np.asarray(
+                self.layer_thicknesses
+            )
+            film_y = np.broadcast_to(y[None, :, None], (len(z_centers), ny, nx))
+            film_x = np.broadcast_to(x[None, None, :], (len(z_centers), ny, nx))
+            material_depth = np.broadcast_to(
+                z_centers[:, None, None], (len(z_centers), ny, nx)
+            )
+            return film_y, film_x, material_depth
+
+        if self.sample_tilt_axis == "x":
+            lateral = (np.arange(nx, dtype=float) - nx / 2 + 0.5) * self.real_space_pixel_size
+            shifts = lateral * sin_theta
+        else:
+            lateral = (np.arange(ny, dtype=float) - ny / 2 + 0.5) * self.real_space_pixel_size
+            shifts = lateral * sin_theta
+
+        if self.sample_tilt_simulation_z_extent is None:
+            if abs(cos_theta) < 1e-9:
+                raise ValueError(
+                    "simulation_z_extent is required for sample_tilt_theta near 90 degrees."
+                )
+            z_min = (0.0 - np.max(shifts)) / cos_theta
+            z_max = (total_thickness - np.min(shifts)) / cos_theta
+            nz = int(np.ceil((z_max - z_min) / dz))
+            z_centers = z_min + (np.arange(nz, dtype=float) + 0.5) * dz
+            material_depth_offset = 0.0
+        else:
+            nz = int(np.ceil(float(self.sample_tilt_simulation_z_extent) / dz))
+            z_centers = (np.arange(nz, dtype=float) - nz / 2 + 0.5) * dz
+            material_depth_offset = 0.5 * total_thickness
+
+        z_grid = z_centers[:, None, None]
+        y_grid = y[None, :, None]
+        x_grid = x[None, None, :]
+        if self.sample_tilt_axis == "x":
+            film_x = x_grid * cos_theta - z_grid * sin_theta
+            film_y = np.broadcast_to(y_grid, (nz, ny, nx))
+            material_depth = material_depth_offset + z_grid * cos_theta + x_grid * sin_theta
+            film_x = np.broadcast_to(film_x, (nz, ny, nx))
+            material_depth = np.broadcast_to(material_depth, (nz, ny, nx))
+        else:
+            film_y = y_grid * cos_theta - z_grid * sin_theta
+            film_x = np.broadcast_to(x_grid, (nz, ny, nx))
+            material_depth = material_depth_offset + z_grid * cos_theta + y_grid * sin_theta
+            film_y = np.broadcast_to(film_y, (nz, ny, nx))
+            material_depth = np.broadcast_to(material_depth, (nz, ny, nx))
+        return film_y, film_x, material_depth
+
+    @staticmethod
+    def _tilted_layer_magnetization(
+        tilted_magnetization: NDArray[np.float64] | None,
+        fallback_magnetization: NDArray[np.float64],
+        layer_idx: int,
+        tilted_shape: tuple[int, int, int],
+    ) -> NDArray[np.float64]:
+        """Return magnetization on the tilted voxel grid for one layer."""
+        if tilted_magnetization is None:
+            return np.broadcast_to(
+                fallback_magnetization[layer_idx][None, ...],
+                (*tilted_shape, 3),
+            )
+        tilted_magnetization = np.asarray(tilted_magnetization, dtype=float)
+        if tilted_magnetization.shape == (*tilted_shape, 3):
+            return tilted_magnetization
+        if tilted_magnetization.shape[0] > layer_idx and tilted_magnetization.shape[1:] == (
+            *tilted_shape,
+            3,
+        ):
+            return tilted_magnetization[layer_idx]
+        raise ValueError(
+            "tilted_magnetization must have shape (Nz, Ny, Nx, 3) or "
+            "(Nlayer, Nz, Ny, Nx, 3)."
+        )
+
+    def _tilted_dense_dielectric_tensor(self) -> NDArray[np.complex128]:
+        """Voxelize the material stack into tilted, interpolated dielectric slices."""
+        if self.mask is None or self.magnetization is None:
+            raise ValueError("mask and magnetization must be assigned before tilt voxelization.")
+
+        fractions, thicknesses = self._tilted_layer_fractions()
+        mask = np.asarray(self.mask, dtype=float)
+        magnetization = np.asarray(self.magnetization, dtype=float)
+        tilted_magnetization = getattr(self, "tilted_magnetization", None)
+        dt = np.asarray(self.dielectric_tensors)
+        nz, ny, nx, n_layers = fractions.shape
+        out = np.zeros((nz, ny, nx, 2, 2), dtype=dt.dtype)
+        material_fraction = np.zeros((nz, ny, nx), dtype=float)
+        tol = 1e-14
+
+        for layer_idx in range(n_layers):
+            layer_fraction = fractions[..., layer_idx] * mask[layer_idx]
+            material_fraction += layer_fraction
+            if not np.any(layer_fraction > tol):
+                continue
+            eps = np.zeros((ny, nx, 2, 2), dtype=dt.dtype)
+            eps[..., 0, 0] = dt[layer_idx, 0, 0, 0]
+            eps[..., 1, 1] = dt[layer_idx, 0, 1, 1]
+            layer_m = self._tilted_layer_magnetization(
+                tilted_magnetization,
+                magnetization,
+                layer_idx,
+                (nz, ny, nx),
+            )
+            if np.any(np.abs(dt[layer_idx, 1]) > tol):
+                eps = eps[None, ...] + layer_m[..., 2, None, None] * dt[layer_idx, 1]
+            else:
+                eps = eps[None, ...]
+            if np.any(np.abs(dt[layer_idx, 2]) > tol):
+                mx = layer_m[..., 0]
+                my = layer_m[..., 1]
+                eps += (np.abs(mx) ** 2 - np.abs(my) ** 2)[..., None, None] * dt[layer_idx, 2]
+            out += layer_fraction[..., None, None] * eps
+
+        vacuum_fraction = np.clip(1.0 - material_fraction, 0.0, 1.0)
+        out[..., 0, 0] += vacuum_fraction
+        out[..., 1, 1] += vacuum_fraction
+        self._propagation_layer_thicknesses = thicknesses
+        self.aperture_support_regions = None
+        return out
+
+    def _tilted_dense_scalar_refractive_index(self, pol) -> NDArray[np.complex128]:
+        """Voxelize the material stack into tilted scalar refractive-index slices."""
+        from scattering_calculator.beam_propagator.simple_propagation import (
+            scalar_refractive_index_coefficients,
+        )
+
+        if self.mask is None or self.magnetization is None:
+            raise ValueError("mask and magnetization must be assigned before tilt voxelization.")
+
+        fractions, thicknesses = self._tilted_layer_fractions()
+        mask = np.asarray(self.mask, dtype=float)
+        magnetization = np.asarray(self.magnetization, dtype=float)
+        tilted_magnetization = getattr(self, "tilted_magnetization", None)
+        indices = np.asarray(self.layer_refractive_indices, dtype=complex)
+        circular_coeff, linear_coeff = scalar_refractive_index_coefficients(pol)
+        out = np.zeros(fractions.shape[:3], dtype=complex)
+        material_fraction = np.zeros(fractions.shape[:3], dtype=float)
+        tol = 1e-14
+
+        for layer_idx in range(fractions.shape[-1]):
+            layer_fraction = fractions[..., layer_idx] * mask[layer_idx]
+            material_fraction += layer_fraction
+            if not np.any(layer_fraction > tol):
+                continue
+            layer_m = self._tilted_layer_magnetization(
+                tilted_magnetization,
+                magnetization,
+                layer_idx,
+                fractions.shape[:3],
+            )
+            n_layer = np.full(fractions.shape[:3], indices[layer_idx, 0], dtype=complex)
+            if abs(circular_coeff * indices[layer_idx, 1]) > tol:
+                n_layer += (
+                    circular_coeff
+                    * layer_m[..., 2]
+                    * indices[layer_idx, 1]
+                )
+            if abs(linear_coeff * indices[layer_idx, 2]) > tol:
+                mx = layer_m[..., 0]
+                my = layer_m[..., 1]
+                n_layer += (
+                    linear_coeff
+                    * (np.abs(mx) ** 2 - np.abs(my) ** 2)
+                    * indices[layer_idx, 2]
+                )
+            out += layer_fraction * n_layer
+
+        out += np.clip(1.0 - material_fraction, 0.0, 1.0)
+        self._propagation_layer_thicknesses = thicknesses
+        self.aperture_support_regions = None
+        return out
+
+    @staticmethod
+    def _normalize_beam_direction(beam_direction: ArrayLike) -> NDArray[np.float64]:
+        """Return a unit beam direction in lab ``(x, y, z)`` coordinates."""
+        direction = np.asarray(beam_direction, dtype=float)
+        if direction.shape != (3,):
+            raise ValueError(
+                "beam_direction must be a three-value vector in lab (x, y, z) "
+                f"coordinates, got shape {direction.shape}."
+            )
+        norm = np.linalg.norm(direction)
+        if not np.isfinite(norm) or norm == 0.0:
+            raise ValueError(f"beam_direction must be finite and nonzero, got {direction!r}.")
+        return direction / norm
+
+    @classmethod
+    def _beam_transverse_basis(
+        cls,
+        beam_direction: ArrayLike,
+        beam_polarization_basis: tuple[ArrayLike, ArrayLike] | None = None,
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+        """Return orthonormal Jones basis vectors ``(e1, e2, k)``.
+
+        The basis uses lab ``(x, y, z)`` coordinates. ``e1`` and ``e2`` are
+        transverse to the normalized beam direction ``k`` and are chosen so that
+        ``e1 x e2 = k``. With ``k = z``, the default basis is ``e1 = x`` and
+        ``e2 = y``.
+        """
+        k = cls._normalize_beam_direction(beam_direction)
+        if beam_polarization_basis is not None:
+            e1 = np.asarray(beam_polarization_basis[0], dtype=float)
+            e2 = np.asarray(beam_polarization_basis[1], dtype=float)
+            if e1.shape != (3,) or e2.shape != (3,):
+                raise ValueError("beam_polarization_basis vectors must each have shape (3,).")
+            e1 = e1 - np.dot(e1, k) * k
+            e1_norm = np.linalg.norm(e1)
+            if not np.isfinite(e1_norm) or e1_norm == 0.0:
+                raise ValueError("First beam_polarization_basis vector is parallel to beam.")
+            e1 = e1 / e1_norm
+            e2 = e2 - np.dot(e2, k) * k - np.dot(e2, e1) * e1
+            e2_norm = np.linalg.norm(e2)
+            if not np.isfinite(e2_norm) or e2_norm == 0.0:
+                raise ValueError(
+                    "Second beam_polarization_basis vector is not an independent "
+                    "transverse direction."
+                )
+            e2 = e2 / e2_norm
+            if np.dot(np.cross(e1, e2), k) < 0:
+                e2 = -e2
+            return e1, e2, k
+
+        lab_x = np.array([1.0, 0.0, 0.0])
+        lab_y = np.array([0.0, 1.0, 0.0])
+        reference = lab_x if abs(np.dot(k, lab_x)) < 0.95 else lab_y
+        e1 = reference - np.dot(reference, k) * k
+        e1 = e1 / np.linalg.norm(e1)
+        e2 = np.cross(k, e1)
+        e2 = e2 / np.linalg.norm(e2)
+        return e1, e2, k
+
+    def _dense_dielectric_tensor_for_beam_direction(
+        self,
+        beam_direction: ArrayLike,
+        beam_polarization_basis: tuple[ArrayLike, ArrayLike] | None = None,
+    ) -> NDArray[np.complex128]:
+        """Build a dense Jones tensor projected perpendicular to the beam."""
+        if self.mask is None or self.magnetization is None:
+            raise ValueError("mask and magnetization must be assigned before tensor projection.")
+
+        e1, e2, k = self._beam_transverse_basis(
+            beam_direction,
+            beam_polarization_basis=beam_polarization_basis,
+        )
+        fractions, thicknesses = self._tilted_layer_fractions()
+        mask = np.asarray(self.mask, dtype=float)
+        magnetization = np.asarray(self.magnetization, dtype=float)
+        tilted_magnetization = getattr(self, "tilted_magnetization", None)
+        indices = np.asarray(self.layer_refractive_indices, dtype=complex)
+        nz, ny, nx, n_layers = fractions.shape
+        out = np.zeros((nz, ny, nx, 2, 2), dtype=complex)
+        material_fraction = np.zeros((nz, ny, nx), dtype=float)
+        tol = 1e-14
+
+        for layer_idx in range(n_layers):
+            layer_fraction = fractions[..., layer_idx] * mask[layer_idx]
+            material_fraction += layer_fraction
+            if not np.any(layer_fraction > tol):
+                continue
+
+            n0, dn_c, dn_l = indices[layer_idx]
+            eps0 = n0**2
+            eps_c = 2.0 * n0 * dn_c
+            eps_l = 2.0 * n0 * dn_l
+            layer_m = self._tilted_layer_magnetization(
+                tilted_magnetization,
+                magnetization,
+                layer_idx,
+                (nz, ny, nx),
+            )
+            m1 = np.einsum("...i,i->...", layer_m, e1)
+            m2 = np.einsum("...i,i->...", layer_m, e2)
+            mk = np.einsum("...i,i->...", layer_m, k)
+
+            eps = np.zeros((nz, ny, nx, 2, 2), dtype=complex)
+            eps[..., 0, 0] = eps0
+            eps[..., 1, 1] = eps0
+            if abs(eps_c) > tol:
+                eps[..., 0, 1] += 1.0j * eps_c * mk
+                eps[..., 1, 0] += -1.0j * eps_c * mk
+            if abs(eps_l) > tol:
+                linear_diag = eps_l * (np.abs(m1) ** 2 - np.abs(m2) ** 2)
+                linear_offdiag = eps_l * 2.0 * m1 * m2
+                eps[..., 0, 0] += linear_diag
+                eps[..., 1, 1] -= linear_diag
+                eps[..., 0, 1] += linear_offdiag
+                eps[..., 1, 0] += linear_offdiag
+            out += layer_fraction[..., None, None] * eps
+
+        vacuum_fraction = np.clip(1.0 - material_fraction, 0.0, 1.0)
+        out[..., 0, 0] += vacuum_fraction
+        out[..., 1, 1] += vacuum_fraction
+        self._propagation_layer_thicknesses = thicknesses
+        self.aperture_support_regions = None
+        self.beam_direction = k
+        self.beam_polarization_basis = (e1, e2)
+        return out
+
+    def _dynamic_projected_dielectric_tensor_stack(
+        self,
+        beam_direction: ArrayLike | None = None,
+    ) -> DynamicProjectedDielectricTensorStack:
+        """Build direction-independent channels for local-k Jones projection."""
+        if self.mask is None or self.magnetization is None:
+            raise ValueError("mask and magnetization must be assigned before tensor projection.")
+
+        if beam_direction is None:
+            beam_direction = (0.0, 0.0, 1.0)
+        k = self._normalize_beam_direction(beam_direction)
+        fractions, thicknesses = self._tilted_layer_fractions()
+        mask = np.asarray(self.mask, dtype=float)
+        magnetization = np.asarray(self.magnetization, dtype=float)
+        tilted_magnetization = getattr(self, "tilted_magnetization", None)
+        indices = np.asarray(self.layer_refractive_indices, dtype=complex)
+        nz, ny, nx, n_layers = fractions.shape
+        eps_iso = np.zeros((nz, ny, nx), dtype=complex)
+        gyrotropic_vector = np.zeros((nz, ny, nx, 3), dtype=complex)
+        linear_tensor = np.zeros((nz, ny, nx, 3, 3), dtype=complex)
+        material_fraction = np.zeros((nz, ny, nx), dtype=float)
+        tol = 1e-14
+
+        for layer_idx in range(n_layers):
+            layer_fraction = fractions[..., layer_idx] * mask[layer_idx]
+            material_fraction += layer_fraction
+            if not np.any(layer_fraction > tol):
+                continue
+
+            n0, dn_c, dn_l = indices[layer_idx]
+            eps0 = n0**2
+            eps_c = 2.0 * n0 * dn_c
+            eps_l = 2.0 * n0 * dn_l
+            layer_m = self._tilted_layer_magnetization(
+                tilted_magnetization,
+                magnetization,
+                layer_idx,
+                (nz, ny, nx),
+            )
+
+            eps_iso += layer_fraction * eps0
+            if abs(eps_c) > tol:
+                gyrotropic_vector += (
+                    layer_fraction[..., None] * eps_c * layer_m
+                )
+            if abs(eps_l) > tol:
+                linear_tensor += (
+                    layer_fraction[..., None, None]
+                    * eps_l
+                    * layer_m[..., :, None]
+                    * layer_m[..., None, :]
+                )
+
+        vacuum_fraction = np.clip(1.0 - material_fraction, 0.0, 1.0)
+        eps_iso += vacuum_fraction
+        self._propagation_layer_thicknesses = thicknesses
+        self.aperture_support_regions = None
+        self.beam_direction = k
+        return DynamicProjectedDielectricTensorStack(
+            eps_iso=eps_iso,
+            gyrotropic_vector=gyrotropic_vector,
+            linear_tensor=linear_tensor,
+            beam_direction=k,
+        )
 
     def dielectric_tensor_mixed(self, n, theta=0.0):
         """Build a 3-element array of 2×2 transverse dielectric tensors.
@@ -1069,6 +1670,9 @@ class Structure:
         self,
         use_aperture_roi: bool = True,
         compact: bool = False,
+        beam_direction: ArrayLike | None = None,
+        beam_polarization_basis: tuple[ArrayLike, ArrayLike] | None = None,
+        local_k_projection: bool = False,
     ) -> None:
         """Build the spatially resolved dielectric tensor for propagation.
 
@@ -1100,6 +1704,20 @@ class Structure:
             diagonal terms plus dense aperture ROI patches. This avoids
             allocating the full ``(Nz, Ny, Nx, 2, 2)`` tensor during multislice
             propagation.
+        beam_direction : array-like of float, optional
+            Beam propagation direction in lab ``(x, y, z)`` coordinates. When
+            provided, the local 3-D magnetic dielectric response is projected
+            onto two transverse Jones axes perpendicular to this direction.
+            This produces a dense tensor stack and ignores ``compact``.
+        beam_polarization_basis : pair of array-like, optional
+            Optional lab-frame vectors defining the transverse Jones basis. The
+            vectors are orthonormalized perpendicular to ``beam_direction``.
+        local_k_projection : bool
+            If ``True``, store direction-independent magnetic response channels
+            and let the Jones propagator project each slice using the local
+            phase-gradient direction of the current electric field. This makes
+            XMCD proportional to the local ``m · k`` estimate. The tensor is
+            dynamic and ignores ``compact``.
 
         Returns
         -------
@@ -1107,6 +1725,27 @@ class Structure:
             Final dielectric tensor stored in ``self.final_dielectric_tensor``.
         """
 
+        if local_k_projection:
+            self.final_dielectric_tensor = self._dynamic_projected_dielectric_tensor_stack(
+                beam_direction=beam_direction,
+            )
+            return
+
+        if beam_direction is not None:
+            self.final_dielectric_tensor = self._dense_dielectric_tensor_for_beam_direction(
+                beam_direction,
+                beam_polarization_basis=beam_polarization_basis,
+            )
+            return
+
+        use_tilted_voxelization = (
+            not np.isclose(float(getattr(self, "sample_tilt_theta", 0.0)), 0.0)
+            or getattr(self, "sample_tilt_simulation_z_extent", None) is not None
+            or getattr(self, "tilted_magnetization", None) is not None
+        )
+        if use_tilted_voxelization:
+            self.final_dielectric_tensor = self._tilted_dense_dielectric_tensor()
+            return
         compact_stack = self.calculate_compact_dielectric_tensor(
             use_aperture_roi=use_aperture_roi
         )
@@ -1148,6 +1787,15 @@ class Structure:
             all layer patches up front.
         """
         from scattering_calculator.beam_propagator import simple_propagation
+
+        use_tilted_voxelization = (
+            not np.isclose(float(getattr(self, "sample_tilt_theta", 0.0)), 0.0)
+            or getattr(self, "sample_tilt_simulation_z_extent", None) is not None
+            or getattr(self, "tilted_magnetization", None) is not None
+        )
+        if use_tilted_voxelization:
+            self.final_scalar_refractive_index = self._tilted_dense_scalar_refractive_index(pol)
+            return
 
         compact_stack = simple_propagation.calculate_scalar_refractive_index_stack(
             self,

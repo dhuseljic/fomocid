@@ -89,7 +89,29 @@ class SetupSimulationExperiment:
         result : Any
             Return value produced by the function.
         """
-        self.sample.calculate_final_dielectric_tensor()
+        alpha_beam = getattr(
+            self.illumination_config,
+            "illumination_alpha_beam",
+            0.0,
+        )
+        beam_direction = light_beam.beam_direction_from_alpha(alpha_beam)
+        if np.allclose(
+            beam_direction,
+            np.array([0.0, 0.0, 1.0]),
+            atol=1e-14,
+            rtol=0.0,
+        ):
+            beam_direction = None
+        self.sample.calculate_final_dielectric_tensor(
+            beam_direction=beam_direction,
+            local_k_projection=bool(
+                getattr(
+                    self.simulation_config,
+                    "dielectric_tensor_local_k_projection",
+                    False,
+                )
+            ),
+        )
         self.holos = [None, None]
         for ii, pol in enumerate(["CR", "CL"]):
             self.beam_params.pol = pol
@@ -102,9 +124,7 @@ class SetupSimulationExperiment:
                 self.illumination_config.illumination_center,
                 self.illumination_config.illumination_focus_distance,
                 self.illumination_config.illumination_fwhm,
-                alpha_beam=getattr(
-                    self.illumination_config, "illumination_alpha_beam", 0.0
-                ),
+                alpha_beam=alpha_beam,
             )
             illumination.get_illumination_jones()
 
@@ -140,6 +160,11 @@ class SetupSimulationExperiment:
                     self.detector_config,
                     "detector_pixel_footprint_samples",
                     3,
+                ),
+                ignore_flat_detector_curvature=getattr(
+                    self.detector_config,
+                    "ignore_flat_detector_curvature",
+                    False,
                 ),
             )
             hologram_exp.add_noise()

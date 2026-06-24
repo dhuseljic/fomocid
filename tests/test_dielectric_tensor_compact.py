@@ -15,11 +15,94 @@ if str(SRC) not in sys.path:
 
 from scattering_calculator.sample_generator.structures import (
     CompactDielectricTensorStack,
+    DynamicProjectedDielectricTensorStack,
     Structure,
 )
 
 
 class CompactDielectricTensorTests(unittest.TestCase):
+    def _projected_structure(self) -> Structure:
+        structure = object.__new__(Structure)
+        structure.mask = np.ones((1, 2, 3), dtype=float)
+        structure.magnetization = np.zeros((1, 2, 3, 3), dtype=float)
+        structure.layer_refractive_indices = np.array(
+            [[2.0 + 0.0j, 0.1 + 0.0j, 0.0j]],
+            dtype=complex,
+        )
+        structure.layer_thicknesses = [5e-9]
+        structure.sample_shape = [1, 2, 3]
+        structure.real_space_pixel_size = 1e-9
+        structure.sample_tilt_theta = 0.0
+        structure.sample_tilt_axis = "x"
+        structure.sample_tilt_voxel_size = None
+        structure.sample_tilt_antialias_samples = 1
+        structure.sample_tilt_simulation_z_extent = None
+        return structure
+
+    def test_beam_direction_projection_matches_normal_xmcd_limit(self) -> None:
+        """Projected Jones tensor preserves the normal-incidence circular term."""
+        structure = self._projected_structure()
+        structure.magnetization[..., 2] = 1.0
+
+        structure.calculate_final_dielectric_tensor(
+            compact=False,
+            beam_direction=(0.0, 0.0, 1.0),
+        )
+
+        eps = structure.final_dielectric_tensor
+        np.testing.assert_allclose(eps[..., 0, 0], 4.0)
+        np.testing.assert_allclose(eps[..., 1, 1], 4.0)
+        np.testing.assert_allclose(eps[..., 0, 1], 0.4j)
+        np.testing.assert_allclose(eps[..., 1, 0], -0.4j)
+
+    def test_beam_direction_projection_uses_magnetization_along_beam(self) -> None:
+        """XMCD follows m dot k, not always the lab z component."""
+        structure = self._projected_structure()
+        structure.magnetization[..., 0] = 1.0
+
+        structure.calculate_final_dielectric_tensor(
+            compact=False,
+            beam_direction=(1.0, 0.0, 0.0),
+        )
+
+        eps = structure.final_dielectric_tensor
+        np.testing.assert_allclose(eps[..., 0, 0], 4.0)
+        np.testing.assert_allclose(eps[..., 1, 1], 4.0)
+        np.testing.assert_allclose(eps[..., 0, 1], 0.4j)
+        np.testing.assert_allclose(eps[..., 1, 0], -0.4j)
+
+    def test_beam_direction_projection_rejects_zero_direction(self) -> None:
+        """A zero beam direction is physically undefined."""
+        structure = self._projected_structure()
+
+        with self.assertRaisesRegex(ValueError, "beam_direction"):
+            structure.calculate_final_dielectric_tensor(
+                compact=False,
+                beam_direction=(0.0, 0.0, 0.0),
+            )
+
+    def test_local_k_projection_stack_projects_xmcd_from_k_map(self) -> None:
+        """Dynamic stack uses the supplied local k map for m dot k."""
+        structure = self._projected_structure()
+        structure.magnetization[..., 0] = 1.0
+
+        structure.calculate_final_dielectric_tensor(
+            compact=False,
+            local_k_projection=True,
+        )
+        stack = structure.final_dielectric_tensor
+        self.assertIsInstance(stack, DynamicProjectedDielectricTensorStack)
+
+        k_map = np.zeros((2, 3, 3), dtype=float)
+        k_map[..., 0] = 0.5
+        k_map[..., 2] = np.sqrt(1.0 - 0.5**2)
+        eps = stack.project_layer(0, k_map)
+
+        np.testing.assert_allclose(eps[..., 0, 0], 4.0)
+        np.testing.assert_allclose(eps[..., 1, 1], 4.0)
+        np.testing.assert_allclose(eps[..., 0, 1], 0.2j)
+        np.testing.assert_allclose(eps[..., 1, 0], -0.2j)
+
     def test_compact_builder_materializes_like_dense_builder(self) -> None:
         """Test that compact builder materializes like dense builder.
 

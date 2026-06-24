@@ -49,7 +49,7 @@ from typing import Any, Callable
 import h5py
 import numpy as np
 
-from scattering_calculator.experimental_conditions import detector
+from scattering_calculator.experimental_conditions import detector, light_beam
 from scattering_calculator.sample_generator import pattern_generator
 from scattering_calculator.simulation_pipelines.simulation_configuration import (
     BeamstopConfig,
@@ -67,6 +67,16 @@ from scattering_calculator.simulation_pipelines.simulation_configuration_range i
     Uniform,
     _s,
 )
+
+
+def _beam_direction_for_projected_jones(
+    alpha_beam: tuple[float, float] | float,
+) -> np.ndarray | None:
+    """Return a beam direction only when tilted contrast projection is needed."""
+    direction = light_beam.beam_direction_from_alpha(alpha_beam)
+    if np.allclose(direction, np.array([0.0, 0.0, 1.0]), atol=1e-14, rtol=0.0):
+        return None
+    return direction
 
 
 @dataclass
@@ -121,6 +131,10 @@ class HologramPipelineConfig:
     detector_pixel_footprint_samples : int
         Number of sub-samples per detector-pixel axis when
         ``use_detector_pixel_footprint`` is ``True``.
+    ignore_flat_detector_curvature : bool
+        If ``True``, project detector pixels onto reciprocal space with the
+        linear approximation ``qx = k * x / z`` and ``qy = k * y / z``. The
+        default ``False`` includes the flat-detector angular q distortion.
     artifacts_config : dict
         Photon-event shape and splatting settings. It does not own
         ``counts_per_photon``; that value belongs in ``detector_params``.
@@ -334,6 +348,7 @@ class HologramPipelineConfig:
     )
     use_detector_pixel_footprint: bool = False
     detector_pixel_footprint_samples: int = 3
+    ignore_flat_detector_curvature: bool = False
 
     # Beamstop
     beamstop_method: str | None = "circular"
@@ -352,6 +367,7 @@ class HologramPipelineConfig:
     aperture_lengths: list[float] = field(
         default_factory=lambda: [0.0, 0.0, 0.0]
     )  # m, only used by SLIT apertures
+    aperture_depths: list[float | None] | None = None  # m, None uses defaults
     aperture_centers: list[tuple] = field(
         default_factory=lambda: [
             (0.0, 0.0),
@@ -394,6 +410,7 @@ class HologramPipelineConfig:
     magnetic_pattern_use_roi: bool = True
     dielectric_tensor_use_roi: bool = True
     dielectric_tensor_compact: bool = True
+    dielectric_tensor_local_k_projection: bool = False
     propagate: bool = False
     jones_apply_zero_order_phase: bool = True
     propagation_padding_px: int = 0
@@ -407,6 +424,10 @@ class HologramPipelineConfig:
     farfield_oversampling: int = 1
     propagator_method: str = "Jones"
     scalar_refractive_index_lazy: bool = True
+    sample_tilt_theta: float = 0.0  # rad
+    sample_tilt_axis: str = "x"
+    sample_tilt_voxel_size: float | None = None  # m
+    sample_tilt_antialias_samples: int = 3
 
     # Simulation grid
     oversampling: int = 2
@@ -465,6 +486,7 @@ class HologramPipelineRanges:
     measurement_config: dict | None = None
     use_detector_pixel_footprint: bool | None = None
     detector_pixel_footprint_samples: int | Uniform | None = None
+    ignore_flat_detector_curvature: bool | None = None
 
     # Beamstop
     beamstop_config: dict | None = None
@@ -492,6 +514,7 @@ class HologramPipelineRanges:
         | Callable[[dict[str, Any]], tuple[float, float]]
         | None
     ) = None
+    dielectric_tensor_local_k_projection: bool | Choice | None = None
 
 
 class HologramPipeline:
@@ -720,6 +743,7 @@ class HologramPipeline:
         dielectric_tensor_use_roi: bool,
         dielectric_tensor_compact: bool,
         save_detected_hologram_without_beamstop: bool,
+        dielectric_tensor_local_k_projection: bool = False,
     ) -> dict[str, Any]:
         """Build canonical metadata for an interactively simulated result."""
         metadata: dict[str, Any] = {}
@@ -759,12 +783,29 @@ class HologramPipeline:
         metadata["sample/magnetic_pattern/use_roi"] = bool(
             use_roi and magnetic_pattern_use_roi
         )
+        beam_direction = None
+        if getattr(propagator_config, "propagator_method", None) == "Jones":
+            beam_direction = _beam_direction_for_projected_jones(
+                illumination_values.get("alpha_beam", 0.0)
+            )
         metadata["sample/dielectric_tensor/use_roi"] = bool(
-            use_roi and dielectric_tensor_use_roi
+            (use_roi and dielectric_tensor_use_roi)
+            if beam_direction is None and not dielectric_tensor_local_k_projection
+            else False
         )
         metadata["sample/dielectric_tensor/compact"] = bool(
             dielectric_tensor_compact
+            if beam_direction is None and not dielectric_tensor_local_k_projection
+            else False
         )
+        metadata["sample/dielectric_tensor/beam_direction_projected"] = (
+            beam_direction is not None
+        )
+        metadata["sample/dielectric_tensor/local_k_projected"] = bool(
+            dielectric_tensor_local_k_projection
+        )
+        if beam_direction is not None:
+            metadata["sample/dielectric_tensor/beam_direction_xyz"] = beam_direction
         metadata.update(cls._propagator_metadata(propagator_config))
         metadata.update(cls._xray_metadata(xray_config))
         metadata["detector/save_detected_no_beamstop"] = bool(
@@ -972,6 +1013,13 @@ class HologramPipeline:
                 params,
             )
         )
+        params["ignore_flat_detector_curvature"] = bool(
+            _pick(
+                rng.ignore_flat_detector_curvature,
+                cfg.ignore_flat_detector_curvature,
+                params,
+            )
+        )
         params["pattern_type"] = _pick(rng.pattern_type, cfg.pattern_type, params)
         params["pattern_config"] = _merge_dict(
             rng.pattern_config, cfg.pattern_config, params
@@ -1028,6 +1076,13 @@ class HologramPipeline:
         params["illumination_center"] = _pick(
             rng.illumination_center, cfg.illumination_center, params
         )
+        params["dielectric_tensor_local_k_projection"] = bool(
+            _pick(
+                rng.dielectric_tensor_local_k_projection,
+                cfg.dielectric_tensor_local_k_projection,
+                params,
+            )
+        )
         params["beamstop_config"] = _merge_dict(
             rng.beamstop_config, cfg.beamstop_config, params
         )
@@ -1036,6 +1091,7 @@ class HologramPipeline:
             {
                 "aperture_types": cfg.aperture_types,
                 "aperture_radii": cfg.aperture_radii,
+                "aperture_depths": cfg.aperture_depths,
                 "aperture_lengths": cfg.aperture_lengths,
                 "aperture_centers": cfg.aperture_centers,
                 "aperture_sigmas": cfg.aperture_sigmas,
@@ -1295,6 +1351,7 @@ class HologramPipeline:
             measurement_config=p["measurement_config"],
             use_detector_pixel_footprint=p["use_detector_pixel_footprint"],
             detector_pixel_footprint_samples=p["detector_pixel_footprint_samples"],
+            ignore_flat_detector_curvature=p["ignore_flat_detector_curvature"],
             beamstop_config=beamstop_config,
         )
         detector_config.setup()
@@ -1321,12 +1378,23 @@ class HologramPipeline:
             real_space_pixel_size=real_space_pixel_size,
             xray_config=xray_config,
             sample_name=cfg.sample_name,
+            sample_tilt_theta=cfg.sample_tilt_theta,
+            sample_tilt_axis=cfg.sample_tilt_axis,
+            sample_tilt_voxel_size=cfg.sample_tilt_voxel_size,
+            sample_tilt_antialias_samples=cfg.sample_tilt_antialias_samples,
         )
         sample_config.setup()
         t_stage = mark_stage("sample setup", t_stage)
         sample_layer_names = sample_config.sample_structure.layer_names
         sample_layer_thicknesses = sample_config.sample_structure.layer_thicknesses
-        membrane_index = sample_layer_names.index("SiN")
+        membrane_index = next(
+            (
+                idx
+                for idx, layer_name in enumerate(sample_layer_names)
+                if FrontApertureConfig._is_silicon_nitride_layer(layer_name)
+            ),
+            len(sample_layer_names),
+        )
         aperture_taper_depth = float(
             np.sum(sample_layer_thicknesses[: max(0, membrane_index - 2)])
         )
@@ -1338,10 +1406,12 @@ class HologramPipeline:
             aperture_shape=sample_shape,
             real_space_pixel_size=sample_config.sample_structure.real_space_pixel_size,
             aperture_thicknesses=sample_layer_thicknesses,
+            aperture_layer_names=sample_layer_names,
             use_roi=cfg.use_roi,
             aperture_config=dict(
                 apertures_type=p["aperture_config"]["aperture_types"],
                 apertures_radius=p["aperture_config"]["aperture_radii"],
+                apertures_depth=p["aperture_config"].get("aperture_depths"),
                 apertures_length=p["aperture_config"].get("aperture_lengths"),
                 apertures_center=p["aperture_config"]["aperture_centers"],
                 apertures_sigma=p["aperture_config"]["aperture_sigmas"],
@@ -1448,6 +1518,13 @@ class HologramPipeline:
                 pattern_slices[1].stop
             )
         metadata["sample/use_roi"] = bool(cfg.use_roi)
+        metadata["sample/tilt_theta_rad"] = float(cfg.sample_tilt_theta)
+        metadata["sample/tilt_axis"] = str(cfg.sample_tilt_axis)
+        if cfg.sample_tilt_voxel_size is not None:
+            metadata["sample/tilt_voxel_size_m"] = float(cfg.sample_tilt_voxel_size)
+        metadata["sample/tilt_antialias_samples"] = int(
+            cfg.sample_tilt_antialias_samples
+        )
         metadata["sample/magnetic_pattern/use_roi"] = bool(
             cfg.use_roi and cfg.magnetic_pattern_use_roi
         )
@@ -1566,16 +1643,38 @@ class HologramPipeline:
             )
             t_stage = mark_stage("scalar refractive index setup", t_stage)
         else:
+            beam_direction = _beam_direction_for_projected_jones(
+                p["illumination_alpha_beam"]
+            )
             sample_config.sample_structure.calculate_final_dielectric_tensor(
                 use_aperture_roi=cfg.use_roi and cfg.dielectric_tensor_use_roi,
-                compact=cfg.dielectric_tensor_compact,
+                compact=(
+                    cfg.dielectric_tensor_compact
+                    if beam_direction is None
+                    and not p["dielectric_tensor_local_k_projection"]
+                    else False
+                ),
+                beam_direction=beam_direction,
+                local_k_projection=p["dielectric_tensor_local_k_projection"],
             )
             metadata["sample/dielectric_tensor/use_roi"] = bool(
-                cfg.use_roi and cfg.dielectric_tensor_use_roi
+                (cfg.use_roi and cfg.dielectric_tensor_use_roi)
+                if beam_direction is None and not p["dielectric_tensor_local_k_projection"]
+                else False
             )
             metadata["sample/dielectric_tensor/compact"] = bool(
                 cfg.dielectric_tensor_compact
+                if beam_direction is None and not p["dielectric_tensor_local_k_projection"]
+                else False
             )
+            metadata["sample/dielectric_tensor/beam_direction_projected"] = (
+                beam_direction is not None
+            )
+            metadata["sample/dielectric_tensor/local_k_projected"] = bool(
+                p["dielectric_tensor_local_k_projection"]
+            )
+            if beam_direction is not None:
+                metadata["sample/dielectric_tensor/beam_direction_xyz"] = beam_direction
             t_stage = mark_stage("dielectric tensor", t_stage)
 
         # ---- Illumination config -----------------------------------------
@@ -1934,6 +2033,16 @@ class HologramPipeline:
         aperture_grp.create_dataset(
             "apertures_radius",
             data=np.asarray(aperture_config["aperture_radii"], dtype=np.float64),
+        )
+        depth_values = aperture_config.get("aperture_depths")
+        if depth_values is None:
+            depth_values = [np.nan] * len(aperture_config["aperture_types"])
+        aperture_grp.create_dataset(
+            "apertures_depth",
+            data=np.asarray(
+                [np.nan if value is None else value for value in depth_values],
+                dtype=np.float64,
+            ),
         )
         aperture_grp.create_dataset(
             "apertures_length",

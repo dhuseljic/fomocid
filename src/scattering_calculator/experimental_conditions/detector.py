@@ -55,25 +55,42 @@ class detector_layout:
         self.detx = X
         self.dety = Y
 
-    def calc_q_space_coordinates(self, beam_parameters) -> None:
+    def calc_q_space_coordinates(
+        self,
+        beam_parameters,
+        ignore_flat_detector_curvature: bool = False,
+    ) -> None:
         """Compute Fourier-space (qx, qy) coordinate grids for the detector plane.
 
         Sets ``self.detqx`` and ``self.detqy`` as 2-D arrays of physical
         coordinates in metres, centred on the optical axis.
         """
 
-        r = np.sqrt(self.detx**2 + self.dety**2)
-        theta = np.arctan2(self.dety, self.detx)
-        self.detqx = (
-            beam_parameters.wavevector
-            * np.sin(np.arctan(r / self.distance_sample_detector))
-            * np.cos(theta)
-        )
-        self.detqy = (
-            beam_parameters.wavevector
-            * np.sin(np.arctan(r / self.distance_sample_detector))
-            * np.sin(theta)
-        )
+        if ignore_flat_detector_curvature:
+            detqx = (
+                beam_parameters.wavevector
+                * self.detx
+                / self.distance_sample_detector
+            )
+            detqy = (
+                beam_parameters.wavevector
+                * self.dety
+                / self.distance_sample_detector
+            )
+            self.detqx, self.detqy = np.broadcast_arrays(detqx, detqy)
+        else:
+            r = np.sqrt(self.detx**2 + self.dety**2)
+            theta = np.arctan2(self.dety, self.detx)
+            self.detqx = (
+                beam_parameters.wavevector
+                * np.sin(np.arctan(r / self.distance_sample_detector))
+                * np.cos(theta)
+            )
+            self.detqy = (
+                beam_parameters.wavevector
+                * np.sin(np.arctan(r / self.distance_sample_detector))
+                * np.sin(theta)
+            )
 
     def get_detector_extent_real_space(self) -> NDArray[np.float64]:
         """Calculate the physical extent of the detector plane in metres.
@@ -722,6 +739,7 @@ class detector_hologram:
         self,
         use_pixel_footprint: bool = False,
         pixel_footprint_samples: int = 3,
+        ignore_flat_detector_curvature: bool = False,
     ) -> NDArray[np.float64]:
         """Project the ideal hologram onto a flat detector.
 
@@ -739,6 +757,11 @@ class detector_hologram:
             Number of sub-samples per detector-pixel axis when
             ``use_pixel_footprint`` is ``True``. A value of ``3`` uses nine
             sub-samples per detector pixel. Default is ``3``.
+        ignore_flat_detector_curvature : bool, optional
+            If ``True``, map detector-plane position linearly to reciprocal
+            coordinates as ``qx = k * x / z`` and ``qy = k * y / z``. If
+            ``False``, use the flat-detector angular mapping
+            ``q = k * sin(arctan(r / z))``. Default is ``False``.
 
         Returns
         -------
@@ -749,6 +772,26 @@ class detector_hologram:
         # Full reciprocal-space span of the shifted FFT grid. One FFT pixel is 1/self.real_space_pixel_size
         # therefore Dq / N, so q maps to q / Dq * N + N / 2.
         Dq = 2.0 * np.pi / self.real_space_pixel_size
+
+        def detector_q(detx, dety):
+            z = float(self.detector_layout.distance_sample_detector)
+            if ignore_flat_detector_curvature:
+                detqx = self.beam_parameters.wavevector * detx / z
+                detqy = self.beam_parameters.wavevector * dety / z
+                return np.broadcast_arrays(detqx, detqy)
+            r = np.sqrt(detx**2 + dety**2)
+            theta = np.arctan2(dety, detx)
+            detqx = (
+                self.beam_parameters.wavevector
+                * np.sin(np.arctan(r / z))
+                * np.cos(theta)
+            )
+            detqy = (
+                self.beam_parameters.wavevector
+                * np.sin(np.arctan(r / z))
+                * np.sin(theta)
+            )
+            return detqx, detqy
 
         def solid_angle_factor(detx, dety):
             z = float(self.detector_layout.distance_sample_detector)
@@ -774,9 +817,17 @@ class detector_hologram:
             )
 
         if not use_pixel_footprint:
+            if ignore_flat_detector_curvature:
+                detqx, detqy = detector_q(
+                    self.detector_layout.detx,
+                    self.detector_layout.dety,
+                )
+            else:
+                detqx = self.detector_layout.detqx
+                detqy = self.detector_layout.detqy
             self.hologram_detector = sample_q(
-                self.detector_layout.detqx,
-                self.detector_layout.detqy,
+                detqx,
+                detqy,
             ) * solid_angle_factor(self.detector_layout.detx, self.detector_layout.dety)
             return self.hologram_detector
 
@@ -789,21 +840,11 @@ class detector_hologram:
             dety = self.detector_layout.dety + y_offset
             for x_offset in offsets:
                 detx = self.detector_layout.detx + x_offset
-                r = np.sqrt(detx**2 + dety**2)
-                theta = np.arctan2(dety, detx)
-                detqx = (
-                    self.beam_parameters.wavevector
-                    * np.sin(np.arctan(r / self.detector_layout.distance_sample_detector))
-                    * np.cos(theta)
-                )
-                detqy = (
-                    self.beam_parameters.wavevector
-                    * np.sin(np.arctan(r / self.detector_layout.distance_sample_detector))
-                    * np.sin(theta)
-                )
+                detqx, detqy = detector_q(detx, dety)
                 accumulated += sample_q(detqx, detqy) * solid_angle_factor(detx, dety)
 
         self.hologram_detector = accumulated / n_samples**2
+
         return self.hologram_detector
 
     def make_tile_class_map(self, shape, tile_size=256, n_classes=32, seed=None):

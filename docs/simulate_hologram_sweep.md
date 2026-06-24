@@ -484,6 +484,7 @@ detector grid with positivity-preserving linear interpolation by default:
 ```python
 use_detector_pixel_footprint = False
 detector_pixel_footprint_samples = 3
+ignore_flat_detector_curvature = False
 ```
 
 Set `use_detector_pixel_footprint=True` in the sweep file to average each ideal
@@ -493,6 +494,12 @@ sub-sampling grid. This is closer to a finite detector-pixel footprint and
 cannot create negative intensity values from a non-negative hologram, but it is
 slower by roughly the number of sub-samples per pixel. The package default
 `False` mode uses one centre sample per detector pixel and is faster.
+
+Set `ignore_flat_detector_curvature=True` to project detector pixels with the
+linear reciprocal-space approximation `qx = k * x / z` and `qy = k * y / z`
+instead of the default flat-detector angular mapping
+`q = k * sin(arctan(r / z))`. The default `False` preserves the previous
+hologram outputs and includes the nonlinear q spacing caused by a flat detector.
 
 In both modes, the projection always applies the flat-detector solid-angle
 collection factor. A pixel at detector-plane coordinate `(x, y)` and
@@ -711,7 +718,8 @@ values actually used after applying sweep ranges and compatibility aliases:
     ├── detector/                    # detector geometry and output switches
     │   ├── save_detected_no_beamstop
     │   ├── use_detector_pixel_footprint
-    │   └── detector_pixel_footprint_samples
+    │   ├── detector_pixel_footprint_samples
+    │   └── ignore_flat_detector_curvature
     ├── detector_params/             # readout noise, threshold, QE, counts/photon
     ├── measurement_config/          # exposure, frames, count normalization
     ├── artifacts_config/            # photon-event shape/splatting controls

@@ -211,7 +211,8 @@ class wavefronts:
         """
         E_in = np.asarray(E_in, dtype=complex)
         compact_eps_stack = self._is_compact_eps_stack(eps_stack)
-        if not compact_eps_stack:
+        dynamic_eps_stack = self._is_dynamic_projected_eps_stack(eps_stack)
+        if not compact_eps_stack and not dynamic_eps_stack:
             eps_stack = np.asarray(eps_stack, dtype=complex)
 
         if E_in.ndim != 3 or E_in.shape[-1] != 2:
@@ -227,7 +228,17 @@ class wavefronts:
             #print(iz)
             dz = thicknesses[iz]
             # Local Jones interaction
-            if compact_eps_stack:
+            if dynamic_eps_stack:
+                k_map = self.local_wavevector_directions(E_in, wavelength, pixel_size)
+                eps_slice = eps_stack.project_layer(iz, k_map)
+                E_in = self.propagate_jones_single_slice(
+                    E_in,
+                    eps_slice,
+                    wavelength,
+                    dz,
+                    aperture_support_regions=None,
+                )
+            elif compact_eps_stack:
                 E_in = self.apply_compact_eps_slice(E_in, eps_stack, iz, wavelength, dz)
             else:
                 eps_slice = eps_stack[iz]
@@ -294,6 +305,46 @@ class wavefronts:
             and hasattr(eps_stack, "patches")
             and hasattr(eps_stack, "shape")
         )
+
+    @staticmethod
+    def _is_dynamic_projected_eps_stack(eps_stack):
+        """Return True for local-k projected dielectric response stacks."""
+        return (
+            hasattr(eps_stack, "project_layer")
+            and hasattr(eps_stack, "eps_iso")
+            and hasattr(eps_stack, "shape")
+        )
+
+    @staticmethod
+    def local_wavevector_directions(E, wavelength, pixel_size):
+        """Estimate local propagation directions from Jones-field phase gradients.
+
+        The sign follows the simulator convention where a tilted beam with
+        phase ``exp(-i k x sin(alpha_x))`` has positive ``k_x``.
+        """
+        E = np.asarray(E, dtype=complex)
+        wavelength = float(wavelength)
+        pixel_size = float(pixel_size)
+        if E.ndim != 3 or E.shape[-1] != 2:
+            raise ValueError("E must have shape (Ny, Nx, 2)")
+        k0 = 2 * np.pi / wavelength
+        dE_dy, dE_dx = np.gradient(E, pixel_size, pixel_size, axis=(0, 1))
+        intensity = np.sum(np.abs(E) ** 2, axis=-1)
+        grad_x = np.imag(np.sum(np.conjugate(E) * dE_dx, axis=-1))
+        grad_y = np.imag(np.sum(np.conjugate(E) * dE_dy, axis=-1))
+        grad_x = np.divide(grad_x, intensity, out=np.zeros_like(grad_x), where=intensity > 0)
+        grad_y = np.divide(grad_y, intensity, out=np.zeros_like(grad_y), where=intensity > 0)
+        kx = -grad_x / k0
+        ky = -grad_y / k0
+        transverse2 = kx**2 + ky**2
+        too_large = transverse2 >= 0.999999
+        if np.any(too_large):
+            scale = np.sqrt(0.999999 / transverse2[too_large])
+            kx[too_large] *= scale
+            ky[too_large] *= scale
+            transverse2 = kx**2 + ky**2
+        kz = np.sqrt(np.clip(1.0 - transverse2, 0.0, None))
+        return np.stack((kx, ky, kz), axis=-1)
 
 
     # ============================================================

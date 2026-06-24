@@ -287,6 +287,7 @@ class DetectorConfig(_ConfigMixin):
     artifacts_config: dict = field(default_factory=dict)
     measurement_config: dict = field(default_factory=lambda: {"number_frames": 1})
     beamstop_config: BeamstopConfig | None = None
+    ignore_flat_detector_curvature: bool = False
 
     def __post_init__(self) -> None:
         """Handle the internal post init operation.
@@ -350,7 +351,10 @@ class DetectorConfig(_ConfigMixin):
         float
             Real-space resolution in metres.
         """
-        self.detector_layout.calc_q_space_coordinates(beam_parameters)
+        self.detector_layout.calc_q_space_coordinates(
+            beam_parameters,
+            ignore_flat_detector_curvature=self.ignore_flat_detector_curvature,
+        )
         self.detector_layout.calc_resolution_from_detector()
 
         return self.detector_layout.real_space_resolution
@@ -393,7 +397,9 @@ class DetectorConfig(_ConfigMixin):
             self.propagator.SampleConfig.real_space_pixel_size,
             self.beamstop,
         )
-        self.hologram_exp.gnomonic_projection()
+        self.hologram_exp.gnomonic_projection(
+            ignore_flat_detector_curvature=self.ignore_flat_detector_curvature,
+        )
 
     def return_ideal_hologram(self) -> np.ndarray:
         """Return the ideal (noise-free, artifact-free) hologram as a 2-D array.

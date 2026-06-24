@@ -440,7 +440,10 @@ class detector_hologram:
 
 
 
-    def gnomonic_projection(self) -> NDArray[np.float64]:
+    def gnomonic_projection(
+        self,
+        ignore_flat_detector_curvature: bool = False,
+    ) -> NDArray[np.float64]:
         """Apply gnomonic projection to the hologram to correct for curvature of the Ewald sphere.
         Returns
         -------
@@ -449,16 +452,23 @@ class detector_hologram:
 
         Parameters
         ----------
-        None
-            This function takes no explicit input parameters.
+        ignore_flat_detector_curvature : bool, optional
+            If ``True``, use the linear detector-plane mapping
+            ``qx = k * x / z`` and ``qy = k * y / z``. If ``False``, use the
+            q coordinates already stored on the detector layout.
         """
         l= self.beam_parameters.wavelength
         k = 2 * np.pi / self.beam_parameters.wavelength
-        detqx = self.detector_layout.detqx
-        detqy = self.detector_layout.detqy
         z = self.detector_layout.distance_sample_detector
         detx = self.detector_layout.detx
         dety = self.detector_layout.dety
+        if ignore_flat_detector_curvature:
+            detqx = k * detx / z
+            detqy = k * dety / z
+            detqx, detqy = np.broadcast_arrays(detqx, detqy)
+        else:
+            detqx = self.detector_layout.detqx
+            detqy = self.detector_layout.detqy
 
         # generate the qx, qy coordinates in the far field based on the real-space coordinates of the illumination plane
         # these are the q of the far field before the gnomonic projection, which are given by qx = (2 * pi / real_space_pixel_size) * (nx / sample_shape[1]) and qy = (2 * pi / real_space_pixel_size) * (ny / sample_shape[0])
@@ -565,6 +575,4 @@ class detector_hologram:
         holo[holo<0]=0
 
         self.hologram_exp=holo.copy()
-
-
 

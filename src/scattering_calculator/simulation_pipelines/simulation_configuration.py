@@ -349,6 +349,11 @@ class DetectorConfig(_ConfigMixin):
     detector_pixel_footprint_samples : int
         Number of sub-samples per detector-pixel axis when
         ``use_detector_pixel_footprint`` is ``True``.
+    ignore_flat_detector_curvature : bool
+        If ``True``, project detector pixels with the linear approximation
+        ``qx = k * x / z`` and ``qy = k * y / z``. If ``False``, include the
+        flat-detector angular q distortion. Default ``False`` preserves the
+        original behavior.
 
     Attributes
     ----------
@@ -390,6 +395,7 @@ class DetectorConfig(_ConfigMixin):
     beamstop_config: BeamstopConfig | None = None
     use_detector_pixel_footprint: bool = False
     detector_pixel_footprint_samples: int = 3
+    ignore_flat_detector_curvature: bool = False
 
     def __post_init__(self) -> None:
         """Handle the internal post init operation.
@@ -453,7 +459,10 @@ class DetectorConfig(_ConfigMixin):
         float
             Real-space resolution in metres.
         """
-        self.detector_layout.calc_q_space_coordinates(beam_parameters)
+        self.detector_layout.calc_q_space_coordinates(
+            beam_parameters,
+            ignore_flat_detector_curvature=self.ignore_flat_detector_curvature,
+        )
         self.detector_layout.calc_resolution_from_detector()
 
         return self.detector_layout.real_space_resolution
@@ -490,13 +499,17 @@ class DetectorConfig(_ConfigMixin):
         self.exit_wavefield_intensity = exit_intensity
         self.hologram_intensity = np.sum(self.wavefront.hologram)
 
-    def detect_hologram(self) -> np.ndarray:
+    def detect_hologram(
+        self,
+        projection_beam_params: light_beam.beam_parameters | None = None,
+    ) -> np.ndarray:
         """Simulate the detection of the hologram on the detector, including noise and artifacts.
 
         Parameters
         ----------
-        None
-            This function takes no explicit input parameters.
+        projection_beam_params : light_beam.beam_parameters or None
+            Beam parameters used only for projecting the far-field hologram onto
+            the detector. If ``None``, use the propagated illumination beam.
 
         Returns
         -------
@@ -505,22 +518,25 @@ class DetectorConfig(_ConfigMixin):
         """
         if not hasattr(self, "wavefront"):
             raise ValueError("No propagated wavefront assigned to detector layout.")
+        beam_params = (
+            projection_beam_params
+            or self.propagator.IlluminationConfig.beam_params
+        )
         self.hologram_exp = detector.detector_hologram(
             self.detector_layout,
             self.wavefront.hologram,
-            self.propagator.IlluminationConfig.beam_params,
+            beam_params,
             self.propagator.SampleConfig.real_space_pixel_size,
             self.beamstop,
             artifacts_config=self.artifacts_config,
             measurement_config=self.measurement_config,
             detector_params=self.detector_params,
-            coherence_length=(
-                self.propagator.IlluminationConfig.beam_params.coherence_length
-            ),
+            coherence_length=beam_params.coherence_length,
         )
         self.hologram_exp.gnomonic_projection(
             use_pixel_footprint=self.use_detector_pixel_footprint,
             pixel_footprint_samples=self.detector_pixel_footprint_samples,
+            ignore_flat_detector_curvature=self.ignore_flat_detector_curvature,
         )
 
     def return_ideal_hologram(self) -> np.ndarray:
@@ -712,6 +728,10 @@ class SampleConfig(_ConfigMixin):
     xray_config: XRayConfig | None = (None,)
     sample_name: str | None = (None,)
     comments: str | None = (None,)
+    sample_tilt_theta: float = 0.0
+    sample_tilt_axis: Literal["x", "y"] = "x"
+    sample_tilt_voxel_size: float | None = None
+    sample_tilt_antialias_samples: int = 3
     other_config: dict = field(default_factory=dict)
 
     def setup(self) -> None:
@@ -758,6 +778,12 @@ class SampleConfig(_ConfigMixin):
                 )
             else:
                 self.sample_structure.add_layer(layer.material, thickness=layer.thickness)
+        self.sample_structure.set_sample_tilt(
+            theta=self.sample_tilt_theta,
+            axis=self.sample_tilt_axis,
+            voxel_size=self.sample_tilt_voxel_size,
+            antialias_samples=self.sample_tilt_antialias_samples,
+        )
 
     def assign_magnetic_pattern(self, magnetic_vector_field: np.ndarray) -> None:
         """Map a 2-D scalar magnetization pattern onto the 3-D sample stack.
@@ -1016,6 +1042,7 @@ class FrontApertureConfig(_ConfigMixin):
     aperture_shape: tuple[int, int] = (256, 256)  # px
     real_space_pixel_size: float = 10e-9  # m/px
     aperture_thicknesses: list[float] = field(default_factory=lambda: [0.01])  # m
+    aperture_layer_names: list[str] | None = None
     aperture_config: dict = field(default_factory=dict)
     use_roi: bool = True
 
@@ -1095,6 +1122,7 @@ class FrontApertureConfig(_ConfigMixin):
             "apertures_top_radius_factor", len(types), 2.0
         )
         lengths = self._aperture_values("apertures_length", len(types), None)
+        depths = self._aperture_values("apertures_depth", len(types), None)
 
         for (
             type,
@@ -1108,6 +1136,7 @@ class FrontApertureConfig(_ConfigMixin):
             seed,
             top_radius_factor,
             length,
+            depth_override,
         ) in zip(
             types,
             radi,
@@ -1120,8 +1149,11 @@ class FrontApertureConfig(_ConfigMixin):
             seeds,
             top_radius_factors,
             lengths,
+            depths,
         ):
-            if type == "OH":
+            if depth_override is not None:
+                depth = float(depth_override)
+            elif type == "OH":
                 depth = self.aperture_config.get("thickness_OH", None)
             elif type in ("RH", "SLIT"):
                 depth = np.sum(self.aperture_thicknesses)
@@ -1211,6 +1243,51 @@ class FrontApertureConfig(_ConfigMixin):
         """
         return self.aperture.aperture_design
 
+    @staticmethod
+    def _is_silicon_nitride_layer(layer_name: str) -> bool:
+        """Return True when ``layer_name`` denotes a silicon nitride layer."""
+        normalized = "".join(ch for ch in str(layer_name).lower() if ch.isalnum())
+        return normalized in {"sin", "si3n4", "siliconnitride"}
+
+    def _support_layer_index_before_silicon_nitride(self) -> int | None:
+        """Return the layer immediately before the first silicon nitride layer."""
+        if self.aperture_layer_names is None:
+            return None
+        if len(self.aperture_layer_names) != len(self.aperture_thicknesses):
+            raise ValueError(
+                "aperture_layer_names must match aperture_thicknesses; "
+                f"got {len(self.aperture_layer_names)} names and "
+                f"{len(self.aperture_thicknesses)} thicknesses"
+            )
+        for idx, layer_name in enumerate(self.aperture_layer_names):
+            if self._is_silicon_nitride_layer(layer_name):
+                return max(0, idx - 1)
+        return None
+
+    def _aperture_scale_at_layer(
+        self,
+        layer_idx: int | None,
+        drilled_depth: float,
+        taper_depth: float | None,
+        top_radius_factor: float,
+    ) -> float | None:
+        """Return the aperture size scale at ``layer_idx``."""
+        top_radius_factor = float(top_radius_factor)
+        if layer_idx is None:
+            return 1.0
+        layer_edges = np.concatenate(([0.0], np.cumsum(self.aperture_thicknesses)))
+        layer_idx = int(np.clip(layer_idx, 0, len(self.aperture_thicknesses) - 1))
+        drilled_depth = float(drilled_depth)
+        if layer_edges[layer_idx] >= drilled_depth:
+            return None
+        taper_limit = drilled_depth if taper_depth is None else min(
+            max(float(taper_depth), 0.0), drilled_depth
+        )
+        if taper_limit <= 0:
+            return 1.0
+        depth_fraction = np.clip(layer_edges[layer_idx] / taper_limit, 0.0, 1.0)
+        return top_radius_factor + (1.0 - top_radius_factor) * depth_fraction
+
     def create_supportmask(
         self,
         output_shape: tuple[int, int] | None = None,
@@ -1218,6 +1295,12 @@ class FrontApertureConfig(_ConfigMixin):
         aperture_types: tuple[str, ...] | None = None,
     ) -> np.ndarray:
         """Return a binary 2-D support mask covering all OH/RH aperture holes.
+
+        For tapered apertures, the saved support is taken from the aperture
+        plane immediately before the silicon nitride membrane when layer names
+        are available. This matches the gold-side aperture at the SiN interface,
+        not the wider top-surface opening. Older configurations without layer
+        names fall back to the base aperture radius.
 
         Parameters
         ----------
@@ -1262,6 +1345,8 @@ class FrontApertureConfig(_ConfigMixin):
             "apertures_top_radius_factor", n, 2.0
         )
         lengths = self._aperture_values("apertures_length", n, None)
+        depths = self._aperture_values("apertures_depth", n, None)
+        support_layer_idx = self._support_layer_index_before_silicon_nitride()
         center_y0 = shape[0] / 2
         center_x0 = shape[1] / 2
 
@@ -1276,6 +1361,7 @@ class FrontApertureConfig(_ConfigMixin):
             seed,
             top_radius_factor,
             length,
+            depth_override,
         ) in zip(
             types,
             radii,
@@ -1287,17 +1373,40 @@ class FrontApertureConfig(_ConfigMixin):
             seeds,
             top_radius_factors,
             lengths,
+            depths,
         ):
             if aperture_types is not None and type not in aperture_types:
                 continue
             center_y = center_y0 + center[0] / pixel_size
             center_x = center_x0 + center[1] / pixel_size
             seed = None if seed is None or int(seed) < 0 else int(seed)
+            if depth_override is not None:
+                depth = float(depth_override)
+            elif type == "OH":
+                depth = self.aperture_config.get("thickness_OH", None)
+                if depth is None:
+                    depth = np.sum(self.aperture_thicknesses)
+            elif type in ("RH", "SLIT"):
+                depth = np.sum(self.aperture_thicknesses)
+            else:
+                raise ValueError(f"Aperture type not defined, got {type}")
+            taper_depth = self.aperture_config.get(
+                "aperture_taper_depth",
+                self.aperture_config.get("thickness_OH", depth),
+            )
+            aperture_scale = self._aperture_scale_at_layer(
+                support_layer_idx,
+                depth,
+                taper_depth,
+                top_radius_factor,
+            )
+            if aperture_scale is None:
+                continue
             if type == "SLIT":
                 if length is None:
                     raise ValueError("SLIT apertures require apertures_length.")
-                width_px = radius * max(1.0, float(top_radius_factor)) / pixel_size
-                length_px = length * max(1.0, float(top_radius_factor)) / pixel_size
+                width_px = radius * aperture_scale / pixel_size
+                length_px = length * aperture_scale / pixel_size
                 if self.use_roi:
                     y_slice, x_slice = structures.Apertures3D._rectangle_aperture_bbox(
                         (1, *shape),
@@ -1331,7 +1440,7 @@ class FrontApertureConfig(_ConfigMixin):
                     seed=seed,
                 )
             else:
-                radius_px = radius * max(1.0, float(top_radius_factor)) / pixel_size
+                radius_px = radius * aperture_scale / pixel_size
                 if self.use_roi:
                     y_slice, x_slice = structures.Apertures3D._aperture_bbox(
                         (1, *shape),
@@ -1706,7 +1815,7 @@ class SamplePropagatorConfig(_ConfigMixin):
         """Build the ROI-consistent background exit wave on an extended grid."""
         background = self._illumination_jones_for_shape(shape)
         eps_stack = self.SampleConfig.sample_structure.final_dielectric_tensor
-        thicknesses = self.SampleConfig.sample_structure.layer_thicknesses
+        thicknesses = self.SampleConfig.sample_structure.propagation_layer_thicknesses
         wavelength = self.IlluminationConfig.beam_params.wavelength
         k0 = 2 * np.pi / wavelength
         propagate = bool(self.propagator_config.get("propagate", False))
@@ -1749,6 +1858,11 @@ class SamplePropagatorConfig(_ConfigMixin):
             ),
         )
         scalar_stack = self.SampleConfig.sample_structure.final_scalar_refractive_index
+        if hasattr(scalar_stack, "base_index"):
+            base_index = scalar_stack.base_index
+        else:
+            scalar_arr = np.asarray(scalar_stack)
+            base_index = scalar_arr[:, 0, 0]
         wavelength = self.IlluminationConfig.beam_params.wavelength
         k0 = 2 * np.pi / wavelength
         propagate = bool(self.propagator_config.get("propagate", False))
@@ -1758,9 +1872,10 @@ class SamplePropagatorConfig(_ConfigMixin):
                 self.propagator_config.get("jones_apply_zero_order_phase", True),
             )
         )
-        for iz, dz in enumerate(self.SampleConfig.sample_structure.layer_thicknesses):
-            background *= np.exp(-1j * k0 * float(dz) * scalar_stack.base_index[iz])
-            if iz < len(self.SampleConfig.sample_structure.layer_thicknesses) - 1 and (
+        thicknesses = self.SampleConfig.sample_structure.propagation_layer_thicknesses
+        for iz, dz in enumerate(thicknesses):
+            background *= np.exp(-1j * k0 * float(dz) * base_index[iz])
+            if iz < len(thicknesses) - 1 and (
                 propagate or scalar_apply_zero_order_phase
             ):
                 background *= np.exp(-1j * k0 * float(dz))
@@ -1814,7 +1929,9 @@ class SamplePropagatorConfig(_ConfigMixin):
         wavefront = Jones_propagator.wavefronts(
             beam_parameters=self.IlluminationConfig.beam_params,
             eps_stack=self.SampleConfig.sample_structure.final_dielectric_tensor,
-            layer_thicknesses=self.SampleConfig.sample_structure.layer_thicknesses,
+            layer_thicknesses=(
+                self.SampleConfig.sample_structure.propagation_layer_thicknesses
+            ),
             real_space_pixel_size=self.SampleConfig.real_space_pixel_size,
             E_in=self.IlluminationConfig.illumination.illumination_jones,
             aperture_support_regions=getattr(
@@ -1892,7 +2009,9 @@ class SamplePropagatorConfig(_ConfigMixin):
         wavefront = simple_propagation.scalar_wavefronts(
             beam_parameters=self.IlluminationConfig.beam_params,
             refractive_index_stack=scalar_stack,
-            layer_thicknesses=self.SampleConfig.sample_structure.layer_thicknesses,
+            layer_thicknesses=(
+                self.SampleConfig.sample_structure.propagation_layer_thicknesses
+            ),
             real_space_pixel_size=self.SampleConfig.real_space_pixel_size,
             E_in=self.IlluminationConfig.illumination.illumination_jones,
             aperture_support_regions=getattr(

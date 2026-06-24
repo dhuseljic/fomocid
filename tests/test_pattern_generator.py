@@ -300,6 +300,55 @@ class ApertureAreaAverageTests(unittest.TestCase):
         self.assertGreater(np.sum(hole_fraction[-1]), 4.0 * 14.0 * 0.7)
         self.assertLess(np.min(aperture.return_aperture_mask()), 1.0)
 
+    def test_front_aperture_accepts_per_aperture_depth(self) -> None:
+        """Test that apertures can stop at independent depths."""
+        config = simulation_configuration.FrontApertureConfig(
+            aperture_shape=(3, 41, 41),
+            real_space_pixel_size=1.0,
+            aperture_thicknesses=[1.0, 1.0, 1.0],
+            aperture_layer_names=["Au", "SiN", "Co"],
+            aperture_config={
+                "apertures_type": ["OH", "RH"],
+                "apertures_radius": [4.0, 3.0],
+                "apertures_center": [(0.0, 0.0), (10.0, 0.0)],
+                "apertures_sigma": [0.0, 0.0],
+                "apertures_depth": [1.0, 2.0],
+                "apertures_top_radius_factor": [1.0, 1.0],
+            },
+        )
+        config.setup()
+        mask = config.return_aperture()
+
+        center = (20, 20)
+        reference = (30, 20)
+        self.assertLess(mask[0, center[0], center[1]], 1.0)
+        self.assertEqual(mask[1, center[0], center[1]], 1.0)
+        self.assertLess(mask[0, reference[0], reference[1]], 1.0)
+        self.assertLess(mask[1, reference[0], reference[1]], 1.0)
+        self.assertEqual(mask[2, reference[0], reference[1]], 1.0)
+
+    def test_object_hole_defaults_to_before_silicon_nitride(self) -> None:
+        """Test legacy OH depth default still stops before the SiN layer."""
+        config = simulation_configuration.FrontApertureConfig(
+            aperture_shape=(3, 31, 31),
+            real_space_pixel_size=1.0,
+            aperture_thicknesses=[1.0, 1.0, 1.0],
+            aperture_layer_names=["Au", "SiN", "Co"],
+            aperture_config={
+                "apertures_type": ["OH"],
+                "apertures_radius": [4.0],
+                "apertures_center": [(0.0, 0.0)],
+                "apertures_sigma": [0.0],
+                "thickness_OH": 1.0,
+                "apertures_top_radius_factor": [1.0],
+            },
+        )
+        config.setup()
+        mask = config.return_aperture()
+
+        self.assertLess(mask[0, 15, 15], 1.0)
+        self.assertEqual(mask[1, 15, 15], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

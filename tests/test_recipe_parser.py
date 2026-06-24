@@ -139,6 +139,127 @@ class RecipeParserTests(unittest.TestCase):
         self.assertAlmostEqual(structure.layer_thicknesses[0], 10e-9)
         np.testing.assert_allclose(structure.dielectric_tensors[0], expected)
 
+    def test_tilted_layer_voxelization_adds_vacuum_and_fractional_interfaces(self) -> None:
+        """Test tilted sample voxelization with interpolated material fractions."""
+        params = material_params(
+            refractive_indices={
+                "Co": np.array([2.0 + 0.0j, 0.0j, 0.0j]),
+            }
+        )
+        structure = Structure(
+            name="tilted",
+            material_params=params,
+            sample_shape=[0, 5, 9],
+            real_space_pixel_size=1.0,
+        )
+        structure.add_layer("Co", thickness=2.0)
+        structure.mask = np.ones((1, 5, 9), dtype=float)
+        structure.magnetization = np.zeros((1, 5, 9, 3), dtype=float)
+        structure.set_sample_tilt(
+            theta=np.deg2rad(30.0),
+            axis="x",
+            voxel_size=0.5,
+            antialias_samples=3,
+        )
+
+        structure.calculate_final_dielectric_tensor(compact=False)
+        eps = structure.final_dielectric_tensor
+
+        self.assertGreater(eps.shape[0], 4)
+        self.assertEqual(len(structure.propagation_layer_thicknesses), eps.shape[0])
+        material_fraction = (eps[..., 0, 0].real - 1.0) / (2.0**2 - 1.0)
+        self.assertLess(np.min(material_fraction), 1e-12)
+        self.assertGreater(np.max(material_fraction), 1.0 - 1e-12)
+        self.assertTrue(np.any((material_fraction > 0.0) & (material_fraction < 1.0)))
+
+    def test_zero_tilt_keeps_original_compact_path(self) -> None:
+        """Test theta=0 does not expand the layer stack."""
+        params = material_params(
+            refractive_indices={
+                "Co": np.array([2.0 + 0.0j, 0.0j, 0.0j]),
+            }
+        )
+        structure = Structure(
+            name="untilted",
+            material_params=params,
+            sample_shape=[0, 3, 3],
+            real_space_pixel_size=1.0,
+        )
+        structure.add_layer("Co", thickness=2.0)
+        structure.mask = np.ones((1, 3, 3), dtype=float)
+        structure.magnetization = np.zeros((1, 3, 3, 3), dtype=float)
+        structure.set_sample_tilt(theta=0.0)
+
+        structure.calculate_final_dielectric_tensor(compact=True)
+
+        self.assertEqual(structure.final_dielectric_tensor.shape[0], 1)
+        self.assertEqual(structure.propagation_layer_thicknesses, [2.0])
+
+    def test_zero_tilt_fixed_volume_uses_tilted_magnetization(self) -> None:
+        """Test theta=0 still supports a fixed simulation z volume."""
+        params = material_params(
+            refractive_indices={
+                "Co": np.array([2.0 + 0.0j, 0.5 + 0.0j, 0.0j]),
+            }
+        )
+        structure = Structure(
+            name="untilted-fixed-volume",
+            material_params=params,
+            sample_shape=[0, 3, 4],
+            real_space_pixel_size=1.0,
+        )
+        structure.add_layer("Co", thickness=2.0)
+        structure.mask = np.ones((1, 3, 4), dtype=float)
+        structure.magnetization = np.zeros((1, 3, 4, 3), dtype=float)
+        structure.set_sample_tilt(
+            theta=0.0,
+            voxel_size=1.0,
+            simulation_z_extent=6.0,
+        )
+        _, film_x, film_depth = structure.tilted_material_coordinate_grids()
+        structure.tilted_magnetization = np.zeros((*film_x.shape, 3), dtype=float)
+        structure.tilted_magnetization[..., 2] = np.sign(film_x)
+
+        structure.calculate_final_scalar_refractive_index("CR", compact=False)
+        n_stack = structure.final_scalar_refractive_index
+
+        self.assertEqual(n_stack.shape, (6, 3, 4))
+        self.assertEqual(len(structure.propagation_layer_thicknesses), 6)
+        self.assertTrue(np.any(np.isclose(n_stack.real, 1.0)))
+        material_slice = np.argmin(np.abs(film_depth[:, 0, 0] - 1.0))
+        self.assertLess(np.min(n_stack[material_slice].real), 2.0)
+        self.assertGreater(np.max(n_stack[material_slice].real), 2.0)
+
+    def test_ninety_degree_tilt_requires_and_uses_fixed_volume(self) -> None:
+        """Test that 90 degree tilt works with an explicit simulation volume."""
+        params = material_params(
+            refractive_indices={
+                "Co": np.array([2.0 + 0.0j, 0.0j, 0.0j]),
+            }
+        )
+        structure = Structure(
+            name="vertical-film",
+            material_params=params,
+            sample_shape=[0, 3, 7],
+            real_space_pixel_size=1.0,
+        )
+        structure.add_layer("Co", thickness=3.0)
+        structure.mask = np.ones((1, 3, 7), dtype=float)
+        structure.magnetization = np.zeros((1, 3, 7, 3), dtype=float)
+        structure.set_sample_tilt(
+            theta=np.pi / 2,
+            axis="x",
+            voxel_size=1.0,
+            simulation_z_extent=5.0,
+        )
+
+        structure.calculate_final_scalar_refractive_index("CR", compact=False)
+        n_stack = structure.final_scalar_refractive_index
+
+        self.assertEqual(n_stack.shape, (5, 3, 7))
+        self.assertTrue(np.any(np.isclose(n_stack.real, 2.0)))
+        self.assertTrue(np.any(np.isclose(n_stack.real, 1.0)))
+
 
 if __name__ == "__main__":
     unittest.main()
