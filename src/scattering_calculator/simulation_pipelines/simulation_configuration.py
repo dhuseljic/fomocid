@@ -13,7 +13,11 @@ import matplotlib.pyplot as plt
 from scattering_calculator.experimental_conditions import detector, light_beam
 from scattering_calculator.sample_generator import pattern_generator
 from scattering_calculator.sample_generator import structures
-from scattering_calculator.beam_propagator import Jones_propagator, simple_propagation
+from scattering_calculator.beam_propagator import (
+    Jones_propagator,
+    Stokes_propagator,
+    simple_propagation,
+)
 
 
 class _ConfigMixin:
@@ -484,11 +488,16 @@ class DetectorConfig(_ConfigMixin):
         self.wavefront = self.propagator.return_wavefront()
         exit_wavefield = self.propagator.return_scalar_wavefield()
         farfield_exit_wave = getattr(
-            self.wavefront,
-            "exit_wave_for_farfield",
-            self.wavefront.exit_wave,
+            self.wavefront, "exit_wave_for_farfield", self.wavefront.exit_wave
         )
-        if farfield_exit_wave is self.wavefront.exit_wave:
+        if hasattr(self.wavefront, "exit_stokes_for_farfield"):
+            # Stokes I already is intensity.  Squaring all four Stokes
+            # components would have the wrong units and over-count polarized
+            # light, so normalization uses only the first component.
+            exit_intensity = np.sum(
+                self.wavefront.exit_stokes_for_farfield[..., 0]
+            )
+        elif farfield_exit_wave is self.wavefront.exit_wave:
             exit_intensity = np.sum(np.abs(exit_wavefield) ** 2)
         else:
             exit_intensity = np.sum(np.abs(farfield_exit_wave) ** 2)
@@ -1768,11 +1777,13 @@ class SamplePropagatorConfig(_ConfigMixin):
         optical interaction stack for propagation.
     IlluminationConfig : IlluminationConfig
         Illumination configuration used to define the incident beam properties.
-    propagator_method : {"Jones", "Scalar"} or None
+    propagator_method : {"Jones", "Scalar", "Stokes"} or None
         Which beam propagation method to use. ``"Jones"`` consumes the full
         dielectric tensor stack. ``"Scalar"`` consumes a complex
         refractive-index stack built directly from the material database
-        channels for the selected polarization. ``None`` produces an empty
+        channels for the selected polarization. ``"Stokes"`` exposes the
+        Mueller--Stokes polarization state while retaining a coherent carrier
+        for physically correct diffraction. ``None`` produces an empty
         propagator that returns the input wavefield unchanged.
     propagator_config : dict
         Reserved for future extension.
@@ -1780,7 +1791,7 @@ class SamplePropagatorConfig(_ConfigMixin):
 
     SampleConfig: SampleConfig
     IlluminationConfig: IlluminationConfig
-    propagator_method: Literal["Jones", "Scalar"] | None = "Jones"
+    propagator_method: Literal["Jones", "Scalar", "Stokes"] | None = "Jones"
     propagator_config: dict = field(default_factory=dict)
 
     def _illumination_jones_for_shape(self, shape: tuple[int, int]) -> np.ndarray:
@@ -1896,6 +1907,8 @@ class SamplePropagatorConfig(_ConfigMixin):
         """
         if self.propagator_method == "Jones":
             self.wavefront = self._jones_propagation()
+        elif self.propagator_method == "Stokes":
+            self.wavefront = self._stokes_propagation()
         elif self.propagator_method == "Scalar":
             self.wavefront = self._scalar_propagation()
         elif self.propagator_method is None:
@@ -1975,6 +1988,83 @@ class SamplePropagatorConfig(_ConfigMixin):
             farfield_background_jones=farfield_background_jones,
         )
         return wavefront
+
+    def _stokes_propagation(self):
+        """Propagate with deterministic Mueller--Stokes polarization optics.
+
+        Spatial diffraction needs phase correlations that a local Stokes image
+        does not contain.  The Stokes propagator therefore carries coherent
+        mode fields internally and converts every published plane to
+        ``[I,Q,U,V]``.  Supplying ``"input_stokes"`` in ``propagator_config``
+        enables partially polarized, uniform incident beams for Stokes runs.
+
+        Parameters
+        ----------
+        None
+            This method uses the stored sample and illumination configuration.
+
+        Returns
+        -------
+        Stokes_propagator.stokes_wavefronts
+            Configured Mueller--Stokes wavefront.
+        """
+        farfield_oversampling = int(
+            self.propagator_config.get("farfield_oversampling", 1)
+        )
+        farfield_background_jones = None
+        if farfield_oversampling > 1:
+            ny, nx = self.IlluminationConfig.shape
+            farfield_background_jones = self._background_exit_jones(
+                (ny * farfield_oversampling, nx * farfield_oversampling)
+            )
+
+        return Stokes_propagator.stokes_wavefronts(
+            beam_parameters=self.IlluminationConfig.beam_params,
+            eps_stack=self.SampleConfig.sample_structure.final_dielectric_tensor,
+            layer_thicknesses=(
+                self.SampleConfig.sample_structure.propagation_layer_thicknesses
+            ),
+            real_space_pixel_size=self.SampleConfig.real_space_pixel_size,
+            E_in=self.IlluminationConfig.illumination.illumination_jones,
+            aperture_support_regions=getattr(
+                self.SampleConfig.sample_structure, "aperture_support_regions", None
+            ),
+            propagate=bool(self.propagator_config.get("propagate", False)),
+            jones_apply_zero_order_phase=bool(
+                self.propagator_config.get("jones_apply_zero_order_phase", True)
+            ),
+            propagation_padding_px=int(
+                self.propagator_config.get("propagation_padding_px", 0)
+            ),
+            propagation_padding_mode=str(
+                self.propagator_config.get("propagation_padding_mode", "edge")
+            ),
+            propagation_absorber_width_px=int(
+                self.propagator_config.get("propagation_absorber_width_px", 0)
+            ),
+            propagation_absorber_strength=float(
+                self.propagator_config.get("propagation_absorber_strength", 0.0)
+            ),
+            propagation_absorber_profile=str(
+                self.propagator_config.get("propagation_absorber_profile", "cosine")
+            ),
+            multislice_propagation_roi=bool(
+                self.propagator_config.get("multislice_propagation_roi", False)
+            ),
+            multislice_propagation_roi_padding_px=int(
+                self.propagator_config.get(
+                    "multislice_propagation_roi_padding_px", 0
+                )
+            ),
+            multislice_propagation_roi_merge_overlaps=bool(
+                self.propagator_config.get(
+                    "multislice_propagation_roi_merge_overlaps", True
+                )
+            ),
+            farfield_oversampling=farfield_oversampling,
+            farfield_background_jones=farfield_background_jones,
+            input_stokes=self.propagator_config.get("input_stokes"),
+        )
 
     def _scalar_propagation(self):
         """Propagate the configured beam using the scalar eigenmode approximation."""
@@ -2082,7 +2172,16 @@ class SamplePropagatorConfig(_ConfigMixin):
         result : np.ndarray
             Return value produced by the function.
         """
-        if self.wavefront.exit_wave.ndim == 2:
+        if self.propagator_method == "Stokes":
+            # A Stokes vector intentionally has no scalar optical phase.  For
+            # legacy exit-wave storage, return the coherent carrier retained by
+            # the Stokes propagator; callers needing polarization should use
+            # wavefront.exit_stokes directly.
+            carrier = self.wavefront.exit_jones
+            amp = np.sqrt(np.maximum(self.wavefront.exit_stokes[..., 0], 0.0))
+            phase = np.angle(carrier[..., 0])
+            self.exit_wavefield = amp * np.exp(1j * phase)
+        elif self.wavefront.exit_wave.ndim == 2:
             self.exit_wavefield = self.wavefront.exit_wave
         else:
             amp = (

@@ -284,7 +284,7 @@ class HologramPipelineConfig:
         illumination multiplied by the uniform background stack and ROI
         free-space factors, then paste the simulated central exit wave into the
         middle. Default ``1``.
-    propagator_method : {"Jones", "Scalar"}
+    propagator_method : {"Jones", "Scalar", "Stokes"}
         Light-matter interaction method. ``"Jones"`` uses the full
         two-component Jones matrix formalism. ``"Scalar"`` skips dielectric
         tensor construction, builds a complex refractive-index stack directly
@@ -784,7 +784,7 @@ class HologramPipeline:
             use_roi and magnetic_pattern_use_roi
         )
         beam_direction = None
-        if getattr(propagator_config, "propagator_method", None) == "Jones":
+        if getattr(propagator_config, "propagator_method", None) in ("Jones", "Stokes"):
             beam_direction = _beam_direction_for_projected_jones(
                 illumination_values.get("alpha_beam", 0.0)
             )

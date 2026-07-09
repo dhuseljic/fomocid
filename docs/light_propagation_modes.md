@@ -37,6 +37,58 @@ k0 = 2 pi / lambda
 
 where `lambda` is the x-ray wavelength.
 
+## Mueller--Stokes Mode
+
+Set `propagator_method="Stokes"` to expose polarization as Stokes vectors in
+the order `[I, Q, U, V]`. The convention matches the rest of this project:
+`CR = [1, -i] / sqrt(2)` maps to `[1, 0, 0, 1]`, so right-circular light has
+positive `V`.
+
+The returned propagator provides `input_stokes`, `exit_stokes`, and
+`detector_stokes`, each with shape `(Ny, Nx, 4)`. Its hologram is the detector
+plane `I` component. Utility functions in
+`scattering_calculator.beam_propagator.Stokes_propagator` convert Jones
+matrices to Mueller matrices, apply arbitrary Mueller matrices (including
+depolarizers), convert Stokes vectors to and from coherency matrices, and
+validate physical Stokes vectors.
+
+By default the Stokes propagator uses the same pure Jones polarization as the
+configured illumination. For a genuinely partially polarized incident beam,
+pass a uniform physical Stokes vector through the propagator configuration:
+
+```python
+SamplePropagatorConfig(
+    ...,
+    propagator_method="Stokes",
+    propagator_config={
+        "input_stokes": [1.0, 0.0, 0.0, 0.7],  # 70% CR + 30% unpolarized
+    },
+)
+```
+
+The illumination image still supplies the spatial intensity envelope; the
+explicit Stokes vector supplies the polarization state.
+
+For magnetic helicity-difference holography with partially polarized beams,
+compare matched helicity pairs at the same degree of polarization. For example,
+to study a 70% circularly polarized beam, propagate both
+`CR = [1.0, 0.0, 0.0, +0.7]` and `CL = [1.0, 0.0, 0.0, -0.7]`, then form the
+hologram difference `CL - CR` before the FTH reconstruction. Subtracting an
+unpolarized hologram instead changes the physical question and can hide the
+helicity scaling.
+
+A local Stokes vector contains polarization coherence but not the phase
+relationship between different pixels. Directly Fourier-transforming its four
+components would therefore not produce a physical diffraction pattern. The
+Stokes propagator retains coherent Jones carriers internally for free-space
+and Fraunhofer propagation. A pure input uses one carrier; a partially
+polarized input is decomposed into orthogonal coherent modes of its coherency
+matrix and the resulting Stokes fields are summed incoherently. For the
+deterministic dielectric tensors currently used by the sample model, this is
+the corresponding Mueller transformation at each plane. Explicit local
+depolarizing elements can also be represented by the standalone
+`apply_mueller` operation.
+
 ## No Multislice Propagation
 
 When `propagate=False`, the simulator still applies the material interaction in
