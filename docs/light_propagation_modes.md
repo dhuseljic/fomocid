@@ -44,6 +44,104 @@ the order `[I, Q, U, V]`. The convention matches the rest of this project:
 `CR = [1, -i] / sqrt(2)` maps to `[1, 0, 0, 1]`, so right-circular light has
 positive `V`.
 
+### Mueller--Stokes Theory
+
+The Jones formalism represents a fully coherent transverse electric field by
+two complex amplitudes:
+
+```text
+E = [Ex, Ey].
+```
+
+From this field one can build the Stokes vector
+
+```text
+S = [I, Q, U, V],
+```
+
+where
+
+```text
+I = |Ex|^2 + |Ey|^2
+Q = |Ex|^2 - |Ey|^2
+U = 2 Re(Ex Ey*)
+V = 2 Im(Ex Ey*)
+```
+
+with the sign of `V` chosen as described above. `I` is total intensity, `Q`
+measures horizontal-versus-vertical linear polarization, `U` measures
+`+45°`-versus-`-45°` linear polarization, and `V` measures right-versus-left
+circular polarization. A pure Jones state always satisfies
+
+```text
+I^2 = Q^2 + U^2 + V^2,
+```
+
+while partially polarized light satisfies
+
+```text
+I^2 >= Q^2 + U^2 + V^2.
+```
+
+The degree of polarization is therefore
+
+```text
+DoP = sqrt(Q^2 + U^2 + V^2) / I.
+```
+
+This is the first reason to use Stokes vectors: they can represent pure,
+partially polarized, and unpolarized light with the same four real numbers.
+For example,
+
+```text
+[1, 0, 0, +1]  pure CR
+[1, 0, 0, -1]  pure CL
+[1, 0, 0, +0.7]  70% CR plus 30% unpolarized light
+[1, 0, 0, 0]  unpolarized light
+```
+
+Mathematically, a Stokes vector is equivalent to a `2 x 2` polarization
+coherency matrix:
+
+```text
+C = 1/2 (I sigma_0 + Q sigma_1 + U sigma_2 + V sigma_3),
+```
+
+where the `sigma_i` are the Hermitian basis matrices used by the code. A
+physical Stokes vector is exactly one whose coherency matrix is positive
+semidefinite. This is what `validate_stokes` checks.
+
+A Mueller matrix is a real `4 x 4` matrix that acts linearly on Stokes vectors:
+
+```text
+S_out = M S_in.
+```
+
+If the optical element is deterministic and non-depolarizing, the Mueller
+matrix can be derived from a Jones matrix `J`:
+
+```text
+C_out = J C_in J†
+M_ij = 1/2 Tr(sigma_i J sigma_j J†).
+```
+
+The dielectric tensor slices in the current propagation model are of this
+deterministic type. In that case, Jones and Mueller--Stokes describe the same
+local polarization transformation for pure inputs, while Stokes additionally
+exposes the polarization state as `[I, Q, U, V]` and can carry mixed input
+states through coherent-mode decomposition.
+
+There is one important propagation subtlety. A Stokes vector describes
+polarization coherence at a single transverse point, but it does not store the
+complex phase relationships between different pixels. Those spatial phase
+relationships are exactly what produces diffraction and holographic
+interference. For this reason, the simulator does not Fourier-transform the
+four Stokes components directly. Instead, it propagates one or more coherent
+Jones carriers through the sample and free space, then sums their Stokes
+representations incoherently. A pure state uses one carrier; a partially
+polarized uniform input is diagonalized into orthogonal coherent modes of its
+coherency matrix.
+
 The returned propagator provides `input_stokes`, `exit_stokes`, and
 `detector_stokes`, each with shape `(Ny, Nx, 4)`. Its hologram is the detector
 plane `I` component. Utility functions in
