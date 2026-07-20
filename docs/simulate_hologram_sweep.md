@@ -435,6 +435,13 @@ Large final stripes therefore use a smaller generated source field when
 possible, while still regenerating a larger field if the measured FFT stripe
 width would make the scaled image too small to crop safely.
 
+Adaptive resizing is bounded by `max_auto_size` per axis and
+`max_auto_pixels` in total. The sweep defaults both limits to a 2048-by-2048
+source field. If an anomalous FFT stripe-width estimate would exceed either
+limit, pattern generation raises a descriptive `ValueError` before allocating
+the oversized FFT arrays. Increase these limits explicitly only when the
+larger allocation is intentional and the worker memory budget supports it.
+
 The sweep also caps the random OH size relative to the magnetic texture length:
 
 ```python

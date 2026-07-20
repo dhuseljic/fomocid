@@ -20,6 +20,41 @@ from scattering_calculator.simulation_pipelines import simulation_configuration
 
 
 class BinaryLabyrinthAutoSizeTests(unittest.TestCase):
+    def test_auto_size_rejects_pathological_fft_resize(self) -> None:
+        """An anomalous measured width must fail before a huge second FFT."""
+        calls: list[tuple[int, int]] = []
+
+        def fake_generate_binary(**kwargs):
+            height = int(kwargs["H"])
+            width = int(kwargs["W"])
+            calls.append((height, width))
+            # A nearly constant field makes the mocked width estimate below
+            # the only driver of the adaptive resize.
+            continuous = np.zeros((1, height, width), dtype=float)
+            return None, None, continuous, {"H": height, "W": width}
+
+        with (
+            mock.patch.object(
+                pattern_generator, "generate_binary", fake_generate_binary
+            ),
+            mock.patch.object(
+                pattern_generator,
+                "_estimate_labyrinth_stripe_width_fft",
+                return_value=(1_000_000.0, 2_000_000.0),
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "unsafe source field"):
+                pattern_generator.create_binary_labyrinth_pattern(
+                    (300, 300),
+                    stripe_width=10,
+                    n_steps=1,
+                    auto_size=True,
+                    max_auto_size=512,
+                    max_auto_pixels=512**2,
+                )
+
+        self.assertEqual(len(calls), 1)
+
     def test_auto_size_shrinks_generated_field_for_large_target_stripes(self) -> None:
         """Test that auto size shrinks generated field for large target stripes.
 

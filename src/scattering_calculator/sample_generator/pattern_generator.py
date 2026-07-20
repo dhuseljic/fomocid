@@ -1303,6 +1303,8 @@ def create_binary_labyrinth_pattern(
     crop_margin: float | None = None,
     min_auto_size: int = 32,
     auto_size_overshoot: float = 1.35,
+    max_auto_size: int | None = 2048,
+    max_auto_pixels: int | None = 4_194_304,
     plot: bool = False,
     real_space_pixel_size: float = 1,
     batch: int = 1,
@@ -1352,6 +1354,12 @@ def create_binary_labyrinth_pattern(
         Input value for ``min_auto_size``.
     auto_size_overshoot : float
         Input value for ``auto_size_overshoot``.
+    max_auto_size : int or None
+        Maximum height or width permitted for an automatically sized source
+        field. ``None`` disables the per-axis limit.
+    max_auto_pixels : int or None
+        Maximum total pixels permitted for an automatically sized source
+        field. ``None`` disables the total-pixel limit.
     plot : bool
         Input value for ``plot``.
     real_space_pixel_size : float
@@ -1393,6 +1401,33 @@ def create_binary_labyrinth_pattern(
     requested_W = int(W)
     min_auto_size = max(8, int(min_auto_size))
     auto_size_overshoot = max(1.0, float(auto_size_overshoot))
+    if max_auto_size is not None and int(max_auto_size) <= 0:
+        raise ValueError("max_auto_size must be positive or None")
+    if max_auto_pixels is not None and int(max_auto_pixels) <= 0:
+        raise ValueError("max_auto_pixels must be positive or None")
+    max_auto_size = None if max_auto_size is None else int(max_auto_size)
+    max_auto_pixels = None if max_auto_pixels is None else int(max_auto_pixels)
+
+    def _validate_auto_shape(height: int, width: int, *, reason: str) -> None:
+        """Reject pathological adaptive sizes before FFT arrays are allocated."""
+        if not auto_size:
+            return
+        exceeds_axis = max_auto_size is not None and (
+            height > max_auto_size or width > max_auto_size
+        )
+        exceeds_pixels = (
+            max_auto_pixels is not None and height * width > max_auto_pixels
+        )
+        if exceeds_axis or exceeds_pixels:
+            raise ValueError(
+                "Labyrinth adaptive sizing requested an unsafe source field "
+                f"of {height}x{width} pixels ({reason}). Limits are "
+                f"max_auto_size={max_auto_size!r} and "
+                f"max_auto_pixels={max_auto_pixels!r}. This usually means "
+                "the measured FFT stripe width produced a pathological "
+                "rescale factor; adjust the sampled geometry or explicitly "
+                "raise the limits if the allocation is intentional."
+            )
     margin = crop_margin
     if margin is None:
         margin = max(8.0, 2.0 * float(stripe_width))
@@ -1417,6 +1452,8 @@ def create_binary_labyrinth_pattern(
     else:
         current_H = requested_H
         current_W = requested_W
+
+    _validate_auto_shape(current_H, current_W, reason="initial estimate")
 
     meta = {}
     base = None
@@ -1464,12 +1501,22 @@ def create_binary_labyrinth_pattern(
             break
 
         if large_enough and oversized:
+            _validate_auto_shape(
+                next_H, next_W, reason=f"measured rescale factor {scale:.6g}"
+            )
             current_H = next_H
             current_W = next_W
             resized_after_measurement = True
         else:
-            current_H = max(current_H + 1, next_H)
-            current_W = max(current_W + 1, next_W)
+            proposed_H = max(current_H + 1, next_H)
+            proposed_W = max(current_W + 1, next_W)
+            _validate_auto_shape(
+                proposed_H,
+                proposed_W,
+                reason=f"measured rescale factor {scale:.6g}",
+            )
+            current_H = proposed_H
+            current_W = proposed_W
 
     if base is None:
         raise RuntimeError("Labyrinth generator did not return a pattern.")
@@ -1521,6 +1568,8 @@ def create_binary_labyrinth_pattern(
             "auto_size": bool(auto_size),
             "min_auto_size": min_auto_size,
             "auto_size_overshoot": auto_size_overshoot,
+            "max_auto_size": -1 if max_auto_size is None else max_auto_size,
+            "max_auto_pixels": -1 if max_auto_pixels is None else max_auto_pixels,
             "estimated_source_stripe_width_px": estimated_source_width,
             "crop_margin_px": margin,
             "binarization_threshold": threshold,

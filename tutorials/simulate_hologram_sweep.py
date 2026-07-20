@@ -171,6 +171,9 @@ labyrinth_config = {
     "domain_conversion": "soft",
     "softness": 1.0,
     "auto_size": True,
+    # Fail before allocating a pathological FFT field after adaptive sizing.
+    "max_auto_size": 2048,
+    "max_auto_pixels": 2048**2,
     "crop_margin": None,
 }
 pattern_config = {
