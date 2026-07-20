@@ -91,6 +91,7 @@ diagnostics.
 ├── configs/                # Shipped tutorial and smoke-test YAML configs
 ├── docs/                   # Canonical docs, config reference, and notebooks
 ├── src/fomocid/            # Shared package for data, SSL, eval, analysis, utils
+├── src/scattering_calculator/ # Coherent-scattering simulator and pipelines
 ├── tests/                  # Smoke tests and repository contract checks
 └── tutorials/              # Runnable CLIs and coherent-scattering notebooks
 ```
@@ -114,3 +115,8 @@ This is a source-only repository. Built docs, checkpoints, cached artifacts, `eg
 - Smoke configs use fake data so CI does not depend on benchmark downloads.
 - `configs/mnist_mae.yaml` is the lightest real-dataset MAE example in the repo.
 - Coherent-scattering notebooks are intentionally focused by topic. Use the map in [docs/coherent_scattering_tutorials.md](docs/coherent_scattering_tutorials.md) to pick the smallest notebook for the concept you want to learn.
+- Labyrinth-pattern adaptive FFT sizing is bounded by default to 2048 pixels
+  per axis and 4,194,304 pixels in total, preventing anomalous stripe-width
+  estimates from triggering unbounded worker-memory allocations. See the
+  [hologram sweep documentation](docs/simulate_hologram_sweep.md#pattern-size-parameter)
+  for configuration and failure behavior.

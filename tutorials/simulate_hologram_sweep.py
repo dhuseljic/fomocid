@@ -723,7 +723,7 @@ ranges = HologramPipelineRanges(
         # conversion between detector counts and photon events.
         "counts_per_photon": Uniform(80, 220),
     },
-    # Pattern-type mix: 40% labyrinth, 40% skyrmion lattice, 20% saturated.
+    # Pattern-type mix: 50% labyrinth, 37.5% skyrmion lattice, 12.5% saturated.
     pattern_type=Choice(
         (
             "binary_labyrinth_pattern",

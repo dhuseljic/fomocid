@@ -397,7 +397,6 @@ pattern_type=Choice(
         "binary_labyrinth_pattern",
         "binary_labyrinth_pattern",
         "binary_labyrinth_pattern",
-        "binary_labyrinth_pattern",
         "disordered_skyrmion_lattice_pattern",
         "disordered_skyrmion_lattice_pattern",
         "disordered_skyrmion_lattice_pattern",
@@ -406,8 +405,8 @@ pattern_type=Choice(
 )
 ```
 
-That is 5/9 labyrinth, 3/9 skyrmions, and 1/9 saturated. Add or remove
-repeated entries to change the mixture.
+That is 4/8 labyrinth, 3/8 skyrmions, and 1/8 saturated. Add or remove repeated
+entries to change the mixture.
 
 `sigma` controls Gaussian domain-wall smoothing and is specified in metres in
 pipeline configurations. `MagneticPatternConfig` converts it to pixels before
@@ -421,7 +420,7 @@ labyrinth, stripe, and image-based generators.
 and aperture range logic:
 
 ```python
-stripe_width = Uniform(10e-9, 500e-9).sample()
+stripe_width = Uniform(30e-9, 500e-9).sample()
 ```
 
 For labyrinth and stripe patterns, it means stripe/domain width. For skyrmions,
@@ -750,7 +749,7 @@ values actually used after applying sweep ranges and compatibility aliases:
 │   ├── detected                     # noisy/artifact-affected hologram
 │   └── detected_no_beamstop         # optional
 ├── CL/                              # same datasets for circular-left
-├── beamstop_mask                    # detector-space beamstop transmission
+├── beamstop_mask                    # detector-space blocked fraction (1 = blocked)
 ├── supportmask                      # FTH aperture support
 ├── magnetic_pattern_oh              # magnetic pattern visible through the OH
 └── metadata/
@@ -986,6 +985,22 @@ with h5py.File(path, "r") as h5:
 ```
 
 Use `np.abs(recon)` for amplitude or `np.angle(recon)` for phase.
+
+The full transformed array is the Patterson map. An FTH image is obtained by
+cropping an object/reference-hole cross-correlation lobe at the displacement
+set by the reference-hole position; the bright central autocorrelation is not
+the magnetic reconstruction. Keep that distinction when evaluating downstream
+masking or reconstruction algorithms.
+
+`beamstop_mask` is a detector-plane obstruction map: values near `1` are
+blocked and its transmission is `1 - beamstop_mask`. Because `CR/detected` and
+`CL/detected` already include this shadow, applying a predicted beamstop mask to
+those arrays again is mostly redundant. To compare a predicted mask with the
+ideal mask on a practical FTH task, apply both masks separately to the same
+`CR/detected_no_beamstop - CL/detected_no_beamstop` input, reconstruct both,
+crop the same cross-correlation lobe, and compare with shared display limits or
+a quantitative error metric. Do not independently percentile-normalize the two
+images when judging their difference.
 
 ## Common Edits
 
