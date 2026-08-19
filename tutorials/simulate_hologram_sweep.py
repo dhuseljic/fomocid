@@ -22,8 +22,8 @@ from scattering_calculator.simulation_pipelines.pipelines import (
 )
 from scattering_calculator.sample_generator import structures
 from scattering_calculator.sample_generator.domain_phase_space import (
-    analyze_domain_phase_space,
     balanced_state_schedule,
+    load_or_analyze_domain_phase_space,
     sample_verified_morphology_region,
 )
 
@@ -157,6 +157,11 @@ pattern_bubble_max_eccentricity = 0.85
 pattern_bubble_min_circularity = 0.45
 # The same grid and classifier used by tutorial_binary_domain_phase_space.ipynb.
 pattern_phase_space_grid_size = 12
+pattern_phase_space_cache = output_folder / "binary_domain_phase_space_v1.npz"
+# Very small k0 combined with the independently sampled 30--500 nm physical
+# stripe width can demand >10k x >10k adaptive FFT fields. Keep non-saturated
+# production samples in the resolved high-k0 part of the analyzed space.
+pattern_production_k0_bounds = (1.0, 1.1)
 labyrinth_config = {
     "batch": 1,
     "H": 100,
@@ -188,7 +193,8 @@ pattern_config.update(labyrinth_config)
 # Analyze the inexpensive 128 x 128 generator once. The resulting rich regions
 # guide the much more expensive hologram simulations below.
 phase_space_rng = np.random.default_rng(pipeline_random_seed)
-phase_space = analyze_domain_phase_space(
+phase_space = load_or_analyze_domain_phase_space(
+    pattern_phase_space_cache,
     k0_values=np.linspace(*pattern_k0_bounds, pattern_phase_space_grid_size),
     eps_values=np.linspace(*pattern_eps_bounds, pattern_phase_space_grid_size),
     target_mean_values=np.linspace(
@@ -198,6 +204,7 @@ phase_space = analyze_domain_phase_space(
     max_eccentricity=pattern_bubble_max_eccentricity,
     min_circularity=pattern_bubble_min_circularity,
     max_hole_area=pattern_max_hole_area_px,
+    verbose=True,
 )
 state_schedule = balanced_state_schedule(nr_simulations, phase_space_rng)
 state_schedule_iterator = iter(state_schedule)
@@ -390,6 +397,11 @@ def random_pattern_config(params):
             max_eccentricity=pattern_bubble_max_eccentricity,
             min_circularity=pattern_bubble_min_circularity,
             max_hole_area=pattern_max_hole_area_px,
+            coordinate_bounds={
+                "k0": pattern_production_k0_bounds,
+                "eps": pattern_eps_bounds,
+                "target_mean": pattern_target_mean_bounds,
+            },
         )
     config.update(coordinates)
     config["requested_state"] = target_state

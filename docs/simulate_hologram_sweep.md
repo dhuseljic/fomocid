@@ -406,6 +406,19 @@ third points from bubble-rich cells. Counts differ by at most one when the
 total is not divisible by three. Samples within a rich cell are continuous, so
 they are not restricted to the original grid coordinates.
 
+For production holograms, non-saturated samples use the classified
+`k0=1.0..1.1` portion of the map. Lower `k0` values can be valid in the
+dimensionless tutorial but, when combined with the sweep's independently
+sampled 30--500 nm physical stripe width, can require unsafe intermediate FFT
+fields larger than 10,000 pixels per axis. Saturated samples do not resize and
+may still use the full `k0` range.
+
+The classified map is cached as
+`Data/hologram_sweep/binary_domain_phase_space_v1.npz`. Later sweep runs load
+that file instead of repeating the scan. It is recomputed automatically only
+when the grid or morphology-analysis settings change, or when the cache is
+missing or unreadable.
+
 The requested quota is stored in
 `sample/magnetic_pattern/pattern_config/requested_state`. Stripe, bubble,
 mixed, and saturated labels are still measured independently from the
