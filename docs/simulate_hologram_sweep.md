@@ -399,10 +399,19 @@ pattern_eps_bounds = (0.1, 1.2)
 pattern_target_mean_bounds = (-1.0, 1.0)
 ```
 
-`k0`, `eps`, and `target_mean` are sampled continuously and passed into the
-binary-domain evolution. Stripe, bubble, mixed, and saturated labels are
-therefore measured from the generated result rather than selected in advance.
-The classification is performed only inside the object-hole field of view.
+At startup, the sweep classifies the same regular grid used by
+`tutorial_binary_domain_phase_space.ipynb`. It schedules approximately one
+third direct saturated states, one third points from stripe-rich cells, and one
+third points from bubble-rich cells. Counts differ by at most one when the
+total is not divisible by three. Samples within a rich cell are continuous, so
+they are not restricted to the original grid coordinates.
+
+The requested quota is stored in
+`sample/magnetic_pattern/pattern_config/requested_state`. Stripe, bubble,
+mixed, and saturated labels are still measured independently from the
+generated result inside the object-hole field of view and stored as `state`,
+`bubble_count`, and `stripe_count`. Thus an occasional phase-boundary crossover
+remains visible in the metadata.
 The sweep interprets the phase-space limits as inclusive continuous bounds.
 `target_mean=-1` and `target_mean=+1` allow either polarity to reach
 saturation.

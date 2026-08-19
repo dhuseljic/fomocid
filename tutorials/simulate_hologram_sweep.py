@@ -21,12 +21,17 @@ from scattering_calculator.simulation_pipelines.pipelines import (
     HologramPipelineRanges,
 )
 from scattering_calculator.sample_generator import structures
+from scattering_calculator.sample_generator.domain_phase_space import (
+    analyze_domain_phase_space,
+    balanced_state_schedule,
+    sample_verified_morphology_region,
+)
 
 
 #################################################################
 #### HOW MANY SIMULATIONS TO RUN? ####
 #################################################################
-nr_simulations = 3  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 7  # increase to e.g. 1000 for a full training dataset
 
 # --- Material stack ---
 recipe = "[Au(200)Cr(60)]x5/SiN(200)/Pt(10)Al(10)Co(10)"
@@ -150,6 +155,8 @@ pattern_saturation_fraction_threshold = 0.01
 pattern_classification_min_area_px = 9
 pattern_bubble_max_eccentricity = 0.85
 pattern_bubble_min_circularity = 0.45
+# The same grid and classifier used by tutorial_binary_domain_phase_space.ipynb.
+pattern_phase_space_grid_size = 12
 labyrinth_config = {
     "batch": 1,
     "H": 100,
@@ -177,6 +184,23 @@ pattern_config = {
     "sigma": sigma,
 }
 pattern_config.update(labyrinth_config)
+
+# Analyze the inexpensive 128 x 128 generator once. The resulting rich regions
+# guide the much more expensive hologram simulations below.
+phase_space_rng = np.random.default_rng(pipeline_random_seed)
+phase_space = analyze_domain_phase_space(
+    k0_values=np.linspace(*pattern_k0_bounds, pattern_phase_space_grid_size),
+    eps_values=np.linspace(*pattern_eps_bounds, pattern_phase_space_grid_size),
+    target_mean_values=np.linspace(
+        *pattern_target_mean_bounds, pattern_phase_space_grid_size
+    ),
+    min_area=pattern_classification_min_area_px,
+    max_eccentricity=pattern_bubble_max_eccentricity,
+    min_circularity=pattern_bubble_min_circularity,
+    max_hole_area=pattern_max_hole_area_px,
+)
+state_schedule = balanced_state_schedule(nr_simulations, phase_space_rng)
+state_schedule_iterator = iter(state_schedule)
 
 # --- FTH holography mask ---
 aperture_types = ["OH", "RH", "RH"]
@@ -333,7 +357,7 @@ config = HologramPipelineConfig(
 # None                — use the fixed value from HologramPipelineConfig
 
 def random_pattern_config(params):
-    """Sample one point from the binary-domain phase space.
+    """Sample a balanced saturated, stripe-rich, or bubble-rich state.
 
     Parameters
     ----------
@@ -351,14 +375,24 @@ def random_pattern_config(params):
         "sigma": Uniform(np.minimum(3e-9,0.01*stripe_width), np.maximum(3e-9,0.12 * stripe_width)).sample(),
     }
     config.update(labyrinth_config)
-    # Phase-space coordinates must override the fixed fallback values above.
-    config.update(
-        {
-            "k0": Uniform(*pattern_k0_bounds).sample(),
-            "eps": Uniform(*pattern_eps_bounds).sample(),
-            "target_mean": Uniform(*pattern_target_mean_bounds).sample(),
+    target_state = next(state_schedule_iterator)
+    if target_state == "saturated":
+        # target_mean = +/-1 takes the generator's direct saturated fast path.
+        coordinates = {
+            "k0": float(phase_space_rng.uniform(*pattern_k0_bounds)),
+            "eps": float(phase_space_rng.uniform(*pattern_eps_bounds)),
+            "target_mean": float(phase_space_rng.choice((-1.0, 1.0))),
         }
-    )
+    else:
+        coordinates = sample_verified_morphology_region(
+            phase_space, target_state, phase_space_rng,
+            min_area=pattern_classification_min_area_px,
+            max_eccentricity=pattern_bubble_max_eccentricity,
+            min_circularity=pattern_bubble_min_circularity,
+            max_hole_area=pattern_max_hole_area_px,
+        )
+    config.update(coordinates)
+    config["requested_state"] = target_state
     return config
 
 

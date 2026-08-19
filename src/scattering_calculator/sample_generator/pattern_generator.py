@@ -1348,6 +1348,7 @@ def create_binary_labyrinth_pattern(
     target_mean: float | None = None,
     saturation_fraction_threshold: float = 0.01,
     max_hole_area: int = 0,
+    requested_state: str | None = None,
     **generator_overrides,
 ) -> tuple[NDArray[np.float64], dict]:
     """Create binary labyrinth domains rescaled to a requested stripe width.
@@ -1526,6 +1527,7 @@ def create_binary_labyrinth_pattern(
             meta = dict(probe_meta)
             meta.update(
                 {
+                    "requested_state": requested_state or "unspecified",
                     "measured_stripe_width_px": 0.0,
                     "measured_period_px": 0.0,
                     "target_stripe_width_px": stripe_width,
@@ -1683,6 +1685,7 @@ def create_binary_labyrinth_pattern(
     meta = dict(meta)
     meta.update(
         {
+            "requested_state": requested_state or "unspecified",
             "measured_stripe_width_px": measured_width,
             "measured_period_px": measured_period,
             "target_stripe_width_px": stripe_width,
