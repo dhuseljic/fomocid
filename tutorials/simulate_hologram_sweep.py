@@ -137,27 +137,19 @@ beamstop_config = {
 
 
 # --- Magnetic domain pattern ---
-pattern_type = "binary_labyrinth_pattern"  # "wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", "saturated_pattern", or "image_pattern"
+pattern_type = "binary_labyrinth_pattern"
 stripe_width = 300e-9  # m
 sigma = 30e-9  # m
-angle_stripes = np.pi / 4
-waviness_amplitude = 0e-9  # ms
-waviness_scale = 0e-9  # m
-experimental_pattern_path = None  # e.g. DATA_ROOT / "Data" / "reconstruction_domains.png"
-experimental_pattern_pixel_size = None  # real-space pixel size of that reconstruction, in m
-experimental_pattern_threshold = 0.5
-experimental_pattern_invert = False
-experimental_pattern_pad_mode = "edge"
-saturated_config = {
-    "saturation": 1,
-}
-skyrmion_lattice_config = {
-    "skyrmion_density": 0.25,
-    "diameter_spread": 0.10 * stripe_width,
-    "ellipticity": (0.75, 1.35),
-    "roughness": 0.05,
-    "roughness_modes": (3, 9),
-}
+# Sample every magnetic state from one binary-domain phase space. The
+# target-mean bounds are interpreted as -1 to +1.
+pattern_k0_bounds = (0.1, 1.1)
+pattern_eps_bounds = (0.1, 1.2)
+pattern_target_mean_bounds = (-1.0, 1.0)
+pattern_max_hole_area_px = 9
+pattern_saturation_fraction_threshold = 0.01
+pattern_classification_min_area_px = 9
+pattern_bubble_max_eccentricity = 0.85
+pattern_bubble_min_circularity = 0.45
 labyrinth_config = {
     "batch": 1,
     "H": 100,
@@ -165,9 +157,13 @@ labyrinth_config = {
     "n_steps": 50,
     "region": "custom",
     "use_gpu": False,
-    "k0": 1.0,
-    "eps": 0.0,
+    "k0": 0.7,
+    "eps": 0.8,
+    "target_mean": 0.0,
     "noise_amp": 0.0,
+    "quadratic_coefficient": 0.0,
+    "max_hole_area": pattern_max_hole_area_px,
+    "saturation_fraction_threshold": pattern_saturation_fraction_threshold,
     "domain_conversion": "soft",
     "softness": 1.0,
     "auto_size": True,
@@ -180,37 +176,7 @@ pattern_config = {
     "stripe_width": stripe_width,
     "sigma": sigma,
 }
-if pattern_type == "wavy_stripe_pattern":
-    pattern_config.update(
-        {
-            "angle_stripes": angle_stripes,
-            "waviness_amplitude": waviness_amplitude,
-            "waviness_scale": waviness_scale,
-        }
-    )
-elif pattern_type == "binary_labyrinth_pattern":
-    pattern_config.update(labyrinth_config)
-elif pattern_type == "disordered_skyrmion_lattice_pattern":
-    pattern_config.update(skyrmion_lattice_config)
-elif pattern_type == "saturated_pattern":
-    pattern_config.update(saturated_config)
-elif pattern_type == "image_pattern":
-    if experimental_pattern_path is None or experimental_pattern_pixel_size is None:
-        raise ValueError(
-            "image_pattern requires experimental_pattern_path and "
-            "experimental_pattern_pixel_size."
-        )
-    pattern_config.update(
-        {
-            "image_path": str(experimental_pattern_path),
-            "image_pixel_size": experimental_pattern_pixel_size,
-            "threshold": experimental_pattern_threshold,
-            "invert": experimental_pattern_invert,
-            "pad_mode": experimental_pattern_pad_mode,
-        }
-    )
-else:
-    raise ValueError(f"Unknown pattern_type: {pattern_type}")
+pattern_config.update(labyrinth_config)
 
 # --- FTH holography mask ---
 aperture_types = ["OH", "RH", "RH"]
@@ -332,6 +298,9 @@ config = HologramPipelineConfig(
     pattern_config=pattern_config,
     use_roi=use_roi,
     magnetic_pattern_use_roi=True,
+    magnetic_pattern_classification_min_area=pattern_classification_min_area_px,
+    magnetic_pattern_bubble_max_eccentricity=pattern_bubble_max_eccentricity,
+    magnetic_pattern_bubble_min_circularity=pattern_bubble_min_circularity,
     dielectric_tensor_use_roi=dielectric_tensor_use_roi,
     dielectric_tensor_compact=dielectric_tensor_compact,
     dielectric_tensor_local_k_projection=dielectric_tensor_local_k_projection,
@@ -364,7 +333,7 @@ config = HologramPipelineConfig(
 # None                — use the fixed value from HologramPipelineConfig
 
 def random_pattern_config(params):
-    """Generate interdependent magnetic-pattern parameters in physical units.
+    """Sample one point from the binary-domain phase space.
 
     Parameters
     ----------
@@ -381,34 +350,13 @@ def random_pattern_config(params):
         "stripe_width": stripe_width,
         "sigma": Uniform(np.minimum(3e-9,0.01*stripe_width), np.maximum(3e-9,0.12 * stripe_width)).sample(),
     }
-    if params["pattern_type"] == "binary_labyrinth_pattern":
-        config.update(labyrinth_config)
-        return config
-    if params["pattern_type"] == "disordered_skyrmion_lattice_pattern":
-        ellipticity_delta = Uniform(0.1, 0.5).sample()
-        config.update(
-            {
-                "skyrmion_density": Uniform(0.1, 0.45).sample(),
-                "diameter_spread": Uniform(0.01 * stripe_width, 0.10 * stripe_width).sample(),
-                "ellipticity": (1.0 - ellipticity_delta, 1.0 + ellipticity_delta),
-                "roughness": Uniform(0.01, 0.08).sample(),
-                "roughness_modes": (3, 9),
-            }
-        )
-        return config
-    if params["pattern_type"] == "saturated_pattern":
-        config.update({"saturation": Choice((-1, 1)).sample()})
-        return config
-
-    waviness_amplitude = Uniform(0.0, 2.0 * stripe_width).sample()
-    min_waviness_scale = max(4.0 * stripe_width, 50e-9)
-    max_waviness_scale = 5.0 * stripe_width
-    waviness_scale = Uniform(min_waviness_scale, max_waviness_scale).sample()
+    config.update(labyrinth_config)
+    # Phase-space coordinates must override the fixed fallback values above.
     config.update(
         {
-            "angle_stripes": Uniform(0.0, np.pi).sample(),
-            "waviness_amplitude": waviness_amplitude,
-            "waviness_scale": waviness_scale,
+            "k0": Uniform(*pattern_k0_bounds).sample(),
+            "eps": Uniform(*pattern_eps_bounds).sample(),
+            "target_mean": Uniform(*pattern_target_mean_bounds).sample(),
         }
     )
     return config
@@ -723,19 +671,8 @@ ranges = HologramPipelineRanges(
         # conversion between detector counts and photon events.
         "counts_per_photon": Uniform(80, 220),
     },
-    # Pattern-type mix: 50% labyrinth, 37.5% skyrmion lattice, 12.5% saturated.
-    pattern_type=Choice(
-        (
-            "binary_labyrinth_pattern",
-            "binary_labyrinth_pattern",
-            "binary_labyrinth_pattern",
-            "binary_labyrinth_pattern",
-            "disordered_skyrmion_lattice_pattern",
-            "disordered_skyrmion_lattice_pattern",
-            "disordered_skyrmion_lattice_pattern",
-            "saturated_pattern",
-        )
-    ),
+    # All states come from the binary-domain k0/eps/target_mean phase space.
+    pattern_type=None,
 
     # Generate interdependent magnetic stripe parameters first.
     pattern_config=random_pattern_config,

@@ -51,6 +51,9 @@ import numpy as np
 
 from scattering_calculator.experimental_conditions import detector, light_beam
 from scattering_calculator.sample_generator import pattern_generator
+from scattering_calculator.sample_generator.domain_analysis import (
+    classify_magnetic_domains,
+)
 from scattering_calculator.simulation_pipelines.simulation_configuration import (
     BeamstopConfig,
     DetectorConfig,
@@ -209,6 +212,13 @@ class HologramPipelineConfig:
         the object hole and paste that ROI into a uniform full-field pattern.
         If ``False``, generate the magnetic pattern over the entire sample
         plane. Default ``True``.
+    magnetic_pattern_classification_min_area : int
+        Minimum connected-component area in object-hole pixels for a resolved
+        stripe or bubble. Smaller components are counted as noise.
+    magnetic_pattern_bubble_max_eccentricity : float
+        Maximum covariance eccentricity for a component to count as a bubble.
+    magnetic_pattern_bubble_min_circularity : float
+        Minimum digital circularity for a component to count as a bubble.
     dielectric_tensor_use_roi : bool
         If ``True``, compute magnetic/vacuum dielectric-tensor corrections in
         local aperture bounding boxes. If ``False``, use the full aperture
@@ -408,6 +418,9 @@ class HologramPipelineConfig:
     pattern_config_length: dict = field(default_factory=dict)
     use_roi: bool = True
     magnetic_pattern_use_roi: bool = True
+    magnetic_pattern_classification_min_area: int = 9
+    magnetic_pattern_bubble_max_eccentricity: float = 0.85
+    magnetic_pattern_bubble_min_circularity: float = 0.45
     dielectric_tensor_use_roi: bool = True
     dielectric_tensor_compact: bool = True
     dielectric_tensor_local_k_projection: bool = False
@@ -1604,6 +1617,39 @@ class HologramPipeline:
             aperture_types=("OH",),
         )
         magnetic_pattern_oh = magnetic_pattern * oh_mask
+        domain_analysis = classify_magnetic_domains(
+            magnetic_pattern,
+            analysis_mask=np.asarray(oh_mask) > 0.5,
+            min_area=cfg.magnetic_pattern_classification_min_area,
+            max_eccentricity=cfg.magnetic_pattern_bubble_max_eccentricity,
+            min_circularity=cfg.magnetic_pattern_bubble_min_circularity,
+        )
+        state = {
+            "uniform": "saturated",
+            "noise": "saturated",
+            "bubbles": "bubble",
+            "stripes": "stripe",
+            "mixed": "mixed",
+        }[domain_analysis["morphology"]]
+        metadata["sample/magnetic_pattern/state"] = state
+        metadata["sample/magnetic_pattern/bubble_count"] = domain_analysis[
+            "bubble_count"
+        ]
+        metadata["sample/magnetic_pattern/stripe_count"] = domain_analysis[
+            "stripe_count"
+        ]
+        metadata["sample/magnetic_pattern/noise_component_count"] = domain_analysis[
+            "noise_count"
+        ]
+        metadata["sample/magnetic_pattern/classification_min_area_px"] = int(
+            cfg.magnetic_pattern_classification_min_area
+        )
+        metadata["sample/magnetic_pattern/bubble_max_eccentricity"] = float(
+            cfg.magnetic_pattern_bubble_max_eccentricity
+        )
+        metadata["sample/magnetic_pattern/bubble_min_circularity"] = float(
+            cfg.magnetic_pattern_bubble_min_circularity
+        )
         if output_pattern_slices is not None:
             magnetic_pattern_oh = magnetic_pattern_oh[output_pattern_slices]
             metadata["sample/magnetic_pattern/saved_roi_y_start_px"] = (

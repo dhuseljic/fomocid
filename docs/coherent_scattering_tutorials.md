@@ -27,6 +27,7 @@ result is saved with the same canonical HDF5 structure as a scripted sweep.
 | Holography mask definition | [`tutorial_material_holography_mask_definition.ipynb`](../tutorials/tutorial_material_holography_mask_definition.ipynb) | FTH object/reference holes, 3-D aperture masks, layer-by-layer views, vertical cuts, and support masks. |
 | Illumination function | [`tutorial_illumination_function_definition.ipynb`](../tutorials/tutorial_illumination_function_definition.ipynb) | Gaussian and plane-wave illumination, beam centre/FWHM/focus distance, optional beam tilt, Jones polarization, and RGB complex-field visualization. |
 | Magnetic pattern | [`tutorial_magnetic_pattern_definition.ipynb`](../tutorials/tutorial_magnetic_pattern_definition.ipynb) | Labyrinth, stripe, skyrmion, and saturated patterns; physical `sigma` smoothing; statistics; and vector magnetization mapping. |
+| Binary-domain phase space | [`tutorial_binary_domain_phase_space.ipynb`](../tutorials/tutorial_binary_domain_phase_space.ipynb) | `k0`/`eps`/`target_mean` scans, production-matched small-hole cleanup, stripe and bubble component analysis, saturation maps, and verified continuous sampling inside the valid domain volume. |
 | Material parameters | [`tutorial_material_parameters_definition.ipynb`](../tutorials/tutorial_material_parameters_definition.ipynb) | Recipe parsing, effective layers, refractive-index channels, material stack visualization, and compact dielectric tensors. |
 | Hologram generation and artifacts | [`tutorial_hologram_generation_and_artifacts.ipynb`](../tutorials/tutorial_hologram_generation_and_artifacts.ipynb) | Ideal/detected holograms, detector artifacts, beamstop/noise effects, CR-CL/CR+CL channels, and FTH reconstruction. |
 | Propagation formalism comparison | [`tutorial_compare_propagation_formalisms.ipynb`](../tutorials/tutorial_compare_propagation_formalisms.ipynb) | Scalar, Jones, and Mueller--Stokes propagation through the same magnetic FTH sample; pure CR/CL exit waves, detector holograms, FTH reconstructions, and a Stokes-only sweep of decreasing circular polarization using matched CL-CR pairs. |
@@ -212,6 +213,10 @@ numbered sample so the stored values are always the values actually used.
 Sample-owned settings are grouped under `metadata/sample/`, including the
 master `use_roi` switch, aperture geometry, magnetic-pattern settings, and
 dielectric-tensor settings.
+Magnetic-pattern metadata also records the OH-local measured `state`
+(`stripe`, `bubble`, `mixed`, or `saturated`), `bubble_count`, `stripe_count`,
+and the component-classification thresholds. One resolved bubble is a valid
+bubble state.
 All propagation metadata is grouped under `metadata/propagator_config/`, with
 `propagator_method` first and no separate propagation group.
 

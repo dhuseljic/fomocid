@@ -15,11 +15,188 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from scattering_calculator.sample_generator import pattern_generator
+from scattering_calculator.sample_generator.domain_analysis import (
+    classify_magnetic_domains,
+)
+from scattering_calculator.sample_generator.gray_scott_generator_binary import (
+    generate as generate_binary,
+)
 from scattering_calculator.sample_generator.structures import Apertures3D
 from scattering_calculator.simulation_pipelines import simulation_configuration
 
 
+class BinaryDomainPhaseSpaceTests(unittest.TestCase):
+    def test_target_mean_changes_raw_binary_phase_fraction(self) -> None:
+        """The evolution constraint must alter occupancy before thresholding."""
+        fractions = []
+        for target_mean in (-0.4, 0.0, 0.4):
+            _, binary, continuous, _ = generate_binary(
+                batch=1,
+                H=64,
+                W=64,
+                n_steps=40,
+                region="custom",
+                use_gpu=False,
+                seed=4,
+                k0=0.7,
+                eps=0.8,
+                noise_amp=0.0,
+                target_mean=target_mean,
+            )
+            self.assertAlmostEqual(float(continuous.mean()), target_mean, places=5)
+            fractions.append(float(np.mean(binary < 0)))
+
+        self.assertGreater(fractions[0], fractions[1])
+        self.assertGreater(fractions[1], fractions[2])
+
+    def test_spatial_field_bias_suppresses_one_phase_outside_roi(self) -> None:
+        """A spatial evolution field can confine minority domains."""
+        height = width = 64
+        yy, xx = np.indices((height, width))
+        inside = (yy - height / 2) ** 2 + (xx - width / 2) ** 2 < 18**2
+        field_bias = np.where(inside, 0.0, 0.08)
+
+        _, binary, _, _ = generate_binary(
+            batch=1,
+            H=height,
+            W=width,
+            n_steps=60,
+            region="custom",
+            use_gpu=False,
+            seed=2,
+            k0=0.7,
+            eps=0.8,
+            noise_amp=0.0,
+            field_bias=field_bias,
+        )
+
+        self.assertGreater(np.mean(binary[0, inside] < 0), 0.2)
+        self.assertLess(np.mean(binary[0, ~inside] < 0), 0.1)
+
+    def test_field_bias_rejects_incompatible_shape(self) -> None:
+        with self.assertRaisesRegex(ValueError, "field_bias must be"):
+            generate_binary(
+                batch=1,
+                H=32,
+                W=32,
+                n_steps=1,
+                use_gpu=False,
+                field_bias=np.zeros((12, 12)),
+            )
+
+
+class MagneticDomainClassificationTests(unittest.TestCase):
+    def test_counts_round_minority_components_as_bubbles(self) -> None:
+        yy, xx = np.indices((96, 96))
+        pattern = np.ones((96, 96), dtype=float)
+        for center_y, center_x, radius in ((25, 25, 8), (68, 62, 10)):
+            circle = (yy - center_y) ** 2 + (xx - center_x) ** 2 <= radius**2
+            pattern[circle] = -1.0
+
+        analysis = classify_magnetic_domains(pattern)
+
+        self.assertEqual(analysis["minority_polarity"], -1)
+        self.assertEqual(analysis["bubble_count"], 2)
+        self.assertEqual(analysis["stripe_count"], 0)
+        self.assertEqual(analysis["morphology"], "bubbles")
+
+    def test_classifies_elongated_domain_as_stripe(self) -> None:
+        pattern = np.ones((64, 64), dtype=float)
+        pattern[28:36, 8:56] = -1.0
+
+        analysis = classify_magnetic_domains(pattern)
+
+        self.assertEqual(analysis["bubble_count"], 0)
+        self.assertEqual(analysis["stripe_count"], 1)
+        self.assertEqual(analysis["morphology"], "stripes")
+        self.assertGreater(
+            analysis["minority_components"][0]["eccentricity"], 0.8
+        )
+
+    def test_boundary_clipped_circle_is_not_counted_as_bubble(self) -> None:
+        yy, xx = np.indices((64, 64))
+        pattern = np.ones((64, 64), dtype=float)
+        pattern[(yy - 30) ** 2 + xx**2 <= 10**2] = -1.0
+
+        analysis = classify_magnetic_domains(pattern)
+
+        self.assertEqual(analysis["bubble_count"], 0)
+        self.assertEqual(analysis["stripe_count"], 1)
+
+    def test_binarizes_continuous_input_at_requested_threshold(self) -> None:
+        pattern = np.ones((32, 32), dtype=float)
+        pattern[10:22, 10:22] = -0.2
+
+        analysis = classify_magnetic_domains(pattern, threshold=0.5)
+
+        self.assertEqual(set(np.unique(analysis["binary_pattern"])), {-1, 1})
+        self.assertEqual(analysis["bubble_count"], 1)
+
+    def test_analysis_mask_limits_counts_to_object_hole(self) -> None:
+        yy, xx = np.indices((80, 80))
+        field_of_view = (yy - 40) ** 2 + (xx - 40) ** 2 <= 25**2
+        pattern = np.ones((80, 80), dtype=float)
+        pattern[(yy - 40) ** 2 + (xx - 40) ** 2 <= 7**2] = -1.0
+        pattern[(yy - 8) ** 2 + (xx - 8) ** 2 <= 5**2] = -1.0
+
+        analysis = classify_magnetic_domains(
+            pattern, analysis_mask=field_of_view
+        )
+
+        self.assertEqual(analysis["bubble_count"], 1)
+
+    def test_small_nested_sign_hole_is_filled(self) -> None:
+        field = -np.ones((40, 40), dtype=float)
+        field[8:32, 8:32] = 1.0
+        field[19:21, 19:21] = -1.0
+
+        cleaned = pattern_generator.fill_small_domain_holes(field, max_hole_area=4)
+
+        self.assertTrue(np.all(cleaned[19:21, 19:21] > 0))
+
+
 class BinaryLabyrinthAutoSizeTests(unittest.TestCase):
+    def test_soft_conversion_preserves_saturated_target_mean_sign(self) -> None:
+        with mock.patch.object(
+            pattern_generator,
+            "_estimate_labyrinth_stripe_width_fft",
+            side_effect=AssertionError("saturated state must skip FFT sizing"),
+        ):
+            negative, negative_meta = pattern_generator.create_binary_labyrinth_pattern(
+                (32, 32),
+                stripe_width=4,
+                sigma=1,
+                H=96,
+                W=96,
+                n_steps=30,
+                region="custom",
+                use_gpu=False,
+                seed=3,
+                k0=1.1,
+                eps=1.2,
+                target_mean=-1.0,
+            )
+        positive, _ = pattern_generator.create_binary_labyrinth_pattern(
+            (32, 32),
+            stripe_width=4,
+            sigma=1,
+            H=32,
+            W=32,
+            n_steps=10,
+            region="custom",
+            use_gpu=False,
+            seed=3,
+            k0=1.1,
+            eps=1.2,
+            target_mean=1.0,
+        )
+
+        np.testing.assert_array_equal(negative, -1.0)
+        self.assertTrue(negative_meta["saturated_shortcut"])
+        self.assertEqual(negative_meta["rescale_factor"], 1.0)
+        self.assertGreater(float(np.mean(positive)), 0.0)
+        self.assertGreater(float(np.mean(positive > 0)), 0.8)
+
     def test_auto_size_rejects_pathological_fft_resize(self) -> None:
         """An anomalous measured width must fail before a huge second FFT."""
         calls: list[tuple[int, int]] = []

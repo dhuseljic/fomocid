@@ -115,8 +115,15 @@ This is a source-only repository. Built docs, checkpoints, cached artifacts, `eg
 - Smoke configs use fake data so CI does not depend on benchmark downloads.
 - `configs/mnist_mae.yaml` is the lightest real-dataset MAE example in the repo.
 - Coherent-scattering notebooks are intentionally focused by topic. Use the map in [docs/coherent_scattering_tutorials.md](docs/coherent_scattering_tutorials.md) to pick the smallest notebook for the concept you want to learn.
+- The binary-domain phase-space notebook explores `k0`, `eps`, and
+  `target_mean`, applies the same bounded small-hole cleanup as the production
+  sweep, labels stripe/bubble/mixed/saturated states, and builds a continuous
+  sampler over coordinates containing at least one resolved domain (including
+  a single bubble).
 - Labyrinth-pattern adaptive FFT sizing is bounded by default to 2048 pixels
   per axis and 4,194,304 pixels in total, preventing anomalous stripe-width
   estimates from triggering unbounded worker-memory allocations. See the
   [hologram sweep documentation](docs/simulate_hologram_sweep.md#pattern-size-parameter)
   for configuration and failure behavior.
+- Saturated binary-domain states bypass FFT sizing and smoothing entirely and
+  return a uniform `-1` or `+1` pattern at the requested output shape.

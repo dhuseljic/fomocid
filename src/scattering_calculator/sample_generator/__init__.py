@@ -7,6 +7,7 @@ from .gray_scott_generator import (
     generate,
     sample_fk,
 )
+from .domain_analysis import DomainComponent, classify_magnetic_domains
 from .pattern_generator import (
     create_lattice,
     create_binary_labyrinth_pattern,
@@ -16,6 +17,7 @@ from .pattern_generator import (
     create_skyrmion_pattern,
     create_stripe_pattern,
     create_wavy_stripe_pattern,
+    fill_small_domain_holes,
     map_magnetization_to_3d,
     skyrmions_on_lattice,
 )
@@ -34,6 +36,7 @@ from scattering_calculator.database.database_loading import material_params
 __all__ = [
     "Apertures2D",
     "Apertures3D",
+    "DomainComponent",
     "GrayScottBatch",
     "GrayScottConfig",
     "Layer",
@@ -43,6 +46,7 @@ __all__ = [
     "RecipeParser",
     "Structure",
     "create_lattice",
+    "classify_magnetic_domains",
     "create_binary_labyrinth_pattern",
     "create_disordered_skyrmion_lattice_pattern",
     "create_image_pattern",
@@ -50,6 +54,7 @@ __all__ = [
     "create_skyrmion_pattern",
     "create_stripe_pattern",
     "create_wavy_stripe_pattern",
+    "fill_small_domain_holes",
     "generate",
     "map_magnetization_to_3d",
     "material_params",

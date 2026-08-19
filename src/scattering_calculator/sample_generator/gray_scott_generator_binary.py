@@ -99,6 +99,11 @@ class GrayScottConfig:
     eps: float = 0.25
     noise_amp: float = 0.02
 
+    # Symmetry-breaking controls. Defaults preserve the historical dynamics.
+    quadratic_coefficient: float = 0.0
+    field_bias: object = 0.0
+    target_mean: Optional[float] = None
+
     batch: int = 16
 
     n_steps: int = 300
@@ -167,6 +172,7 @@ class GrayScottBatch:
         self.k0 = cfg.k0
         self.eps = cfg.eps
         self.noise_amp = cfg.noise_amp
+        self.quadratic_coefficient = float(cfg.quadratic_coefficient)
 
         self.xp = _xp(cfg.use_gpu)
 
@@ -183,6 +189,19 @@ class GrayScottBatch:
         ).astype(_np.float32)
 
         self.u = xp.asarray(u0)
+
+        field_bias = xp.asarray(cfg.field_bias, dtype=xp.float32)
+        if field_bias.ndim == 0:
+            self.field_bias = field_bias
+        elif field_bias.shape == (cfg.H, cfg.W):
+            self.field_bias = field_bias[None, :, :]
+        elif field_bias.shape == (cfg.batch, cfg.H, cfg.W):
+            self.field_bias = field_bias
+        else:
+            raise ValueError(
+                "field_bias must be a scalar, an (H, W) array, or a "
+                f"(batch, H, W) array; got shape {field_bias.shape}"
+            )
 
         # ====================================================
         # morphology presets
@@ -264,11 +283,21 @@ class GrayScottBatch:
             ).real
 
             # nonlinear saturation
-            u = u + 0.5 * u - 0.25 * u**3
+            u = (
+                u
+                + 0.5 * u
+                + self.quadratic_coefficient * u**2
+                - 0.25 * u**3
+                + self.field_bias
+            )
 
             # normalize
             std = xp.std(u, axis=(-2, -1), keepdims=True) + 1e-6
             u = u / std
+
+            if self.cfg.target_mean is not None:
+                mean = xp.mean(u, axis=(-2, -1), keepdims=True)
+                u = u - mean + float(self.cfg.target_mean)
 
             # weak noise
             noise = self.noise_amp * (
@@ -326,6 +355,9 @@ def generate(
     k0: float = 0.085,
     eps: float = 0.25,
     noise_amp: float = 0.02,
+    quadratic_coefficient: float = 0.0,
+    field_bias=0.0,
+    target_mean: Optional[float] = None,
     **overrides,
 ):
     """API-compatible binary magnetic-domain generator.
@@ -369,6 +401,17 @@ def generate(
         Input value for ``eps``.
     noise_amp : float
         Input value for ``noise_amp``.
+    quadratic_coefficient : float
+        Coefficient of the quadratic nonlinear term. Non-zero values break the
+        ``u -> -u`` symmetry and promote unequal-domain and bubble phases.
+    field_bias : float or ndarray
+        Scalar or spatial field added during every evolution step. A scalar
+        favours one phase globally; an ``(H, W)`` array can confine domains to
+        selected parts of the field.
+    target_mean : float or None
+        Optional mean value imposed on the continuous field after each
+        normalization step. This controls the phase fraction during evolution,
+        rather than changing the final threshold.
     **overrides : Any
         Input value for ``overrides``.
     """
@@ -384,6 +427,9 @@ def generate(
         k0=k0,
         eps=eps,
         noise_amp=noise_amp,
+        quadratic_coefficient=quadratic_coefficient,
+        field_bias=field_bias,
+        target_mean=target_mean,
         **overrides,
     )
 
@@ -400,6 +446,8 @@ def generate(
         "n_steps": n_steps,
         "H": H,
         "W": W,
+        "quadratic_coefficient": quadratic_coefficient,
+        "target_mean": target_mean,
     }
 
     return A, B, u,meta

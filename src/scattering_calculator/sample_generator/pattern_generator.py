@@ -6,7 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
-from scipy.ndimage import gaussian_filter, zoom
+from scipy.ndimage import binary_fill_holes, gaussian_filter, label, zoom
 from scipy.spatial import KDTree
 from scattering_calculator.sample_generator.gray_scott_generator_binary import (
     generate as generate_binary,
@@ -36,6 +36,34 @@ def _smooth_profile_from_signed_distance(
         return (signed_distance >= 0).astype(float)
     transition = np.clip(0.5 + 0.5 * signed_distance / wall_width, 0.0, 1.0)
     return transition * transition * (3.0 - 2.0 * transition)
+
+
+def fill_small_domain_holes(
+    field: NDArray[np.float64], max_hole_area: int
+) -> NDArray[np.float64]:
+    """Fill tiny enclosed islands of the opposite sign in a domain field.
+
+    The returned array preserves the input sign everywhere except enclosed
+    components whose area is at most ``max_hole_area`` pixels. It can be used
+    on either a continuous field or an already binary ``-1/+1`` pattern.
+    """
+    if max_hole_area <= 0:
+        return np.asarray(field, dtype=float).copy()
+    original = np.asarray(field, dtype=float)
+    result = original.copy()
+    replacement_magnitude = max(float(np.std(original)), np.finfo(float).eps)
+    structure = np.ones((3, 3), dtype=bool)
+    for positive_phase in (True, False):
+        phase_mask = original >= 0 if positive_phase else original < 0
+        holes = binary_fill_holes(phase_mask, structure=structure) & ~phase_mask
+        hole_labels, hole_count = label(holes, structure=structure)
+        for hole_index in range(1, hole_count + 1):
+            hole = hole_labels == hole_index
+            if int(hole.sum()) <= max_hole_area:
+                result[hole] = (
+                    replacement_magnitude if positive_phase else -replacement_magnitude
+                )
+    return result
 
 
 def map_magnetization_to_3d(
@@ -1317,6 +1345,9 @@ def create_binary_labyrinth_pattern(
     k0: float = 1.0,
     eps: float = 0.0,
     noise_amp: float = 0.0,
+    target_mean: float | None = None,
+    saturation_fraction_threshold: float = 0.01,
+    max_hole_area: int = 0,
     **generator_overrides,
 ) -> tuple[NDArray[np.float64], dict]:
     """Create binary labyrinth domains rescaled to a requested stripe width.
@@ -1333,6 +1364,13 @@ def create_binary_labyrinth_pattern(
     after the optional Gaussian blur, which avoids interpolation and
     thresholding artifacts for small stripes. Set ``domain_conversion="hard"``
     to recover exact +/-1 binarisation.
+
+    When ``target_mean`` produces a minority sign fraction no larger than
+    ``saturation_fraction_threshold`` on the requested source grid, the
+    function immediately returns a uniform +/-1 output. Saturated states do not
+    run FFT width estimation, adaptive resizing, interpolation, cleanup, or
+    smoothing because those operations have no physical meaning for a uniform
+    pattern.
 
     Parameters
     ----------
@@ -1384,6 +1422,18 @@ def create_binary_labyrinth_pattern(
         Input value for ``eps``.
     noise_amp : float
         Input value for ``noise_amp``.
+    target_mean : float or None
+        Optional continuous-field mean imposed during evolution. When set, the
+        final domain conversion keeps the generator's physical zero threshold
+        instead of recentering the field at its median.
+    saturation_fraction_threshold : float
+        Minority sign fraction at or below which the generated field is
+        treated as saturated. This removes isolated numerical outliers and
+        avoids meaningless FFT rescaling of an otherwise uniform state.
+    max_hole_area : int
+        Maximum enclosed sign-island area, in final output pixels, to fill
+        before domain-wall smoothing. Zero disables cleanup. This removes tiny
+        nested holes without changing larger resolved domains.
     **generator_overrides : Any
         Input value for ``generator_overrides``.
 
@@ -1396,6 +1446,12 @@ def create_binary_labyrinth_pattern(
     rows, cols = tuple(sz_array)
     if stripe_width <= 0:
         raise ValueError(f"stripe_width must be positive, got {stripe_width}")
+    if int(max_hole_area) < 0:
+        raise ValueError("max_hole_area must be non-negative")
+    max_hole_area = int(max_hole_area)
+    if not 0.0 <= float(saturation_fraction_threshold) <= 0.5:
+        raise ValueError("saturation_fraction_threshold must be between 0 and 0.5")
+    saturation_fraction_threshold = float(saturation_fraction_threshold)
 
     requested_H = int(H)
     requested_W = int(W)
@@ -1440,6 +1496,73 @@ def create_binary_labyrinth_pattern(
     effective_k0 = 0.7 if region_key in (None, "labyrinth", "stripes") else float(k0)
     estimated_source_width = np.pi / effective_k0 if effective_k0 > 0 else 4.0
     estimated_scale = max(float(stripe_width) / estimated_source_width, 1e-3)
+
+    # Probe the requested source grid before any adaptive-size calculation.
+    # Stripe-width rescaling is meaningless for a saturated state, so return a
+    # uniform requested-size pattern immediately when the probe has no resolved
+    # minority phase.
+    if target_mean is not None:
+        _, _, probe_continuous, probe_meta = generate_binary(
+            batch=batch,
+            H=requested_H,
+            W=requested_W,
+            n_steps=n_steps,
+            region=region,
+            use_gpu=use_gpu,
+            seed=seed,
+            k0=k0,
+            eps=eps,
+            noise_amp=noise_amp,
+            target_mean=target_mean,
+            **generator_overrides,
+        )
+        probe_negative_fraction = float(np.mean(np.asarray(probe_continuous[0]) < 0))
+        if (
+            probe_negative_fraction <= saturation_fraction_threshold
+            or probe_negative_fraction >= 1.0 - saturation_fraction_threshold
+        ):
+            saturation = -1.0 if probe_negative_fraction > 0.5 else 1.0
+            pattern = np.full((rows, cols), saturation, dtype=float)
+            meta = dict(probe_meta)
+            meta.update(
+                {
+                    "measured_stripe_width_px": 0.0,
+                    "measured_period_px": 0.0,
+                    "target_stripe_width_px": stripe_width,
+                    "rescale_factor": 1.0,
+                    "requested_H": requested_H,
+                    "requested_W": requested_W,
+                    "generated_H": requested_H,
+                    "generated_W": requested_W,
+                    "scaled_H": rows,
+                    "scaled_W": cols,
+                    "auto_size": bool(auto_size),
+                    "saturated_shortcut": True,
+                    "min_auto_size": min_auto_size,
+                    "auto_size_overshoot": auto_size_overshoot,
+                    "max_auto_size": -1 if max_auto_size is None else max_auto_size,
+                    "max_auto_pixels": -1 if max_auto_pixels is None else max_auto_pixels,
+                    "estimated_source_stripe_width_px": estimated_source_width,
+                    "crop_margin_px": margin,
+                    "binarization_threshold": 0.0,
+                    "domain_conversion": str(domain_conversion).lower(),
+                    "softness": softness,
+                    "k0": k0,
+                    "eps": eps,
+                    "noise_amp": noise_amp,
+                    "target_mean": float(target_mean),
+                    "saturation_fraction_threshold": saturation_fraction_threshold,
+                    "max_hole_area": max_hole_area,
+                    "region": str(region),
+                    "seed": -1 if seed is None else seed,
+                }
+            )
+            if plot:
+                plt.figure(figsize=(5, 5))
+                plt.imshow(pattern, cmap="gray", vmin=-1, vmax=1)
+                plt.title("Saturated magnetic pattern")
+            return pattern, meta
+
     if auto_size:
         current_H = max(
             min_auto_size,
@@ -1473,6 +1596,7 @@ def create_binary_labyrinth_pattern(
             k0=k0,
             eps=eps,
             noise_amp=noise_amp,
+            target_mean=target_mean,
             **generator_overrides,
         )
         base = np.asarray(continuous[0], dtype=float)
@@ -1525,8 +1649,11 @@ def create_binary_labyrinth_pattern(
     if scaled.size == 0:
         scaled = base
     pattern = _center_crop(scaled, (rows, cols))
-    threshold = float(np.median(pattern))
+    threshold = 0.0 if target_mean is not None else float(np.median(pattern))
     pattern = pattern - threshold
+
+    if max_hole_area:
+        pattern = fill_small_domain_holes(pattern, max_hole_area)
 
     if sigma is not None:
         pattern = gaussian_filter(pattern, sigma)
@@ -1541,7 +1668,8 @@ def create_binary_labyrinth_pattern(
         if contrast_scale > 0:
             pattern = np.tanh(pattern / (softness * contrast_scale))
         else:
-            pattern = np.zeros_like(pattern)
+            mean_value = float(np.mean(pattern))
+            pattern = np.full_like(pattern, np.sign(mean_value))
     else:
         raise ValueError(
             "domain_conversion must be 'soft' or 'hard', "
@@ -1566,6 +1694,7 @@ def create_binary_labyrinth_pattern(
             "scaled_H": scaled.shape[0],
             "scaled_W": scaled.shape[1],
             "auto_size": bool(auto_size),
+            "saturated_shortcut": False,
             "min_auto_size": min_auto_size,
             "auto_size_overshoot": auto_size_overshoot,
             "max_auto_size": -1 if max_auto_size is None else max_auto_size,
@@ -1578,6 +1707,9 @@ def create_binary_labyrinth_pattern(
             "k0": k0,
             "eps": eps,
             "noise_amp": noise_amp,
+            "target_mean": np.nan if target_mean is None else float(target_mean),
+            "saturation_fraction_threshold": saturation_fraction_threshold,
+            "max_hole_area": max_hole_area,
             "region": str(region),
             "seed": -1 if seed is None else seed,
         }
