@@ -12,14 +12,14 @@ HDF5 group is one complete synthetic experiment.
 
 For notebook-first learning, use the focused notebooks under `tutorials/`:
 
-- [`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb)
+- [`09_hologram_pipeline.ipynb`](../tutorials/09_hologram_pipeline.ipynb)
   walks through `HologramPipelineConfig`, `HologramPipelineRanges`, running the
   pipeline, reading HDF5 outputs, and visualizing masks, magnetic patterns,
   CR/CL holograms, CR-CL channels, and exit waves.
-- [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb)
+- [`10_multislice_and_roi_modes.ipynb`](../tutorials/10_multislice_and_roi_modes.ipynb)
   explains `propagate=True/False`, aperture ROI modes, Jones/tensor ROI,
   multislice ROI, padding, absorbers, and recommended operating modes.
-- [`tutorial_tilted_magnetic_layer_multislice.ipynb`](../tutorials/tutorial_tilted_magnetic_layer_multislice.ipynb)
+- [`11_tilted_magnetic_layer_multislice.ipynb`](../tutorials/11_tilted_magnetic_layer_multislice.ipynb)
   demonstrates tilted multilayers, fixed beam-direction contrast, and optional
   local-momentum vector contrast where XMCD follows the local light direction
   during multislice propagation.
@@ -334,7 +334,7 @@ Common operating modes:
 - **Full-field reference/debug mode**: `use_roi=False`.
 
 For runnable comparisons and visual examples, see
-[`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb).
+[`10_multislice_and_roi_modes.ipynb`](../tutorials/10_multislice_and_roi_modes.ipynb).
 That tutorial also includes a didactic vertical x-z wavefront diagnostic through
 the aperture centers for each propagation mode. It overlays the aperture wall,
 SiN membrane borders, magnetic-material borders, and the 1-D ROI propagation
@@ -400,7 +400,7 @@ pattern_target_mean_bounds = (-1.0, 1.0)
 ```
 
 At startup, the sweep classifies the same regular grid used by
-`tutorial_binary_domain_phase_space.ipynb`. It schedules approximately one
+`03_binary_domain_phase_space.ipynb`. It schedules approximately one
 third direct saturated states, one third points from stripe-rich cells, and one
 third points from bubble-rich cells. Counts differ by at most one when the
 total is not divisible by three. Samples within a rich cell are continuous, so
@@ -434,7 +434,7 @@ Tiny nested sign holes can be removed before domain-wall smoothing with
 nested domains are preserved.
 
 The same cleanup and bounds are used by
-[`tutorial_binary_domain_phase_space.ipynb`](../tutorials/tutorial_binary_domain_phase_space.ipynb):
+[`03_binary_domain_phase_space.ipynb`](../tutorials/03_binary_domain_phase_space.ipynb):
 
 ```python
 pattern_max_hole_area_px = 9
@@ -963,7 +963,7 @@ Interactive simulations can use
 `HologramPipeline.build_precomputed_metadata()` followed by
 `HologramPipeline.write_precomputed_result()` to save an already-computed
 `HologramConfig` with this same layout. The end of
-`tutorials/Scattering_simulator_CK.ipynb` demonstrates this workflow.
+`tutorials/legacy/ck_interactive_monolith.ipynb` demonstrates this workflow.
 
 ## Reading The HDF5 File
 
@@ -1062,7 +1062,7 @@ smoothing.
 For a notebook that reads the HDF5 output and visualizes masks, aperture
 geometry, magnetic pattern crops, CR/CL holograms, CR-CL/CR+CL channels,
 reconstructions, and complex exit waves, see
-[`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb).
+[`09_hologram_pipeline.ipynb`](../tutorials/09_hologram_pipeline.ipynb).
 
 ## FTH Reconstruction
 

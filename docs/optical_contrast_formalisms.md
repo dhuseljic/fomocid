@@ -293,6 +293,6 @@ Use this rule of thumb:
   aperture structure should change the local light momentum inside the sample.
 
 The tilted multilayer demonstration notebook,
-[`tutorial_tilted_magnetic_layer_multislice.ipynb`](../tutorials/tutorial_tilted_magnetic_layer_multislice.ipynb),
+[`11_tilted_magnetic_layer_multislice.ipynb`](../tutorials/11_tilted_magnetic_layer_multislice.ipynb),
 is the focused runnable example for fixed beam-direction and local-k vector
 contrast.

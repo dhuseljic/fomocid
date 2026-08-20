@@ -155,7 +155,7 @@ pattern_saturation_fraction_threshold = 0.01
 pattern_classification_min_area_px = 9
 pattern_bubble_max_eccentricity = 0.85
 pattern_bubble_min_circularity = 0.45
-# The same grid and classifier used by tutorial_binary_domain_phase_space.ipynb.
+# The same grid and classifier used by 03_binary_domain_phase_space.ipynb.
 pattern_phase_space_grid_size = 12
 pattern_phase_space_cache = output_folder / "binary_domain_phase_space_v1.npz"
 # Very small k0 combined with the independently sampled 30--500 nm physical

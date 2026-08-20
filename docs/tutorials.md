@@ -35,18 +35,18 @@ notebook_tutorials/02_mae_analysis
 The coherent-scattering notebooks are organized by topic so users can learn one
 part of the simulation at a time:
 
-- [`tutorial_beamstop_definition.ipynb`](../tutorials/tutorial_beamstop_definition.ipynb)
-- [`tutorial_material_holography_mask_definition.ipynb`](../tutorials/tutorial_material_holography_mask_definition.ipynb)
-- [`tutorial_illumination_function_definition.ipynb`](../tutorials/tutorial_illumination_function_definition.ipynb)
-- [`tutorial_magnetic_pattern_definition.ipynb`](../tutorials/tutorial_magnetic_pattern_definition.ipynb)
-- [`tutorial_binary_domain_phase_space.ipynb`](../tutorials/tutorial_binary_domain_phase_space.ipynb)
-- [`tutorial_material_parameters_definition.ipynb`](../tutorials/tutorial_material_parameters_definition.ipynb)
-- [`tutorial_hologram_generation_and_artifacts.ipynb`](../tutorials/tutorial_hologram_generation_and_artifacts.ipynb)
-- [`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb)
-- [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb)
-- [`tutorial_tilted_magnetic_layer_multislice.ipynb`](../tutorials/tutorial_tilted_magnetic_layer_multislice.ipynb)
-- [`tutorial_cobalt_l_edge_energy_sweep.ipynb`](../tutorials/tutorial_cobalt_l_edge_energy_sweep.ipynb)
-- [`Scattering_simulator_CK_mumax.ipynb`](../tutorials/Scattering_simulator_CK_mumax.ipynb)
+- [`05_beamstop.ipynb`](../tutorials/05_beamstop.ipynb)
+- [`04_holography_mask.ipynb`](../tutorials/04_holography_mask.ipynb)
+- [`06_illumination.ipynb`](../tutorials/06_illumination.ipynb)
+- [`02_magnetic_patterns.ipynb`](../tutorials/02_magnetic_patterns.ipynb)
+- [`03_binary_domain_phase_space.ipynb`](../tutorials/03_binary_domain_phase_space.ipynb)
+- [`01_material_parameters.ipynb`](../tutorials/01_material_parameters.ipynb)
+- [`07_hologram_generation_and_artifacts.ipynb`](../tutorials/07_hologram_generation_and_artifacts.ipynb)
+- [`09_hologram_pipeline.ipynb`](../tutorials/09_hologram_pipeline.ipynb)
+- [`10_multislice_and_roi_modes.ipynb`](../tutorials/10_multislice_and_roi_modes.ipynb)
+- [`11_tilted_magnetic_layer_multislice.ipynb`](../tutorials/11_tilted_magnetic_layer_multislice.ipynb)
+- [`12_cobalt_l_edge_energy_sweep.ipynb`](../tutorials/12_cobalt_l_edge_energy_sweep.ipynb)
+- [`13_mumax_ovf_workflow.ipynb`](../tutorials/13_mumax_ovf_workflow.ipynb)
 
 Use the [coherent-scattering tutorial map](coherent_scattering_tutorials.md)
 to choose the right notebook, and the

@@ -23,23 +23,23 @@ result is saved with the same canonical HDF5 structure as a scripted sweep.
 
 | Topic | Notebook | What it teaches |
 |---|---|---|
-| Beamstop definition | [`tutorial_beamstop_definition.ipynb`](../tutorials/tutorial_beamstop_definition.ipynb) | Detector geometry, physical beamstop parameters, projected mask, wires, roughness, anti-aliasing, and line-profile checks. |
-| Holography mask definition | [`tutorial_material_holography_mask_definition.ipynb`](../tutorials/tutorial_material_holography_mask_definition.ipynb) | FTH object/reference holes, 3-D aperture masks, layer-by-layer views, vertical cuts, and support masks. |
-| Illumination function | [`tutorial_illumination_function_definition.ipynb`](../tutorials/tutorial_illumination_function_definition.ipynb) | Gaussian and plane-wave illumination, beam centre/FWHM/focus distance, optional beam tilt, Jones polarization, and RGB complex-field visualization. |
-| Magnetic pattern | [`tutorial_magnetic_pattern_definition.ipynb`](../tutorials/tutorial_magnetic_pattern_definition.ipynb) | Labyrinth, stripe, skyrmion, and saturated patterns; physical `sigma` smoothing; statistics; and vector magnetization mapping. |
-| Binary-domain phase space | [`tutorial_binary_domain_phase_space.ipynb`](../tutorials/tutorial_binary_domain_phase_space.ipynb) | `k0`/`eps`/`target_mean` scans, production-matched small-hole cleanup, stripe and bubble component analysis, saturation maps, and verified continuous sampling inside the valid domain volume. |
-| Material parameters | [`tutorial_material_parameters_definition.ipynb`](../tutorials/tutorial_material_parameters_definition.ipynb) | Recipe parsing, effective layers, refractive-index channels, material stack visualization, and compact dielectric tensors. |
-| Hologram generation and artifacts | [`tutorial_hologram_generation_and_artifacts.ipynb`](../tutorials/tutorial_hologram_generation_and_artifacts.ipynb) | Ideal/detected holograms, detector artifacts, beamstop/noise effects, CR-CL/CR+CL channels, and FTH reconstruction. |
-| Propagation formalism comparison | [`tutorial_compare_propagation_formalisms.ipynb`](../tutorials/tutorial_compare_propagation_formalisms.ipynb) | Scalar, Jones, and Mueller--Stokes propagation through the same magnetic FTH sample; pure CR/CL exit waves, detector holograms, FTH reconstructions, and a Stokes-only sweep of decreasing circular polarization using matched CL-CR pairs. |
-| Pipeline usage | [`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb) | `HologramPipelineConfig`, `HologramPipelineRanges`, running sweeps, HDF5 layout, reading outputs, masks, magnetic patterns, and CR/CL exit waves. |
-| Multislice and ROI modes | [`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb) | `propagate=True/False`, aperture ROI modes, Jones/tensor ROI, multislice ROI, padding/absorbers, and practical mode choices. |
-| Tilted magnetic layer multislice | [`tutorial_tilted_magnetic_layer_multislice.ipynb`](../tutorials/tutorial_tilted_magnetic_layer_multislice.ipynb) | Tilted multilayers, fixed beam-direction XMCD projection, local-k vector contrast, and x-z/y-z diagnostics of how local momentum modifies `m . k`. |
-| Co L-edge energy sweep | [`tutorial_cobalt_l_edge_energy_sweep.ipynb`](../tutorials/tutorial_cobalt_l_edge_energy_sweep.ipynb) | Fixed-sample energy scan across the Cobalt L3/L2 edges, XMCD exit-wave `log(CR/CL)`, holograms, object-hole-cropped FTH reconstructions, and total intensity versus energy. |
-| CK workflow with Mumax OVF input | [`Scattering_simulator_CK_mumax.ipynb`](../tutorials/Scattering_simulator_CK_mumax.ipynb) | CK-style single-simulation workflow where the magnetic layer count and 3-D magnetization stack come from a memory-mapped Mumax/OOMMF `.ovf` file in `DATA_ROOT/Data/mumax_files/`. Includes recipe compatibility checks, Mumax-to-sample interpolation, CL-CR exit-wave visualization, and ideal/detected FTH difference reconstructions. |
+| Beamstop definition | [`05_beamstop.ipynb`](../tutorials/05_beamstop.ipynb) | Detector geometry, physical beamstop parameters, projected mask, wires, roughness, anti-aliasing, and line-profile checks. |
+| Holography mask definition | [`04_holography_mask.ipynb`](../tutorials/04_holography_mask.ipynb) | FTH object/reference holes, 3-D aperture masks, layer-by-layer views, vertical cuts, and support masks. |
+| Illumination function | [`06_illumination.ipynb`](../tutorials/06_illumination.ipynb) | Gaussian and plane-wave illumination, beam centre/FWHM/focus distance, optional beam tilt, Jones polarization, and RGB complex-field visualization. |
+| Magnetic pattern | [`02_magnetic_patterns.ipynb`](../tutorials/02_magnetic_patterns.ipynb) | Labyrinth, stripe, skyrmion, and saturated patterns; physical `sigma` smoothing; statistics; and vector magnetization mapping. |
+| Binary-domain phase space | [`03_binary_domain_phase_space.ipynb`](../tutorials/03_binary_domain_phase_space.ipynb) | `k0`/`eps`/`target_mean` scans, production-matched small-hole cleanup, stripe and bubble component analysis, saturation maps, and verified continuous sampling inside the valid domain volume. |
+| Material parameters | [`01_material_parameters.ipynb`](../tutorials/01_material_parameters.ipynb) | Recipe parsing, effective layers, refractive-index channels, material stack visualization, and compact dielectric tensors. |
+| Hologram generation and artifacts | [`07_hologram_generation_and_artifacts.ipynb`](../tutorials/07_hologram_generation_and_artifacts.ipynb) | Ideal/detected holograms, detector artifacts, beamstop/noise effects, CR-CL/CR+CL channels, and FTH reconstruction. |
+| Propagation formalism comparison | [`08_compare_propagation_formalisms.ipynb`](../tutorials/08_compare_propagation_formalisms.ipynb) | Scalar, Jones, and Mueller--Stokes propagation through the same magnetic FTH sample; pure CR/CL exit waves, detector holograms, FTH reconstructions, and a Stokes-only sweep of decreasing circular polarization using matched CL-CR pairs. |
+| Pipeline usage | [`09_hologram_pipeline.ipynb`](../tutorials/09_hologram_pipeline.ipynb) | `HologramPipelineConfig`, `HologramPipelineRanges`, running sweeps, HDF5 layout, reading outputs, masks, magnetic patterns, and CR/CL exit waves. |
+| Multislice and ROI modes | [`10_multislice_and_roi_modes.ipynb`](../tutorials/10_multislice_and_roi_modes.ipynb) | `propagate=True/False`, aperture ROI modes, Jones/tensor ROI, multislice ROI, padding/absorbers, and practical mode choices. |
+| Tilted magnetic layer multislice | [`11_tilted_magnetic_layer_multislice.ipynb`](../tutorials/11_tilted_magnetic_layer_multislice.ipynb) | Tilted multilayers, fixed beam-direction XMCD projection, local-k vector contrast, and x-z/y-z diagnostics of how local momentum modifies `m . k`. |
+| Co L-edge energy sweep | [`12_cobalt_l_edge_energy_sweep.ipynb`](../tutorials/12_cobalt_l_edge_energy_sweep.ipynb) | Fixed-sample energy scan across the Cobalt L3/L2 edges, XMCD exit-wave `log(CR/CL)`, holograms, object-hole-cropped FTH reconstructions, and total intensity versus energy. |
+| CK workflow with Mumax OVF input | [`13_mumax_ovf_workflow.ipynb`](../tutorials/13_mumax_ovf_workflow.ipynb) | CK-style single-simulation workflow where the magnetic layer count and 3-D magnetization stack come from a memory-mapped Mumax/OOMMF `.ovf` file in `DATA_ROOT/Data/mumax_files/`. Includes recipe compatibility checks, Mumax-to-sample interpolation, CL-CR exit-wave visualization, and ideal/detected FTH difference reconstructions. |
 
 ## Mumax OVF Workflow
 
-[`Scattering_simulator_CK_mumax.ipynb`](../tutorials/Scattering_simulator_CK_mumax.ipynb)
+[`13_mumax_ovf_workflow.ipynb`](../tutorials/13_mumax_ovf_workflow.ipynb)
 is the CK-style notebook for micromagnetic input. It uses
 `scattering_calculator.utils.mumax.read_mumax_ovf(..., mmap=True)` so the
 header and binary vector field are exposed quickly as a lazy array shaped
@@ -181,7 +181,7 @@ Use full-field multislice, `propagate=True` with
 pixels is important.
 
 For a deeper explanation and runnable comparisons, use
-[`tutorial_multislice_and_roi_modes.ipynb`](../tutorials/tutorial_multislice_and_roi_modes.ipynb).
+[`10_multislice_and_roi_modes.ipynb`](../tutorials/10_multislice_and_roi_modes.ipynb).
 For the propagation equations and detector q-space projection, see
 [`light_propagation_modes.md`](light_propagation_modes.md).
 
@@ -232,5 +232,5 @@ The pipeline usage notebook shows how to load:
 - `beamstop_mask`, `supportmask`, and `magnetic_pattern_oh`;
 - scalar and array metadata.
 
-See [`tutorial_hologram_pipeline_usage.ipynb`](../tutorials/tutorial_hologram_pipeline_usage.ipynb)
+See [`09_hologram_pipeline.ipynb`](../tutorials/09_hologram_pipeline.ipynb)
 for plotting CR/CL, CR-CL, masks, magnetic patterns, and exit waves.
