@@ -387,6 +387,23 @@ class DetectorConfig(_ConfigMixin):
             "photon_kernel_size": 9,
             "photon_irregularity": 2.0,
             "regenerate_photon_kernels": True,
+            "camera_seed": None,
+            "average_hot_pixels": 0.0,
+            "average_cold_pixels": 0.0,
+            "flicker_fraction": 0.0,
+            "flicker_probability": 0.5,
+            "hot_pixel_value": None,
+            "hot_pixel_value_spread": 0.05,
+            "hot_pixel_temporal_sigma": 0.02,
+            "cold_pixel_value": 0.0,
+            "cold_pixel_value_spread": 0.05,
+            "cold_pixel_temporal_sigma": 0.02,
+            "cosmic_rays_per_second": 0.0,
+            "cosmic_ray_value": None,
+            "cosmic_ray_value_spread": 0.15,
+            "cosmic_ray_length_range": (2.0, 5.0),
+            "cosmic_ray_aspect_ratio_range": (2.0, 3.0),
+            "cosmic_ray_max_length": 5,
         }
     )
     measurement_config: dict = field(

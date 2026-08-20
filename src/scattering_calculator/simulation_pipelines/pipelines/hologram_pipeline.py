@@ -1814,6 +1814,34 @@ class HologramPipeline:
                 },
                 source="detected",
             )
+            artifact_model = detector_config.hologram_exp
+            defect_map = artifact_model.camera_defect_map
+            if pol_idx == 0:
+                for defect_name in ("hot", "cold", "flicker"):
+                    y_coords, x_coords = defect_map[defect_name]
+                    metadata[
+                        f"artifacts_realized/camera/{defect_name}_pixels_yx"
+                    ] = np.column_stack((y_coords, x_coords)).astype(np.int64)
+                    metadata[
+                        f"artifacts_realized/camera/{defect_name}_baseline_values"
+                    ] = defect_map[f"{defect_name}_baseline_values"]
+                metadata["artifacts_realized/camera/hot_pixel_count"] = int(
+                    defect_map["n_hot"]
+                )
+                metadata["artifacts_realized/camera/cold_pixel_count"] = int(
+                    defect_map["n_cold"]
+                )
+            metadata[
+                f"artifacts_realized/{pol}/cosmic_ray_events_yx_length_aspect_angle_value"
+            ] = artifact_model.cosmic_ray_tracks
+            metadata[f"artifacts_realized/{pol}/cosmic_ray_count"] = int(
+                artifact_model.cosmic_ray_count
+            )
+            metadata[f"artifacts_realized/{pol}/effective_exposure_time_s"] = (
+                1.0
+                if artifact_model.exposure_time is None
+                else float(artifact_model.exposure_time)
+            )
             if cfg.save_detected_hologram_without_beamstop:
                 hologram_config.add_holograms(
                     {

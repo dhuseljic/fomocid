@@ -45,11 +45,15 @@ from the `tutorials/` directory.
     — define a complete detector, sample, FTH mask, magnetic pattern, and CR/CL
     illumination; simulate exit waves, ideal and corrupted hologram sums and
     differences, and their FTH reconstructions.
+15. [`15_camera_defects_and_cosmic_rays.ipynb`](15_camera_defects_and_cosmic_rays.ipynb)
+    — model camera-persistent hot, cold, and flickering pixels alongside
+    exposure-dependent cosmic-ray tracks with reproducible seeds.
 
 Notebooks 1–9 form the main introductory path. Notebooks 10–13 are advanced
 or specialized and can be opened independently after the pipeline tutorial.
 Tutorial 14 is the recommended end-to-end capstone and maintained replacement
-for the old monolithic scattering notebooks.
+for the old monolithic scattering notebooks. Tutorial 15 is a focused detector
+artifact reference and can be run independently.
 
 ## Runnable scripts
 
