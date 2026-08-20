@@ -25,7 +25,7 @@ result is saved with the same canonical HDF5 structure as a scripted sweep.
 |---|---|---|
 | Beamstop definition | [`05_beamstop.ipynb`](../tutorials/05_beamstop.ipynb) | Detector geometry, physical beamstop parameters, projected mask, wires, roughness, anti-aliasing, and line-profile checks. |
 | Holography mask definition | [`04_holography_mask.ipynb`](../tutorials/04_holography_mask.ipynb) | FTH object/reference holes, 3-D aperture masks, layer-by-layer views, vertical cuts, and support masks. |
-| Illumination function | [`06_illumination.ipynb`](../tutorials/06_illumination.ipynb) | Gaussian and plane-wave illumination, beam centre/FWHM/focus distance, optional beam tilt, Jones polarization, and RGB complex-field visualization. |
+| Illumination function | [`06_illumination.ipynb`](../tutorials/06_illumination.ipynb) | Gaussian and plane-wave illumination, beam centre/FWHM/focus distance, optional beam tilt, Jones polarization, partially polarized Stokes inputs, polarization-degree contrast, and RGB complex-field visualization. |
 | Magnetic pattern | [`02_magnetic_patterns.ipynb`](../tutorials/02_magnetic_patterns.ipynb) | Labyrinth, stripe, skyrmion, and saturated patterns; physical `sigma` smoothing; statistics; and vector magnetization mapping. |
 | Binary-domain phase space | [`03_binary_domain_phase_space.ipynb`](../tutorials/03_binary_domain_phase_space.ipynb) | `k0`/`eps`/`target_mean` scans, production-matched small-hole cleanup, stripe and bubble component analysis, saturation maps, and verified continuous sampling inside the valid domain volume. |
 | Material parameters | [`01_material_parameters.ipynb`](../tutorials/01_material_parameters.ipynb) | Recipe parsing, effective layers, refractive-index channels, material stack visualization, and compact dielectric tensors. |
@@ -36,6 +36,7 @@ result is saved with the same canonical HDF5 structure as a scripted sweep.
 | Tilted magnetic layer multislice | [`11_tilted_magnetic_layer_multislice.ipynb`](../tutorials/11_tilted_magnetic_layer_multislice.ipynb) | Tilted multilayers, fixed beam-direction XMCD projection, local-k vector contrast, and x-z/y-z diagnostics of how local momentum modifies `m . k`. |
 | Co L-edge energy sweep | [`12_cobalt_l_edge_energy_sweep.ipynb`](../tutorials/12_cobalt_l_edge_energy_sweep.ipynb) | Fixed-sample energy scan across the Cobalt L3/L2 edges, XMCD exit-wave `log(CR/CL)`, holograms, object-hole-cropped FTH reconstructions, and total intensity versus energy. |
 | CK workflow with Mumax OVF input | [`13_mumax_ovf_workflow.ipynb`](../tutorials/13_mumax_ovf_workflow.ipynb) | CK-style single-simulation workflow where the magnetic layer count and 3-D magnetization stack come from a memory-mapped Mumax/OOMMF `.ovf` file in `DATA_ROOT/Data/mumax_files/`. Includes recipe compatibility checks, Mumax-to-sample interpolation, CL-CR exit-wave visualization, and ideal/detected FTH difference reconstructions. |
+| End-to-end scattering experiment | [`14_end_to_end_scattering_experiment.ipynb`](../tutorials/14_end_to_end_scattering_experiment.ipynb) | Maintained monolithic workflow covering detector geometry, material stack, FTH mask, magnetic domains, CR/CL illumination, exit waves, ideal and corrupted hologram sums/differences, and FTH reconstructions. |
 
 ## Mumax OVF Workflow
 

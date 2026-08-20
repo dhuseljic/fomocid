@@ -20,7 +20,9 @@ from the `tutorials/` directory.
 5. [`05_beamstop.ipynb`](05_beamstop.ipynb) — configure beamstop geometry,
    wires, roughness, projection, and anti-aliasing.
 6. [`06_illumination.ipynb`](06_illumination.ipynb) — configure plane-wave and
-   Gaussian illumination, focus, displacement, tilt, and polarization.
+   Gaussian illumination, focus, displacement, tilt, Jones polarization, and
+   partially polarized Stokes states; visualize how circular polarization
+   degree controls magnetic contrast.
 7. [`07_hologram_generation_and_artifacts.ipynb`](07_hologram_generation_and_artifacts.ipynb)
    — generate ideal and detected holograms, apply artifacts, and inspect FTH
    reconstructions.
@@ -39,9 +41,15 @@ from the `tutorials/` directory.
 13. [`13_mumax_ovf_workflow.ipynb`](13_mumax_ovf_workflow.ipynb) — load a
     Mumax/OOMMF OVF magnetization stack and use it in a coherent-scattering
     simulation.
+14. [`14_end_to_end_scattering_experiment.ipynb`](14_end_to_end_scattering_experiment.ipynb)
+    — define a complete detector, sample, FTH mask, magnetic pattern, and CR/CL
+    illumination; simulate exit waves, ideal and corrupted hologram sums and
+    differences, and their FTH reconstructions.
 
 Notebooks 1–9 form the main introductory path. Notebooks 10–13 are advanced
 or specialized and can be opened independently after the pipeline tutorial.
+Tutorial 14 is the recommended end-to-end capstone and maintained replacement
+for the old monolithic scattering notebooks.
 
 ## Runnable scripts
 
