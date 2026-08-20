@@ -2074,8 +2074,15 @@ class Structure:
             The function completes in place.
         """
         eps = 1e-12
-        reals = [n.real for n in self.layer_refractive_indices]
-        imags = [n.imag for n in self.layer_refractive_indices]
+        # Material entries contain [n0, dn_c, dn_l].  The stack overview uses
+        # the isotropic n0 channel; plotting the magnetic contrast channels as
+        # if each layer had one scalar index is both ambiguous and invalid.
+        isotropic_indices = [
+            complex(np.asarray(index).reshape(-1)[0])
+            for index in self.layer_refractive_indices
+        ]
+        reals = [index.real for index in isotropic_indices]
+        imags = [index.imag for index in isotropic_indices]
         norm_real = mcolors.Normalize(vmin=min(reals), vmax=max(reals) + eps)
         norm_imag = mcolors.Normalize(vmin=min(imags), vmax=max(imags) + eps)
         cmap = plt.cm.viridis_r
@@ -2087,7 +2094,7 @@ class Structure:
 
         y_bottom = 0
         for name, thickness, refractive_index in zip(
-            self.layer_names, self.layer_thicknesses, self.layer_refractive_indices
+            self.layer_names, self.layer_thicknesses, isotropic_indices
         ):
             thickness = thickness * 1e9  # convert to nm for visualization
             y_center = y_bottom + thickness / 2
