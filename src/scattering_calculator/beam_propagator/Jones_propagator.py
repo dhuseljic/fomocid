@@ -45,6 +45,8 @@ class wavefronts:
         multislice_propagation_roi_padding_px=0,
         multislice_propagation_roi_merge_overlaps=True,
         jones_apply_zero_order_phase=True,
+        store_intermediate_wavefields=False,
+        calculate_farfield=True,
         farfield_oversampling=1,
         farfield_background_jones=None,
     ):
@@ -89,6 +91,13 @@ class wavefronts:
             free-space phase ``exp(-1j * k0 * dz)`` between material slices.
             This keeps the longitudinal phase advance while skipping transverse
             FFT diffraction.
+        store_intermediate_wavefields : bool
+            If ``True``, retain a copy of the Jones wavefield immediately after
+            every material slice in ``intermediate_wavefields``. Disabled by
+            default because its memory cost scales with the number of slices.
+        calculate_farfield : bool
+            If ``True`` (default), calculate the detector-plane Fraunhofer field
+            and hologram. If ``False``, stop at the sample exit surface.
         farfield_oversampling : Any
             Integer factor used to extend the complex exit wave before the
             far-field FFT. Values above ``1`` use ``farfield_background_jones``
@@ -137,16 +146,22 @@ class wavefronts:
                 self.multislice_propagation_roi_merge_overlaps
             ),
             jones_apply_zero_order_phase=jones_apply_zero_order_phase,
+            store_intermediate_wavefields=store_intermediate_wavefields,
         )
-        self.exit_wave_for_farfield = self._build_farfield_exit_wave(
-            self.exit_wave,
-            farfield_background_jones,
-            self.farfield_oversampling,
-        )
-        self.detector_wave = image_transformator.Fraunhofer_propagation_jones(
-            self.exit_wave_for_farfield
-        )
-        self.hologram = E_I(self.detector_wave)
+        if calculate_farfield:
+            self.exit_wave_for_farfield = self._build_farfield_exit_wave(
+                self.exit_wave,
+                farfield_background_jones,
+                self.farfield_oversampling,
+            )
+            self.detector_wave = image_transformator.Fraunhofer_propagation_jones(
+                self.exit_wave_for_farfield
+            )
+            self.hologram = E_I(self.detector_wave)
+        else:
+            self.exit_wave_for_farfield = None
+            self.detector_wave = None
+            self.hologram = None
 
     @staticmethod
     def _build_farfield_exit_wave(exit_wave, background_jones, oversampling):
@@ -195,6 +210,7 @@ class wavefronts:
         multislice_propagation_roi_padding_px=0,
         multislice_propagation_roi_merge_overlaps=True,
         jones_apply_zero_order_phase=True,
+        store_intermediate_wavefields=False,
     ):
         """
         Multislice propagation through a dielectric tensor stack.
@@ -227,6 +243,7 @@ class wavefronts:
             raise ValueError("E_in and eps_stack must have matching (Ny, Nx)")
 
         Nz = eps_stack.shape[0]
+        intermediate_wavefields = [] if store_intermediate_wavefields else None
 
         for iz in range(Nz):
             #print(iz)
@@ -253,6 +270,9 @@ class wavefronts:
                     dz,
                     aperture_support_regions=self.aperture_support_regions,
                 )
+
+            if intermediate_wavefields is not None:
+                intermediate_wavefields.append(E_in.copy())
 
             # Free-space propagation between slices
             if iz < Nz - 1:
@@ -287,6 +307,12 @@ class wavefronts:
                 elif jones_apply_zero_order_phase:
                     k0 = 2 * np.pi / wavelength
                     E_in = E_in * np.exp(-1j * k0 * float(dz))
+
+        self.intermediate_wavefields = (
+            np.stack(intermediate_wavefields, axis=0)
+            if intermediate_wavefields is not None
+            else None
+        )
 
         return E_in
 

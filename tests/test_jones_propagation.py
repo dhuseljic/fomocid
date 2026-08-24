@@ -28,6 +28,34 @@ from scattering_calculator.sample_generator.structures import CompactDielectricT
 
 
 class JonesFreeSpacePropagationTests(unittest.TestCase):
+    def test_intermediate_wavefields_are_opt_in(self) -> None:
+        field = np.zeros((4, 5, 2), dtype=complex)
+        field[..., 0] = 1.0
+        eps = np.zeros((3, 4, 5, 2, 2), dtype=complex)
+        eps[..., 0, 0] = 1.0
+        eps[..., 1, 1] = 1.0
+        beam = SimpleNamespace(wavelength=2e-9)
+
+        default = wavefronts(
+            beam_parameters=beam, eps_stack=eps,
+            layer_thicknesses=[1e-9, 1e-9, 1e-9],
+            real_space_pixel_size=1e-9, E_in=field,
+            propagate=False, calculate_farfield=False,
+        )
+        stored = wavefronts(
+            beam_parameters=beam, eps_stack=eps,
+            layer_thicknesses=[1e-9, 1e-9, 1e-9],
+            real_space_pixel_size=1e-9, E_in=field,
+            propagate=False, calculate_farfield=False,
+            store_intermediate_wavefields=True,
+        )
+
+        self.assertIsNone(default.intermediate_wavefields)
+        self.assertEqual(stored.intermediate_wavefields.shape, (3, 4, 5, 2))
+        np.testing.assert_allclose(stored.intermediate_wavefields[-1], stored.exit_wave)
+        self.assertIsNone(stored.detector_wave)
+        self.assertIsNone(stored.hologram)
+
     def test_local_wavevector_directions_follow_phase_gradient(self) -> None:
         """Local k estimation follows the simulator's tilted-phase convention."""
         wavelength = 2.0e-9
