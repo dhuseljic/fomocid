@@ -21,6 +21,20 @@ def test_adjoint_on_unequal_grids_with_channels():
                                np.vdot(source, op.adjoint(target)), rtol=1e-13)
 
 
+def test_sparse_source_matches_full_matrix_and_zero_field():
+    x, y = np.meshgrid(np.linspace(-1, 1, 4), np.linspace(-.5, .5, 3))
+    op = RayleighSommerfeldPropagator((6, 8), .1, .6, 1.2, x, y,
+                                    max_kernel_elements=16)
+    source = np.zeros((6, 8, 2), complex)
+    source[2, 3, 0] = 1 + 2j
+    source[4, 5, 1] = 1e-20  # Small nonzero amplitudes must not be discarded.
+    expected = np.zeros((x.size, 2), complex)
+    for ds, ss, kernel in op._blocks():
+        expected[ds] += kernel @ source.reshape(-1, 2)[ss]
+    np.testing.assert_allclose(op.forward(source).reshape(-1, 2), expected, rtol=1e-13, atol=0)
+    np.testing.assert_array_equal(op.forward(np.zeros_like(source)), 0)
+
+
 def test_circular_aperture_against_analytic_on_axis_integral():
     n, pitch, radius, z, wavelength = 200, .01, .7, 1.1, .8
     y, x = (np.indices((n, n)) - n / 2) * pitch

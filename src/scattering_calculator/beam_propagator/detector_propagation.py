@@ -49,14 +49,16 @@ class RayleighSommerfeldPropagator:
         self.source_y = ((sy - self.source_shape[0] / 2) * pixel_size).ravel()
         self.block_size = max(1, int(np.sqrt(max_kernel_elements)))
 
-    def _blocks(self):
+    def _blocks(self, source_indices=None):
+        source_x = self.source_x if source_indices is None else self.source_x[source_indices]
+        source_y = self.source_y if source_indices is None else self.source_y[source_indices]
         for d in range(0, self.detector_x.size, self.block_size):
             ds = slice(d, d + self.block_size)
-            for s in range(0, self.source_x.size, self.block_size):
+            for s in range(0, source_x.size, self.block_size):
                 ss = slice(s, s + self.block_size)
                 transverse2 = (
-                    (self.detector_x[ds, None] - self.source_x[None, ss]) ** 2
-                    + (self.detector_y[ds, None] - self.source_y[None, ss]) ** 2
+                    (self.detector_x[ds, None] - source_x[None, ss]) ** 2
+                    + (self.detector_y[ds, None] - source_y[None, ss]) ** 2
                 )
                 r = np.sqrt(transverse2 + self.distance**2)
                 # Stable r-z avoids cancellation for long X-ray distances.
@@ -73,8 +75,12 @@ class RayleighSommerfeldPropagator:
             raise ValueError("field shape does not match source_shape")
         channels = field.shape[2:]
         source = field.reshape(self.source_x.size, -1)
+        # Opaque aperture pixels contribute exactly zero. Retain all nonzero
+        # amplitudes without a threshold, preserving the linear operator.
+        active = np.flatnonzero(np.any(source != 0, axis=1))
+        source = source[active]
         result = np.zeros((self.detector_x.size, source.shape[1]), dtype=complex)
-        for ds, ss, kernel in self._blocks():
+        for ds, ss, kernel in self._blocks(active):
             result[ds] += kernel @ source[ss]
         return result.reshape(self.detector_shape + channels)
 
