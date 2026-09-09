@@ -476,6 +476,34 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
             precomputed_stack.materialize(),
         )
 
+    def test_lazy_scalar_preserves_broadcast_float32_storage(self) -> None:
+        """Shared layer patterns must not expand into a dense float64 volume."""
+        pattern = np.zeros((4, 5, 3), dtype=np.float32)
+        pattern[..., 0] = 0.2
+        pattern[..., 1] = 0.3
+        pattern[..., 2] = 0.7
+        mask = np.ones((2, 4, 5), dtype=np.float32)
+        mask[:, 1:3, 2:4] = 0.4
+        sample = SimpleNamespace(
+            mask=mask,
+            magnetization=np.broadcast_to(pattern, (2, *pattern.shape)),
+            layer_refractive_indices=np.array(
+                [[2.0 + 0.1j, 0.03j, 0.02], [1.5 + 0.05j, -0.02j, 0.01]],
+            ),
+        )
+        reference = SimpleNamespace(
+            mask=mask.astype(float),
+            magnetization=sample.magnetization.astype(float),
+            layer_refractive_indices=sample.layer_refractive_indices,
+        )
+        for pol in ("CR", "CL", 0.0):
+            stack = calculate_scalar_refractive_index_stack(sample, pol, lazy=True)
+            self.assertTrue(np.shares_memory(stack.magnetization, pattern))
+            self.assertTrue(np.shares_memory(stack.mask, mask))
+            self.assertEqual(stack.magnetization.strides[0], 0)
+            expected = calculate_scalar_refractive_index_stack(reference, pol, lazy=False)
+            np.testing.assert_allclose(stack.materialize(), expected.materialize(), rtol=1e-13)
+
     def test_structure_can_store_final_scalar_refractive_index_stack(self) -> None:
         """Structure exposes a scalar analogue to final_dielectric_tensor."""
         sample = SimpleNamespace()
