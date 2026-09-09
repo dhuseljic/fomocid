@@ -44,7 +44,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import h5py
 import numpy as np
@@ -138,6 +138,10 @@ class HologramPipelineConfig:
         If ``True``, project detector pixels onto reciprocal space with the
         linear approximation ``qx = k * x / z`` and ``qy = k * y / z``. The
         default ``False`` includes the flat-detector angular q distortion.
+    detector_propagation_method : {"fraunhofer", "rayleigh_sommerfeld"}
+        Sample-to-detector model. Default ``"fraunhofer"`` uses the existing
+        FFT/projection; ``"rayleigh_sommerfeld"`` integrates the exact scalar
+        finite-distance kernel directly and is intended for smaller grids.
     artifacts_config : dict
         Photon-event shape and splatting settings. It does not own
         ``counts_per_photon``; that value belongs in ``detector_params``.
@@ -359,6 +363,7 @@ class HologramPipelineConfig:
     use_detector_pixel_footprint: bool = False
     detector_pixel_footprint_samples: int = 3
     ignore_flat_detector_curvature: bool = False
+    detector_propagation_method: Literal["fraunhofer", "rayleigh_sommerfeld"] = "fraunhofer"
 
     # Beamstop
     beamstop_method: str | None = "circular"
@@ -500,6 +505,7 @@ class HologramPipelineRanges:
     use_detector_pixel_footprint: bool | None = None
     detector_pixel_footprint_samples: int | Uniform | None = None
     ignore_flat_detector_curvature: bool | None = None
+    detector_propagation_method: str | None = None
 
     # Beamstop
     beamstop_config: dict | None = None
@@ -1033,6 +1039,9 @@ class HologramPipeline:
                 params,
             )
         )
+        params["detector_propagation_method"] = _pick(
+            rng.detector_propagation_method, cfg.detector_propagation_method, params
+        )
         params["pattern_type"] = _pick(rng.pattern_type, cfg.pattern_type, params)
         params["pattern_config"] = _merge_dict(
             rng.pattern_config, cfg.pattern_config, params
@@ -1365,6 +1374,7 @@ class HologramPipeline:
             use_detector_pixel_footprint=p["use_detector_pixel_footprint"],
             detector_pixel_footprint_samples=p["detector_pixel_footprint_samples"],
             ignore_flat_detector_curvature=p["ignore_flat_detector_curvature"],
+            detector_propagation_method=p["detector_propagation_method"],
             beamstop_config=beamstop_config,
         )
         detector_config.setup()

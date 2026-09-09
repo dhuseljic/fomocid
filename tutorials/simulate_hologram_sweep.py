@@ -41,6 +41,7 @@ recipe = "[Au(200)Cr(60)]x5/SiN(200)/Pt(10)Al(10)Co(10)"
 oversampling=2 # sampling of the sample relative to the dector-based sampling; e.g. oversampling=2 means the sample grid has 2x finer pixel size than the detector-projected pixel size in the sample plane; this is separate from farfield_oversampling, which controls the hologram sampling relative to the detector
 farfield_oversampling = 1  # >1 extends the exit wave with the physical background before the far-field FFT
 detector_pixel_footprint_samples = 2  # sub-samples per detector-pixel axis when footprint averaging is enabled
+detector_propagation_method = "fraunhofer"  # Opt in with "rayleigh_sommerfeld" (use small grids).
 ignore_flat_detector_curvature = False  # False = include flat-detector q distortion; True = use linear qx=k*x/z, qy=k*y/z mapping
 
 # Output path.
@@ -317,7 +318,10 @@ config = HologramPipelineConfig(
     artifacts_config=artifacts_config,
     use_detector_pixel_footprint=use_detector_pixel_footprint,
     detector_pixel_footprint_samples=detector_pixel_footprint_samples,
-    ignore_flat_detector_curvature=ignore_flat_detector_curvature,
+    detector_propagation_method=detector_propagation_method,
+    ignore_flat_detector_curvature=(
+        ignore_flat_detector_curvature if detector_propagation_method == "fraunhofer" else False
+    ),
     # Beamstop
     beamstop_method=beamstop_method,
     beamstop_distance=beamstop_distance,

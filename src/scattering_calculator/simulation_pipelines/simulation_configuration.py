@@ -18,6 +18,9 @@ from scattering_calculator.beam_propagator import (
     Stokes_propagator,
     simple_propagation,
 )
+from scattering_calculator.beam_propagator.detector_propagation import (
+    RayleighSommerfeldPropagator,
+)
 
 
 class _ConfigMixin:
@@ -358,6 +361,11 @@ class DetectorConfig(_ConfigMixin):
         ``qx = k * x / z`` and ``qy = k * y / z``. If ``False``, include the
         flat-detector angular q distortion. Default ``False`` preserves the
         original behavior.
+    detector_propagation_method : {"fraunhofer", "rayleigh_sommerfeld"}
+        Default far-field FFT with detector projection, or direct finite-distance
+        scalar diffraction. Rayleigh--Sommerfeld uses coherent fields or the
+        retained Stokes mode carriers and physical pixel areas; its pairwise
+        integration can be slow.
 
     Attributes
     ----------
@@ -417,6 +425,7 @@ class DetectorConfig(_ConfigMixin):
     use_detector_pixel_footprint: bool = False
     detector_pixel_footprint_samples: int = 3
     ignore_flat_detector_curvature: bool = False
+    detector_propagation_method: Literal["fraunhofer", "rayleigh_sommerfeld"] = "fraunhofer"
 
     def __post_init__(self) -> None:
         """Handle the internal post init operation.
@@ -431,6 +440,12 @@ class DetectorConfig(_ConfigMixin):
         None
             The function completes in place.
         """
+        if self.detector_propagation_method not in ("fraunhofer", "rayleigh_sommerfeld"):
+            raise ValueError("Unknown detector_propagation_method")
+        if (self.detector_propagation_method == "rayleigh_sommerfeld"
+                and self.ignore_flat_detector_curvature):
+            raise ValueError("Rayleigh-Sommerfeld requires physical detector coordinates; "
+                             "ignore_flat_detector_curvature must be False")
         if any(s <= 0 for s in self.shape):
             raise ValueError(f"shape dimensions must be positive, got {self.shape}")
         if self.pixel_size <= 0:
@@ -503,6 +518,9 @@ class DetectorConfig(_ConfigMixin):
         """
         self.propagator = samplepropagationconfig
         self.wavefront = self.propagator.return_wavefront()
+        if self.detector_propagation_method == "rayleigh_sommerfeld":
+            self.exit_wavefield_intensity = np.sum(np.abs(self._detector_exit_field()) ** 2)
+            return
         exit_wavefield = self.propagator.return_scalar_wavefield()
         farfield_exit_wave = getattr(
             self.wavefront, "exit_wave_for_farfield", self.wavefront.exit_wave
@@ -553,17 +571,60 @@ class DetectorConfig(_ConfigMixin):
             self.wavefront.hologram,
             beam_params,
             self.propagator.SampleConfig.real_space_pixel_size,
-            self.beamstop,
+            getattr(self, "beamstop", None),
             artifacts_config=self.artifacts_config,
             measurement_config=self.measurement_config,
             detector_params=self.detector_params,
             coherence_length=beam_params.coherence_length,
         )
-        self.hologram_exp.gnomonic_projection(
-            use_pixel_footprint=self.use_detector_pixel_footprint,
-            pixel_footprint_samples=self.detector_pixel_footprint_samples,
-            ignore_flat_detector_curvature=self.ignore_flat_detector_curvature,
+        if self.detector_propagation_method == "rayleigh_sommerfeld":
+            self._detect_rayleigh_sommerfeld(beam_params)
+        else:
+            self.hologram_exp.gnomonic_projection(
+                use_pixel_footprint=self.use_detector_pixel_footprint,
+                pixel_footprint_samples=self.detector_pixel_footprint_samples,
+                ignore_flat_detector_curvature=self.ignore_flat_detector_curvature,
+            )
+
+    def _detector_exit_field(self):
+        """Return coherent channels, including incoherent Stokes mode carriers."""
+        if getattr(self.propagator, "propagator_method", None) == "Stokes":
+            modes = getattr(self.wavefront, "_coherent_modes", None)
+            if not modes:
+                raise ValueError("Rayleigh-Sommerfeld requires coherent mode carriers for Stokes")
+            # Mode weights are already included in the carrier amplitudes.
+            # A separate trailing axis ensures intensities, not fields, sum.
+            return np.stack([mode.exit_wave for mode in modes], axis=-1)
+        return self.wavefront.exit_wave
+
+    def _detect_rayleigh_sommerfeld(self, beam_params):
+        """Integrate finite-distance intensity over detector pixel footprints.
+
+        Exit amplitudes carry counts per source pixel. The area ratio converts
+        propagated squared amplitudes to counts per detector pixel. No global
+        renormalization or additional far-field solid-angle factor is applied.
+        """
+        field = self._detector_exit_field()
+        source_pitch = self.propagator.SampleConfig.real_space_pixel_size
+        n = max(1, int(self.detector_pixel_footprint_samples)) if self.use_detector_pixel_footprint else 1
+        offsets = ((np.arange(n) + 0.5) / n - 0.5) * self.pixel_size
+        intensity = np.zeros(self.shape, dtype=float)
+        for oy in offsets:
+            for ox in offsets:
+                operator = RayleighSommerfeldPropagator(
+                    field.shape[:2], source_pitch, beam_params.wavelength,
+                    self.sample_to_detector_distance,
+                    self.detector_layout.detx + ox, self.detector_layout.dety + oy,
+                )
+                detector_field = operator.forward(field)
+                power = np.abs(detector_field) ** 2
+                if power.ndim > 2:
+                    power = power.sum(axis=tuple(range(2, power.ndim)))
+                intensity += power
+        self.hologram_exp.hologram_detector = (
+            intensity / n**2 * (self.pixel_size / source_pitch) ** 2
         )
+        self.hologram_intensity = np.sum(self.hologram_exp.hologram_detector)
 
     def return_ideal_hologram(self) -> np.ndarray:
         """Return the ideal (noise-free, artifact-free) hologram as a 2-D array.
