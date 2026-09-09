@@ -82,7 +82,7 @@ class LazyScalarRefractiveIndexStack:
 
         for region in self.support_objects:
             region_support = self.aperture_support[region]
-            region_mask = self.mask[(layer_idx, *region)]
+            region_mask = np.asarray(self.mask[(layer_idx, *region)], dtype=float)
             needs_patch = np.any(
                 region_support & (np.abs(region_mask - 1.0) > self.tol)
             )
@@ -100,12 +100,12 @@ class LazyScalarRefractiveIndexStack:
             if has_circular and np.any(active):
                 index_patch[active] += (
                     self.circular_coeff
-                    * self.magnetization[layer_region + (2,)][active]
+                    * np.asarray(self.magnetization[layer_region + (2,)][active], dtype=float)
                     * self.n_circ[layer_idx]
                 )
             if has_linear and np.any(active):
-                mx = self.magnetization[layer_region + (0,)][active]
-                my = self.magnetization[layer_region + (1,)][active]
+                mx = np.asarray(self.magnetization[layer_region + (0,)][active], dtype=float)
+                my = np.asarray(self.magnetization[layer_region + (1,)][active], dtype=float)
                 dxy = np.abs(mx) ** 2 - np.abs(my) ** 2
                 index_patch[active] += self.linear_coeff * dxy * self.n_lin[layer_idx]
 
@@ -776,8 +776,10 @@ def calculate_scalar_refractive_index_stack(
     ``n=1``. If ``lazy=True``, ROI patches are computed layer by layer during
     propagation instead of being precomputed for the full stack.
     """
-    mask = np.asarray(sample_structure.mask, dtype=float)
-    magnetization = np.asarray(sample_structure.magnetization, dtype=float)
+    mask = np.asarray(sample_structure.mask)
+    # Preserve broadcast views: casting a float32 layer pattern here expands
+    # it into a dense float64 (Nz, Ny, Nx, 3) volume. Convert only ROI values.
+    magnetization = np.asarray(sample_structure.magnetization)
     indices = np.asarray(sample_structure.layer_refractive_indices, dtype=complex)
     if indices.ndim != 2 or indices.shape[1] < 3:
         raise ValueError(
@@ -798,7 +800,9 @@ def calculate_scalar_refractive_index_stack(
     has_circular = np.abs(circular_coeff * n_circ) > tol
     has_linear = np.abs(linear_coeff * n_lin) > tol
 
-    aperture_support = np.any(np.abs(1.0 - mask) > tol, axis=0)
+    aperture_support = np.zeros(mask.shape[1:], dtype=bool)
+    for layer_mask in mask:
+        aperture_support |= np.abs(1.0 - np.asarray(layer_mask, dtype=float)) > tol
     has_aperture_support = np.any(aperture_support)
     if not has_aperture_support:
         aperture_support = np.ones(mask.shape[1:], dtype=bool)
@@ -835,7 +839,7 @@ def calculate_scalar_refractive_index_stack(
     for layer_idx in range(mask.shape[0]):
         for region in support_objects:
             region_support = aperture_support[region]
-            region_mask = mask[(layer_idx, *region)]
+            region_mask = np.asarray(mask[(layer_idx, *region)], dtype=float)
             needs_patch = np.any(region_support & (np.abs(region_mask - 1.0) > tol))
             if has_circular[layer_idx] or has_linear[layer_idx]:
                 active = region_support & (region_mask > tol)
@@ -849,12 +853,12 @@ def calculate_scalar_refractive_index_stack(
             if has_circular[layer_idx] and np.any(active):
                 index_patch[active] += (
                     circular_coeff
-                    * magnetization[layer_region + (2,)][active]
+                    * np.asarray(magnetization[layer_region + (2,)][active], dtype=float)
                     * n_circ[layer_idx]
                 )
             if has_linear[layer_idx] and np.any(active):
-                mx = magnetization[layer_region + (0,)][active]
-                my = magnetization[layer_region + (1,)][active]
+                mx = np.asarray(magnetization[layer_region + (0,)][active], dtype=float)
+                my = np.asarray(magnetization[layer_region + (1,)][active], dtype=float)
                 dxy = np.abs(mx) ** 2 - np.abs(my) ** 2
                 index_patch[active] += linear_coeff * dxy * n_lin[layer_idx]
 

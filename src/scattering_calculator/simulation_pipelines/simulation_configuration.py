@@ -1864,7 +1864,9 @@ class SamplePropagatorConfig(_ConfigMixin):
         for physically correct diffraction. ``None`` produces an empty
         propagator that returns the input wavefield unchanged.
     propagator_config : dict
-        Reserved for future extension.
+        Propagation options. Set ``store_intermediate_wavefields=True`` to
+        retain the post-slice Jones field at every depth, and
+        ``calculate_farfield=False`` to stop at the sample exit surface.
     """
 
     SampleConfig: SampleConfig
@@ -2010,8 +2012,11 @@ class SamplePropagatorConfig(_ConfigMixin):
         farfield_oversampling = int(
             self.propagator_config.get("farfield_oversampling", 1)
         )
+        calculate_farfield = bool(
+            self.propagator_config.get("calculate_farfield", True)
+        )
         farfield_background_jones = None
-        if farfield_oversampling > 1:
+        if calculate_farfield and farfield_oversampling > 1:
             ny, nx = self.IlluminationConfig.shape
             farfield_background_jones = self._background_exit_jones(
                 (ny * farfield_oversampling, nx * farfield_oversampling)
@@ -2034,6 +2039,10 @@ class SamplePropagatorConfig(_ConfigMixin):
             jones_apply_zero_order_phase=bool(
                 self.propagator_config.get("jones_apply_zero_order_phase", True)
             ),
+            store_intermediate_wavefields=bool(
+                self.propagator_config.get("store_intermediate_wavefields", False)
+            ),
+            calculate_farfield=calculate_farfield,
             propagation_padding_px=int(
                 self.propagator_config.get("propagation_padding_px", 0)
             ),
@@ -2285,6 +2294,30 @@ class SamplePropagatorConfig(_ConfigMixin):
         if not hasattr(self, "exit_wavefield"):
             self.calculate_scalar_wavefield()
         return self.exit_wavefield
+
+    def return_intermediate_wavefields(self) -> np.ndarray:
+        """Return post-slice Jones wavefields when opt-in storage is enabled.
+
+        Returns
+        -------
+        ndarray of shape (Nz, Ny, Nx, 2)
+            Complex Jones wavefield immediately after each material slice and
+            before propagation toward the following slice.
+
+        Raises
+        ------
+        ValueError
+            If ``store_intermediate_wavefields`` was not enabled or the chosen
+            propagation method does not provide intermediate Jones fields.
+        """
+        wavefields = getattr(self.wavefront, "intermediate_wavefields", None)
+        if wavefields is None:
+            raise ValueError(
+                "Intermediate wavefields were not stored. Set "
+                "propagator_config['store_intermediate_wavefields'] = True "
+                "before calling setup()."
+            )
+        return wavefields
 
     def visualize_exit_wavefront(self) -> None:
         """Display the intensity and phase of the exit wavefront.

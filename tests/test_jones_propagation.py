@@ -28,6 +28,34 @@ from scattering_calculator.sample_generator.structures import CompactDielectricT
 
 
 class JonesFreeSpacePropagationTests(unittest.TestCase):
+    def test_intermediate_wavefields_are_opt_in(self) -> None:
+        field = np.zeros((4, 5, 2), dtype=complex)
+        field[..., 0] = 1.0
+        eps = np.zeros((3, 4, 5, 2, 2), dtype=complex)
+        eps[..., 0, 0] = 1.0
+        eps[..., 1, 1] = 1.0
+        beam = SimpleNamespace(wavelength=2e-9)
+
+        default = wavefronts(
+            beam_parameters=beam, eps_stack=eps,
+            layer_thicknesses=[1e-9, 1e-9, 1e-9],
+            real_space_pixel_size=1e-9, E_in=field,
+            propagate=False, calculate_farfield=False,
+        )
+        stored = wavefronts(
+            beam_parameters=beam, eps_stack=eps,
+            layer_thicknesses=[1e-9, 1e-9, 1e-9],
+            real_space_pixel_size=1e-9, E_in=field,
+            propagate=False, calculate_farfield=False,
+            store_intermediate_wavefields=True,
+        )
+
+        self.assertIsNone(default.intermediate_wavefields)
+        self.assertEqual(stored.intermediate_wavefields.shape, (3, 4, 5, 2))
+        np.testing.assert_allclose(stored.intermediate_wavefields[-1], stored.exit_wave)
+        self.assertIsNone(stored.detector_wave)
+        self.assertIsNone(stored.hologram)
+
     def test_local_wavevector_directions_follow_phase_gradient(self) -> None:
         """Local k estimation follows the simulator's tilted-phase convention."""
         wavelength = 2.0e-9
@@ -447,6 +475,34 @@ class JonesFreeSpacePropagationTests(unittest.TestCase):
             lazy_stack.materialize(),
             precomputed_stack.materialize(),
         )
+
+    def test_lazy_scalar_preserves_broadcast_float32_storage(self) -> None:
+        """Shared layer patterns must not expand into a dense float64 volume."""
+        pattern = np.zeros((4, 5, 3), dtype=np.float32)
+        pattern[..., 0] = 0.2
+        pattern[..., 1] = 0.3
+        pattern[..., 2] = 0.7
+        mask = np.ones((2, 4, 5), dtype=np.float32)
+        mask[:, 1:3, 2:4] = 0.4
+        sample = SimpleNamespace(
+            mask=mask,
+            magnetization=np.broadcast_to(pattern, (2, *pattern.shape)),
+            layer_refractive_indices=np.array(
+                [[2.0 + 0.1j, 0.03j, 0.02], [1.5 + 0.05j, -0.02j, 0.01]],
+            ),
+        )
+        reference = SimpleNamespace(
+            mask=mask.astype(float),
+            magnetization=sample.magnetization.astype(float),
+            layer_refractive_indices=sample.layer_refractive_indices,
+        )
+        for pol in ("CR", "CL", 0.0):
+            stack = calculate_scalar_refractive_index_stack(sample, pol, lazy=True)
+            self.assertTrue(np.shares_memory(stack.magnetization, pattern))
+            self.assertTrue(np.shares_memory(stack.mask, mask))
+            self.assertEqual(stack.magnetization.strides[0], 0)
+            expected = calculate_scalar_refractive_index_stack(reference, pol, lazy=False)
+            np.testing.assert_allclose(stack.materialize(), expected.materialize(), rtol=1e-13)
 
     def test_structure_can_store_final_scalar_refractive_index_stack(self) -> None:
         """Structure exposes a scalar analogue to final_dielectric_tensor."""
