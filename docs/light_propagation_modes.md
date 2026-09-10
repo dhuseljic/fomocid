@@ -11,7 +11,77 @@ The propagation chain has three conceptually different steps:
 
 - **Local material transmission** through each slice.
 - **Optional multislice free-space propagation** between slices.
-- **Final far-field propagation and flat-detector projection**.
+- **Selectable sample-to-detector propagation**: far-field FFT and projection,
+  or finite-distance Rayleigh--Sommerfeld integration.
+
+## Choosing The Sample-To-Detector Model
+
+The default is the simpler, fast **Fraunhofer FFT** model. The finite-distance
+model is opt-in. Set these options on `DetectorConfig` or
+`HologramPipelineConfig`, not inside the multislice `propagator_config`:
+
+```python
+# Default propagation model
+detector_propagation_method="fraunhofer"
+
+# Optional finite-distance, nonparaxial scalar propagation
+detector_propagation_method="rayleigh_sommerfeld"
+```
+
+These options act **after the final sample slice**. They do not change the
+free-space propagation between slices:
+
+| Stage | Selection | Model |
+| --- | --- | --- |
+| Between sample slices | `propagator_config={"propagate": True}` | Exact-dispersion angular spectrum on the sample grid |
+| Sample exit to detector (default) | `detector_propagation_method="fraunhofer"` | Far-field FFT followed by detector projection |
+| Sample exit to detector (optional) | `detector_propagation_method="rayleigh_sommerfeld"` | Direct finite-distance scalar diffraction |
+
+Far-field propagation and small-angle detector geometry are separate choices.
+The existing default `ignore_flat_detector_curvature=False` retains the angular
+correction when projecting the FFT onto the detector. To use the linear
+small-angle geometry as well, specify:
+
+```python
+detector_propagation_method="fraunhofer"
+ignore_flat_detector_curvature=True
+```
+
+For Rayleigh--Sommerfeld, leave `ignore_flat_detector_curvature=False`: it
+evaluates the field at physical detector coordinates directly.
+
+### Why Not Reuse The Multislice Propagator Directly?
+
+The same angular-spectrum physics can be used from sample to detector.
+Angular spectrum and Rayleigh--Sommerfeld describe the same continuous scalar
+half-space propagation problem with consistent boundary and phase conventions.
+The limitation is numerical sampling, not an intrinsic divergence of the model.
+
+The existing multislice implementation preserves the source pixel pitch and
+array extent. A distant detector usually covers a much larger area with a
+different pixel pitch. Simply substituting the detector distance into that
+routine would produce a field on the **sample grid**, not the detector grid.
+The expanding field can wrap around the periodic FFT window, and the sampled
+transfer function can become inadequate, particularly at high angles.
+
+For propagating modes `abs(exp(-i kz z)) = 1`; evanescent modes are implemented
+with decay, not exponential growth. Splitting a long distance into shorter
+steps on an unchanged grid does not by itself resolve the window problem:
+without absorbers, `H(z/n)^n = H(z)`. Absorbers suppress boundary returns by
+discarding light; they do not recover the light that should reach a larger
+detector.
+
+A detector angular-spectrum backend would need adequate padding/band limiting
+and an explicitly sampled output plane, potentially using a scaled or
+nonuniform Fourier evaluation. It could be substantially faster than direct
+integration, but is not currently exposed as a detector-model option.
+Rayleigh--Sommerfeld currently provides the independently sampled detector
+plane and a reference for validating such a future backend. Both numerical
+methods require convergence checks; an exact continuous kernel does not imply
+an exact discrete calculation.
+
+For the scalar angular-spectrum derivation, see TU Delft's
+[Wavefield propagation](https://qiweb.tudelft.nl/aoi/wavefieldpropagation/wavefieldpropagation/).
 
 ## Coordinates And Fields
 
@@ -421,7 +491,8 @@ Light can diffract between ROI and non-ROI pixels in the full operator.
 
 ## Final Fraunhofer Propagation
 
-After the last material slice, the simulator forms a far-field wave by a 2-D
+By default (`detector_propagation_method="fraunhofer"`), after the last material
+slice the simulator forms a far-field wave by a 2-D
 Fourier transform of the exit wave. For Jones mode,
 
 ```text
@@ -611,8 +682,114 @@ Use **ROI multislice propagation** (`propagate=True`,
 localized near aperture holes and you have validated that the ROI approximation
 is sufficient for the geometry.
 
-The final Fraunhofer FFT and detector q-space projection are always used to
-turn the exit wave into an ideal detector hologram.
+The default final step uses a Fraunhofer FFT and detector q-space projection.
+Select `detector_propagation_method="rayleigh_sommerfeld"` for finite-distance
+scalar propagation beyond the Fresnel and Fraunhofer approximations.
+
+## Finite-Distance Rayleigh--Sommerfeld Propagation
+
+Both `DetectorConfig` and `HologramPipelineConfig` accept:
+
+```python
+detector_propagation_method="rayleigh_sommerfeld"
+```
+
+This choice is independent of `propagator_method="Scalar"` or `"Jones"` and
+the multislice `propagate` switch. It is recorded in detector metadata.
+Stokes mode propagates each retained coherent mode separately, then adds their
+intensities. Mode weights are already carried by their amplitudes. A Stokes
+field without coherent mode carriers is rejected because intensity and
+polarization alone do not specify spatial phase.
+For Jones fields the two transverse components propagate independently; this
+is a scalar diffraction model applied to each component, not a full Maxwell
+solver with longitudinal polarization reconstruction.
+
+For source coordinates `(x, y)` and detector coordinates `(X, Y, z)`, we use
+the full Rayleigh--Sommerfeld I kernel:
+
+```text
+r = sqrt((X-x)^2 + (Y-y)^2 + z^2)
+K = z exp(-i k r) (1 + i k r) / (2 pi r^3)
+U_detector = sum_source K U_exit dx^2
+```
+
+Neither `r` nor the obliquity factor is expanded. The `1` term is retained
+even when `kr` is not large. The continuous kernel solves the scalar
+half-space boundary problem; its numerical evaluation is midpoint quadrature
+over a finite source window, with zero exterior field. The native exit wave
+is used; far-field background padding and `farfield_oversampling` do not extend
+this boundary field. Source coordinates use `(index - N/2) dx`, matching the
+sample and illumination grids, including odd sizes. Detector coordinates use
+`(index - detector_center) * detector_pixel_size`. All lengths are metres.
+
+The detector plane is parallel to the exit plane, with positive separation.
+Different source and detector pitches, rectangular arrays, detector offsets,
+and per-energy wavelengths are supported. No q-space interpolation or extra
+`cos(theta)^3` factor is applied: propagation and obliquity are already in the
+kernel. `ignore_flat_detector_curvature=True` is incompatible with this mode.
+
+### Phase, normalization, and reconstruction
+
+The kernel follows the existing multislice convention `exp(-i kz z)`. In the
+far-field limit its transverse Fourier exponent is positive. The legacy
+Fraunhofer path uses the negative-exponent `fft2`; for a fixed complex exit
+field, comparisons therefore require reversing the transverse Fourier
+coordinates, as well as accounting for spherical phase and amplitude factors.
+This distinction matters for asymmetric complex objects. It is tested rather
+than silently changing either convention.
+
+The reusable `RayleighSommerfeldPropagator` in
+`beam_propagator/detector_propagation.py` exposes `forward(field)` and
+`adjoint(field)`. The adjoint is the conjugate transpose of the discretized
+field operator under ordinary NumPy inner products, including the source area
+factor. It is not an inverse and does not include intensity detection or pixel
+footprint averaging. Existing FFT reconstruction helpers remain FFT algorithms;
+they are not a reconstruction solver for this new detector model.
+
+The pipeline's exit-wave squared amplitudes represent counts per source pixel.
+After propagation, detector intensity is multiplied by
+`(detector_pixel_size / real_space_pixel_size)^2`. There is no total-intensity
+renormalization: a finite detector can collect less than the transmitted light.
+Absolute count scales therefore need not match the legacy FFT normalization
+on an arbitrary detector grid. Exposure, quantum efficiency, beamstop and
+camera effects are subsequently applied through the existing detector code.
+The existing Gaussian partial-coherence postprocessing remains an approximate
+detector blur; it is not a finite-distance mutual-coherence propagation model.
+
+With `use_detector_pixel_footprint=True`, the pipeline averages **intensities**
+over the configured subpixel grid and multiplies by the full pixel area.
+Otherwise it uses pixel-center quadrature. The low-level operator itself
+returns complex field samples without a detector-area factor.
+
+### Sampling and computational cost
+
+This is a direct reference implementation with runtime proportional to the
+number of source pixels times detector pixels (times footprint samples).
+Pairwise arrays are processed in bounded blocks, but large production images
+can still be very slow. Start with small arrays and compare convergence before
+using it for dataset generation. No Fresnel fallback is selected automatically.
+
+The exact kernel does not eliminate discretization error. Resolve both the
+exit field and the kernel's oscillation across a source pixel: a necessary
+local phase-sampling condition is roughly `dx * abs(sin(theta)) < lambda/2`
+in each transverse direction; midpoint quadrature normally needs finer
+sampling for accuracy. At short distances the kernel's central peak also
+needs resolution. Refine source pitch while preserving physical support and
+refine detector footprint sampling until the result converges. Zero padding
+does not repair inadequate source sampling.
+
+Tests cover the analytic on-axis circular-aperture solution, agreement with a
+padded exact angular-spectrum calculation, the far-field phase convention,
+unequal-grid multi-channel adjoint consistency, pixel-area normalization,
+footprint integration, and configuration/metadata routing.
+
+For the scalar diffraction derivation, see TU Delft's
+[Scalar diffraction theory](https://qiweb.tudelft.nl/aoi/scalardiffractiontheory/scalardiffractiontheory/),
+including the full Green-function derivative before its large-`kr` simplification.
+The user-supplied background reference is Pfau and Eisebitt, *X-ray holography*
+(2016), [DOI: 10.1007/978-3-319-14394-1_28](https://doi.org/10.1007/978-3-319-14394-1_28).
+Its bibliographic record was verified; the chapter full text was not available
+during implementation.
 
 ## References
 

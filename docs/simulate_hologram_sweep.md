@@ -744,8 +744,9 @@ These dictionaries configure different stages and should not repeat keys:
   `counts_per_photon`, and `quantum_efficiency`.
 - `measurement_config`: acquisition timing and frame aggregation:
   `exposure_time`, `number_frames`, and `max_counts_per_image`.
-- `artifacts_config`: photon-event shape and splatting controls such as
-  `sigma_photon`, kernel size, class count, and irregularity.
+- `artifacts_config`: photon-event splatting plus camera defects and cosmic-ray
+  controls. This includes the persistent `camera_seed`, hot/cold count means,
+  pixel-value variation, cosmic-ray rate, intensity, size, and aspect ratio.
 
 Do not define one parameter in multiple dictionaries. Legacy aliases are
 normalized when unambiguous; conflicting values raise `ValueError`.
@@ -763,6 +764,37 @@ measurement_config=lambda params: {
 ```
 
 `exposure_time` is currently fixed.
+
+### Controlling Hot, Cold, And Cosmic-Ray Artifacts
+
+Hot, cold, and flickering pixels belong to a simulated camera. Reusing
+`camera_seed` reproduces both their `(y, x)` coordinates and their per-pixel
+baseline values. The controls have two distinct kinds of variation:
+
+- `hot_pixel_value` and `cold_pixel_value` are the central detector-count
+  values.
+- `hot_pixel_value_spread` and `cold_pixel_value_spread` are fractional
+  standard deviations used once, when the camera seed assigns a different
+  baseline to every defective pixel.
+- `hot_pixel_temporal_sigma` and `cold_pixel_temporal_sigma` are fractional
+  standard deviations around each assigned baseline in every exposure.
+- `flicker_fraction` selects which hot-pixel coordinates are unstable, and
+  `flicker_probability` controls their per-frame activation probability.
+
+Cosmic rays are independent exposure events. Their expected count is
+`cosmic_rays_per_second * exposure_time`; a missing exposure uses 1 second.
+Each event is rendered as a rotated, smoothly blurred Gaussian ellipse:
+
+- `cosmic_ray_value` is the central peak count and
+  `cosmic_ray_value_spread` varies the peak independently per event.
+- `cosmic_ray_length_range` is the sampled major-axis FWHM range in pixels.
+  Short values such as `(2.0, 5.0)` avoid long line-like tracks.
+- `cosmic_ray_aspect_ratio_range` is sampled independently for every event.
+  `(2.0, 3.0)` gives varied compact ellipses within the requested ratio range.
+
+The production sweep samples these settings per simulated camera. CR and CL
+share that camera map but use different exposure seeds, so their cosmic rays
+and temporal pixel oscillations differ.
 
 ## HDF5 Layout
 
@@ -814,7 +846,11 @@ values actually used after applying sweep ranges and compatibility aliases:
     │   └── ignore_flat_detector_curvature
     ├── detector_params/             # readout noise, threshold, QE, counts/photon
     ├── measurement_config/          # exposure, frames, count normalization
-    ├── artifacts_config/            # photon-event shape/splatting controls
+    ├── artifacts_config/            # requested camera/cosmic-ray controls
+    ├── artifacts_realized/
+    │   ├── camera/                  # defect coordinates and baseline values
+    │   ├── CR/                      # realized CR cosmic-ray events
+    │   └── CL/                      # realized CL cosmic-ray events
     ├── beamstop/                    # effective beamstop geometry
     ├── illumination/                # beam profile, center, focus, FWHM, tilt
     ├── propagator_config/           # propagation method and effective config
@@ -854,6 +890,10 @@ Each physical parameter has one canonical saved path. Important examples:
 | Counts per photon | `metadata/detector_params/counts_per_photon` |
 | Exposure time | `metadata/measurement_config/exposure_time` |
 | Photon-event sigma | `metadata/artifacts_config/sigma_photon` |
+| Camera seed | `metadata/artifacts_config/camera_seed` |
+| Hot/cold coordinates | `metadata/artifacts_realized/camera/*_pixels_yx` |
+| Hot/cold baselines | `metadata/artifacts_realized/camera/*_baseline_values` |
+| Cosmic-ray event rows | `metadata/artifacts_realized/{CR,CL}/cosmic_ray_events_yx_length_aspect_angle_value` |
 | Illumination FWHM | `metadata/illumination/fwhm_m` |
 | Illumination beam tilt | `metadata/illumination/alpha_beam_rad` (`alpha_y`, `alpha_x`) |
 | Multislice enable flag | `metadata/propagator_config/propagate` |

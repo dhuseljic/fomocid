@@ -37,6 +37,7 @@ result is saved with the same canonical HDF5 structure as a scripted sweep.
 | Co L-edge energy sweep | [`12_cobalt_l_edge_energy_sweep.ipynb`](../tutorials/12_cobalt_l_edge_energy_sweep.ipynb) | Fixed-sample energy scan across the Cobalt L3/L2 edges, XMCD exit-wave `log(CR/CL)`, holograms, object-hole-cropped FTH reconstructions, and total intensity versus energy. |
 | CK workflow with Mumax OVF input | [`13_mumax_ovf_workflow.ipynb`](../tutorials/13_mumax_ovf_workflow.ipynb) | CK-style single-simulation workflow where the magnetic layer count and 3-D magnetization stack come from a memory-mapped Mumax/OOMMF `.ovf` file in `DATA_ROOT/Data/mumax_files/`. Includes recipe compatibility checks, Mumax-to-sample interpolation, CL-CR exit-wave visualization, and ideal/detected FTH difference reconstructions. |
 | End-to-end scattering experiment | [`14_end_to_end_scattering_experiment.ipynb`](../tutorials/14_end_to_end_scattering_experiment.ipynb) | Maintained monolithic workflow covering detector geometry, material stack, FTH mask, magnetic domains, CR/CL illumination, exit waves, ideal and corrupted hologram sums/differences, and FTH reconstructions. |
+| Detector propagation comparison | [`16_compare_detector_propagation.ipynb`](../tutorials/16_compare_detector_propagation.ipynb) | Same exit wave propagated by Fraunhofer and Rayleigh–Sommerfeld, with half-image composites, differences, ratios, and explicit orientation/normalization comparisons. |
 
 ## Mumax OVF Workflow
 

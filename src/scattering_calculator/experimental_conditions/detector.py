@@ -1,3 +1,5 @@
+"""Detector geometry, beamstops, noise, and sensor-artifact simulation."""
+
 from __future__ import annotations
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -404,6 +406,23 @@ class detector_hologram:
         "photon_kernel_size": 9,
         "photon_irregularity": 2.0,
         "regenerate_photon_kernels": True,
+        "camera_seed": None,
+        "average_hot_pixels": 0.0,
+        "average_cold_pixels": 0.0,
+        "flicker_fraction": 0.0,
+        "flicker_probability": 0.5,
+        "hot_pixel_value": None,
+        "hot_pixel_value_spread": 0.05,
+        "hot_pixel_temporal_sigma": 0.02,
+        "cold_pixel_value": 0.0,
+        "cold_pixel_value_spread": 0.05,
+        "cold_pixel_temporal_sigma": 0.02,
+        "cosmic_rays_per_second": 0.0,
+        "cosmic_ray_value": None,
+        "cosmic_ray_value_spread": 0.15,
+        "cosmic_ray_length_range": (2.0, 5.0),
+        "cosmic_ray_aspect_ratio_range": (2.0, 3.0),
+        "cosmic_ray_max_length": 5,
     }
 
     def __init__(
@@ -500,6 +519,13 @@ class detector_hologram:
         return detector_params
 
     def _apply_artifacts_config(self, artifacts_config):
+        artifacts_config = dict(artifacts_config or {})
+        if (
+            "cosmic_ray_max_length" in artifacts_config
+            and "cosmic_ray_length_range" not in artifacts_config
+        ):
+            maximum = float(artifacts_config["cosmic_ray_max_length"])
+            artifacts_config["cosmic_ray_length_range"] = (min(2.0, maximum), maximum)
         self._apply_config(
             {
                 **self.DEFAULT_ARTIFACTS_CONFIG,
@@ -518,8 +544,225 @@ class detector_hologram:
                 "photon_ellipticity_range",
                 "photon_class_seed",
                 "photon_kernel_seed",
+                "camera_seed",
+                "average_hot_pixels",
+                "average_cold_pixels",
+                "flicker_fraction",
+                "flicker_probability",
+                "hot_pixel_value",
+                "hot_pixel_value_spread",
+                "hot_pixel_temporal_sigma",
+                "cold_pixel_value",
+                "cold_pixel_value_spread",
+                "cold_pixel_temporal_sigma",
+                "cosmic_rays_per_second",
+                "cosmic_ray_value",
+                "cosmic_ray_value_spread",
+                "cosmic_ray_length_range",
+                "cosmic_ray_aspect_ratio_range",
+                "cosmic_ray_max_length",
             },
         )
+
+        for name in ("average_hot_pixels", "average_cold_pixels", "cosmic_rays_per_second"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be non-negative.")
+        if not 0.0 <= self.flicker_fraction <= 1.0:
+            raise ValueError("flicker_fraction must be between 0 and 1.")
+        if not 0.0 <= self.flicker_probability <= 1.0:
+            raise ValueError("flicker_probability must be between 0 and 1.")
+        if self.cosmic_ray_max_length < 1:
+            raise ValueError("cosmic_ray_max_length must be at least 1 pixel.")
+        for name in (
+            "hot_pixel_value_spread",
+            "hot_pixel_temporal_sigma",
+            "cold_pixel_value_spread",
+            "cold_pixel_temporal_sigma",
+            "cosmic_ray_value_spread",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be non-negative.")
+        for name in ("cosmic_ray_length_range", "cosmic_ray_aspect_ratio_range"):
+            low, high = getattr(self, name)
+            if low <= 0 or high < low:
+                raise ValueError(f"{name} must be a positive increasing pair.")
+        if self.cosmic_ray_aspect_ratio_range[0] < 1:
+            raise ValueError("cosmic_ray_aspect_ratio_range cannot start below 1.")
+
+    def _camera_defect_map(self, shape):
+        """Return the reproducible hot/cold pixel map for this camera seed.
+
+        Parameters
+        ----------
+        shape : tuple of int
+            Sensor image shape as ``(rows, columns)``.
+
+        Returns
+        -------
+        dict
+            Pixel coordinate arrays and sampled defect counts.
+        """
+        rng = np.random.default_rng(getattr(self, "camera_seed", None))
+        pixel_count = int(np.prod(shape))
+        n_hot = min(rng.poisson(getattr(self, "average_hot_pixels", 0.0)), pixel_count)
+        n_cold = min(rng.poisson(getattr(self, "average_cold_pixels", 0.0)), pixel_count - n_hot)
+        selected = rng.choice(pixel_count, size=n_hot + n_cold, replace=False)
+        hot_flat = selected[:n_hot]
+        cold_flat = selected[n_hot:]
+        n_flicker = int(rng.binomial(n_hot, getattr(self, "flicker_fraction", 0.0)))
+        flicker_flat = (
+            rng.choice(hot_flat, size=n_flicker, replace=False)
+            if n_flicker else np.empty(0, dtype=int)
+        )
+        fixed_hot_flat = np.setdiff1d(hot_flat, flicker_flat, assume_unique=False)
+        threshold = float(getattr(self, "detector_threshold", 64e3))
+        hot_center = getattr(self, "hot_pixel_value", None)
+        hot_center = 0.9 * threshold if hot_center is None else float(hot_center)
+        cold_center = float(getattr(self, "cold_pixel_value", 0.0))
+        hot_baselines = np.clip(
+            rng.normal(
+                hot_center,
+                abs(hot_center) * getattr(self, "hot_pixel_value_spread", 0.05),
+                size=n_hot,
+            ),
+            0,
+            None,
+        )
+        cold_baselines = np.clip(
+            rng.normal(
+                cold_center,
+                max(abs(cold_center), 1.0)
+                * getattr(self, "cold_pixel_value_spread", 0.05),
+                size=n_cold,
+            ),
+            0,
+            None,
+        )
+        hot_baseline_by_flat = dict(zip(hot_flat.tolist(), hot_baselines.tolist()))
+        return {
+            "hot": np.unravel_index(fixed_hot_flat, shape),
+            "flicker": np.unravel_index(flicker_flat, shape),
+            "cold": np.unravel_index(cold_flat, shape),
+            "hot_baseline_values": np.asarray(
+                [hot_baseline_by_flat[index] for index in fixed_hot_flat], dtype=float
+            ),
+            "flicker_baseline_values": np.asarray(
+                [hot_baseline_by_flat[index] for index in flicker_flat], dtype=float
+            ),
+            "cold_baseline_values": cold_baselines,
+            "n_hot": n_hot,
+            "n_cold": n_cold,
+        }
+
+    def _add_sensor_artifacts(self, image, rng):
+        """Apply persistent bad pixels and transient cosmic-ray tracks.
+
+        Parameters
+        ----------
+        image : ndarray
+            Detector-count image before sensor defects.
+        rng : numpy.random.Generator
+            Per-exposure random generator.
+
+        Returns
+        -------
+        ndarray
+            Copy of the image with sensor artifacts applied.
+        """
+        result = np.array(image, dtype=float, copy=True)
+        defect_map = self._camera_defect_map(result.shape)
+        self.camera_defect_map = defect_map
+        hot_setting = getattr(self, "hot_pixel_value", None)
+        hot_value = 0.9 * self.detector_threshold if hot_setting is None else hot_setting
+        cosmic_setting = getattr(self, "cosmic_ray_value", None)
+        cosmic_value = hot_value if cosmic_setting is None else cosmic_setting
+
+        hot_baselines = defect_map["hot_baseline_values"]
+        hot_sigma = np.abs(hot_baselines) * getattr(self, "hot_pixel_temporal_sigma", 0.02)
+        result[defect_map["hot"]] = np.clip(
+            rng.normal(
+                hot_baselines * self.number_frames,
+                hot_sigma * np.sqrt(self.number_frames),
+            ),
+            0,
+            None,
+        )
+        cold_baselines = defect_map["cold_baseline_values"]
+        cold_sigma = np.maximum(np.abs(cold_baselines), 1.0) * getattr(
+            self, "cold_pixel_temporal_sigma", 0.02
+        )
+        result[defect_map["cold"]] = np.clip(
+            rng.normal(
+                cold_baselines * self.number_frames,
+                cold_sigma * np.sqrt(self.number_frames),
+            ),
+            0,
+            None,
+        )
+        flicker_y, flicker_x = defect_map["flicker"]
+        if flicker_y.size:
+            active_frames = rng.binomial(
+                self.number_frames, getattr(self, "flicker_probability", 0.5), size=flicker_y.size
+            )
+            flicker_baselines = defect_map["flicker_baseline_values"]
+            flicker_sigma = np.abs(flicker_baselines) * getattr(
+                self, "hot_pixel_temporal_sigma", 0.02
+            )
+            result[flicker_y, flicker_x] = np.clip(
+                rng.normal(
+                    flicker_baselines * active_frames,
+                    flicker_sigma * np.sqrt(active_frames),
+                ),
+                0,
+                None,
+            )
+
+        exposure = 1.0 if self.exposure_time is None else float(self.exposure_time)
+        if exposure < 0:
+            raise ValueError("exposure_time must be non-negative or None.")
+        expected_rays = getattr(self, "cosmic_rays_per_second", 0.0) * exposure * self.number_frames
+        n_rays = int(rng.poisson(expected_rays))
+        self.cosmic_ray_count = n_rays
+        cosmic_ray_tracks = []
+        if n_rays:
+            rows, cols = result.shape
+            for _ in range(n_rays):
+                y0 = rng.uniform(0, rows - 1)
+                x0 = rng.uniform(0, cols - 1)
+                length_range = getattr(self, "cosmic_ray_length_range", None)
+                if length_range is None:
+                    length_range = (1.0, getattr(self, "cosmic_ray_max_length", 5))
+                length = rng.uniform(*length_range)
+                aspect_ratio = rng.uniform(
+                    *getattr(self, "cosmic_ray_aspect_ratio_range", (2.0, 3.0))
+                )
+                angle = rng.uniform(0, 2 * np.pi)
+                event_value = max(
+                    0.0,
+                    rng.normal(
+                        cosmic_value,
+                        abs(cosmic_value)
+                        * getattr(self, "cosmic_ray_value_spread", 0.15),
+                    ),
+                )
+                sigma_major = length / 2.355
+                sigma_minor = sigma_major / aspect_ratio
+                radius = max(2, int(np.ceil(3 * sigma_major)))
+                y_min, y_max = max(0, int(y0) - radius), min(rows, int(y0) + radius + 1)
+                x_min, x_max = max(0, int(x0) - radius), min(cols, int(x0) + radius + 1)
+                yy, xx = np.indices((y_max - y_min, x_max - x_min), dtype=float)
+                dy, dx = yy + y_min - y0, xx + x_min - x0
+                major = np.sin(angle) * dy + np.cos(angle) * dx
+                minor = np.cos(angle) * dy - np.sin(angle) * dx
+                event = event_value * np.exp(
+                    -0.5 * ((major / sigma_major) ** 2 + (minor / sigma_minor) ** 2)
+                )
+                result[y_min:y_max, x_min:x_max] += event
+                cosmic_ray_tracks.append(
+                    (y0, x0, length, aspect_ratio, angle, event_value)
+                )
+        self.cosmic_ray_tracks = np.asarray(cosmic_ray_tracks, dtype=float).reshape(-1, 6)
+        return result
 
     def _apply_detector_params(self, detector_params):
         self._apply_config(
@@ -610,8 +853,11 @@ class detector_hologram:
         # 0. we start with holo, the FFT of the exit wave, hence the distribution of photons (or counts) at a certain point in the detector for a single image
         rng = np.random.default_rng(getattr(self, "noise_seed", None))
         holo = np.array(self.hologram_detector, dtype=float, copy=True)
+        effective_exposure = 1.0 if self.exposure_time is None else float(self.exposure_time)
+        if effective_exposure < 0:
+            raise ValueError("exposure_time must be non-negative or None.")
         if self.max_counts_per_image is None:
-            holo *= self.exposure_time * self.quantum_efficiency
+            holo *= effective_exposure * self.quantum_efficiency
 
         npx, npy = holo.shape
         self._set_coherence_sigmas(holo.shape)
@@ -690,6 +936,7 @@ class detector_hologram:
 
         # 7. convert photons back to detector counts
         holo_counts = photon_counts.astype(float) * self.counts_per_photon
+        artifact_seed = int(rng.integers(0, np.iinfo(np.uint32).max))
 
         # 8. draw one readout-noise image and reuse it for optional variants.
         readout_noise = 0.0
@@ -705,6 +952,11 @@ class detector_hologram:
             detected = np.array(image, dtype=float, copy=True)
             if apply_mask:
                 detected *= 1.0 - self.beamstop.beamstop
+            # These effects originate in the sensor/readout and therefore are
+            # not shadowed by an upstream optical beamstop.
+            detected = self._add_sensor_artifacts(
+                detected, np.random.default_rng(artifact_seed)
+            )
 
             detected += readout_noise
 
@@ -1038,3 +1290,58 @@ class detector_hologram:
                 splatted += signal.fftconvolve(counts_v, kernel, mode="same")
 
         return splatted
+
+
+def add_sensor_artifacts(
+    image,
+    *,
+    artifacts_config=None,
+    exposure_time=1.0,
+    number_frames=1,
+    detector_threshold=64e3,
+    exposure_seed=None,
+):
+    """Add reproducible camera defects and transient cosmic rays to an image.
+
+    ``camera_seed`` in ``artifacts_config`` fixes hot/cold pixel coordinates.
+    ``exposure_seed`` controls flicker and cosmic rays for this image. When
+    ``exposure_time`` is ``None``, cosmic-ray sampling assumes one second.
+
+    Parameters
+    ----------
+    image : ndarray
+        Input two-dimensional detector image.
+    artifacts_config : dict or None
+        Camera-defect and cosmic-ray settings.
+    exposure_time : float or None
+        Exposure duration in seconds; ``None`` means one second.
+    number_frames : int
+        Number of frames represented by the image.
+    detector_threshold : float
+        Default hot-pixel and cosmic-ray count value.
+    exposure_seed : int or None
+        Seed for transient artifacts in this exposure.
+
+    Returns
+    -------
+    tuple of ndarray and dict
+        Corrupted image and sampled artifact metadata.
+    """
+    model = object.__new__(detector_hologram)
+    model.hologram = np.asarray(image)
+    model.number_frames = int(number_frames)
+    model.exposure_time = exposure_time
+    model.detector_threshold = float(detector_threshold)
+    model._apply_artifacts_config(artifacts_config)
+    result = model._add_sensor_artifacts(
+        np.asarray(image, dtype=float) * model.number_frames,
+        np.random.default_rng(exposure_seed),
+    )
+    result /= model.number_frames
+    metadata = {
+        "hot_pixels": model.camera_defect_map["n_hot"],
+        "cold_pixels": model.camera_defect_map["n_cold"],
+        "cosmic_rays": model.cosmic_ray_count,
+        "effective_exposure_time": 1.0 if exposure_time is None else float(exposure_time),
+    }
+    return result, metadata

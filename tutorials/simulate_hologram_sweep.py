@@ -1,6 +1,9 @@
 """Generate parameter sweeps of simulated FTH holograms."""
 
 # %%
+######################################
+# 01: IMPORTS AND RUN CONTROLS
+######################################
 # Import general libraries
 import os
 import numpy as np
@@ -28,9 +31,7 @@ from scattering_calculator.sample_generator.domain_phase_space import (
 )
 
 
-#################################################################
-#### HOW MANY SIMULATIONS TO RUN? ####
-#################################################################
+# Number of simulations to run.
 nr_simulations = 7  # increase to e.g. 1000 for a full training dataset
 
 # --- Material stack ---
@@ -40,12 +41,10 @@ recipe = "[Au(200)Cr(60)]x5/SiN(200)/Pt(10)Al(10)Co(10)"
 oversampling=2 # sampling of the sample relative to the dector-based sampling; e.g. oversampling=2 means the sample grid has 2x finer pixel size than the detector-projected pixel size in the sample plane; this is separate from farfield_oversampling, which controls the hologram sampling relative to the detector
 farfield_oversampling = 1  # >1 extends the exit wave with the physical background before the far-field FFT
 detector_pixel_footprint_samples = 2  # sub-samples per detector-pixel axis when footprint averaging is enabled
+detector_propagation_method = "fraunhofer"  # Opt in with "rayleigh_sommerfeld" (use small grids).
 ignore_flat_detector_curvature = False  # False = include flat-detector q distortion; True = use linear qx=k*x/z, qy=k*y/z mapping
 
-# %%
-# ===================
-# OUTPUT PATH
-# ===================
+# Output path.
 output_folder = DATA_ROOT / "Data" / "hologram_sweep"
 output_path = output_folder / "simulation_sweep.h5"
 
@@ -75,9 +74,9 @@ use_detector_pixel_footprint = True  # True = average the ideal hologram over ea
 os.makedirs(output_folder, exist_ok=True)
 
 # %%
-# ===================
-# FIXED PARAMETERS
-# ===================
+######################################
+# 02: FIXED BASELINE PARAMETERS
+######################################
 # These are the baseline values used whenever a parameter is NOT swept.
 # Any field here can be moved into HologramPipelineRanges to vary it.
 
@@ -121,6 +120,23 @@ artifacts_config = {
     "photon_kernel_size": 9,
     "photon_irregularity": 2.0,
     "regenerate_photon_kernels": True,
+    # These defaults are replaced by random_artifacts_config for each sample.
+    "camera_seed": 0,
+    "average_hot_pixels": 50.0,
+    "average_cold_pixels": 20.0,
+    "flicker_fraction": 0.2,
+    "flicker_probability": 0.5,
+    "hot_pixel_value": 55_000.0,
+    "hot_pixel_value_spread": 0.08,
+    "hot_pixel_temporal_sigma": 0.03,
+    "cold_pixel_value": 200.0,
+    "cold_pixel_value_spread": 0.25,
+    "cold_pixel_temporal_sigma": 0.10,
+    "cosmic_rays_per_second": 0.5,
+    "cosmic_ray_value": 50_000.0,
+    "cosmic_ray_value_spread": 0.15,
+    "cosmic_ray_length_range": (2.0, 5.0),
+    "cosmic_ray_aspect_ratio_range": (2.0, 3.0),
 }
 
 # --- Beamstop ---
@@ -141,6 +157,9 @@ beamstop_config = {
 
 
 
+######################################
+# 03: MAGNETIC PHASE-SPACE PREPARATION
+######################################
 # --- Magnetic domain pattern ---
 pattern_type = "binary_labyrinth_pattern"
 stripe_width = 300e-9  # m
@@ -278,9 +297,9 @@ illumination_fwhm = 10.5e-6  # m
 illumination_alpha_beam = (0.0, 0.0)  # rad (alpha_y, alpha_x); 0 keeps normal incidence
 
 # %%
-# ===================
-# PIPELINE CONFIG
-# ===================
+######################################
+# 04: PIPELINE CONFIGURATION
+######################################
 config = HologramPipelineConfig(
     # Sample material stack
     recipe=recipe,
@@ -299,7 +318,10 @@ config = HologramPipelineConfig(
     artifacts_config=artifacts_config,
     use_detector_pixel_footprint=use_detector_pixel_footprint,
     detector_pixel_footprint_samples=detector_pixel_footprint_samples,
-    ignore_flat_detector_curvature=ignore_flat_detector_curvature,
+    detector_propagation_method=detector_propagation_method,
+    ignore_flat_detector_curvature=(
+        ignore_flat_detector_curvature if detector_propagation_method == "fraunhofer" else False
+    ),
     # Beamstop
     beamstop_method=beamstop_method,
     beamstop_distance=beamstop_distance,
@@ -354,9 +376,9 @@ config = HologramPipelineConfig(
 )
 
 # %%
-# ===================
-# PARAMETER RANGES
-# ===================
+######################################
+# 05: RANDOM PARAMETER GENERATORS
+######################################
 # Define which parameters vary across runs and how they are sampled.
 #
 # Uniform(low, high)  — draw uniformly from [low, high]
@@ -686,10 +708,57 @@ def random_beamstop_config(params):
     }
 
 
-###############################################################################################################
-###############################################################################################################
-###############################################################################################################
-###############################################################################################################
+def random_artifacts_config(params):
+    """Sample one camera profile and its cosmic-ray process.
+
+    The returned ``camera_seed`` fixes hot/cold/flickering coordinates for
+    both helicities of this sample. The pipeline assigns consecutive detector
+    noise seeds to CR and CL, producing independent cosmic-ray tracks.
+
+    Parameters
+    ----------
+    params : dict
+        Parameters already sampled for the current simulation.
+
+    Returns
+    -------
+    dict
+        Sampled artifact configuration stored under ``artifacts_config`` in
+        the sample metadata.
+    """
+    return {
+        "sigma_photon": Uniform(0.7, 0.9).sample(),
+        "photon_n_classes": 1,
+        "photon_n_variants": 30,
+        "photon_kernel_size": 9,
+        "photon_irregularity": 2.0,
+        "regenerate_photon_kernels": True,
+        "camera_seed": int(np.random.randint(0, 2**31 - 1)),
+        "average_hot_pixels": Uniform(5.0, 120.0).sample(),
+        "average_cold_pixels": Uniform(2.0, 60.0).sample(),
+        "flicker_fraction": Uniform(0.0, 0.4).sample(),
+        "flicker_probability": Uniform(0.15, 0.85).sample(),
+        "hot_pixel_value": Uniform(45_000.0, 60_000.0).sample(),
+        "hot_pixel_value_spread": Uniform(0.03, 0.12).sample(),
+        "hot_pixel_temporal_sigma": Uniform(0.01, 0.06).sample(),
+        "cold_pixel_value": Uniform(0.0, 500.0).sample(),
+        "cold_pixel_value_spread": Uniform(0.05, 0.35).sample(),
+        "cold_pixel_temporal_sigma": Uniform(0.02, 0.15).sample(),
+        "cosmic_rays_per_second": Uniform(0.0, 2.0).sample(),
+        "cosmic_ray_value": Uniform(35_000.0, 60_000.0).sample(),
+        "cosmic_ray_value_spread": Uniform(0.08, 0.25).sample(),
+        "cosmic_ray_length_range": (
+            Uniform(1.5, 2.5).sample(),
+            Uniform(4.0, 6.0).sample(),
+        ),
+        # Every ray independently samples its ratio from this interval.
+        "cosmic_ray_aspect_ratio_range": (2.0, 3.0),
+    }
+
+
+######################################
+# 06: SWEEP PARAMETER RANGES
+######################################
 
 ranges = HologramPipelineRanges(
     # Sweep X-ray energy across the Co L-edge absorption region
@@ -727,14 +796,7 @@ ranges = HologramPipelineRanges(
     # +/-0.5 projected beamstop radii in detector pixels.
     beamstop_config=random_beamstop_config,
 
-    artifacts_config = {
-        "sigma_photon": Uniform(0.7,0.9),
-        "photon_n_classes": 1,
-        "photon_n_variants": 30,
-        "photon_kernel_size": 9,
-        "photon_irregularity": 2.0,
-        "regenerate_photon_kernels": True,
-    },
+    artifacts_config=random_artifacts_config,
 
 
     # generating detector distances from reasonable ranges based on the stripe width and xray energy
@@ -747,15 +809,10 @@ ranges = HologramPipelineRanges(
 )
 
 
-###############################################################################################################
-###############################################################################################################
-###############################################################################################################
-###############################################################################################################
-
 # %%
-# ===================
-# RUN PIPELINE
-# ===================
+######################################
+# 07: RUN THE PIPELINE
+######################################
 
 
 pipeline = HologramPipeline(
@@ -769,9 +826,9 @@ pipeline = HologramPipeline(
 pipeline.run()
 
 # %%
-# ===================
-# INSPECT OUTPUT + FIGURE
-# ===================
+######################################
+# 08: INSPECT OUTPUT AND FIGURES
+######################################
 # Each group '00000/', '00001/', ... contains:
 #
 #   CR/ideal       — ideal (noise-free) hologram for circular-right polarisation
@@ -781,6 +838,8 @@ pipeline.run()
 #   CL/...         — same for circular-left
 #   beamstop_mask  — 2D beamstop mask
 #   metadata/      — all physical parameters used for this run
+#     artifacts_config/   — sampled artifact rates, means, and camera seed
+#     artifacts_realized/ — hot/cold coordinates and CR/CL cosmic-ray tracks
 import matplotlib.pyplot as plt
 
 PLOT_FIGSIZE_MAIN = (11, 8)
