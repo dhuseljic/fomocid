@@ -3,6 +3,10 @@
 Rayleigh--Sommerfeld I is evaluated by midpoint quadrature, with zero field
 outside the supplied source window. No distance or angle expansion is made.
 The exp(-ikr) convention matches the existing multislice angular spectrum.
+This is the field-boundary (RS I) operator, not RS II, which requires the
+normal derivative of the input field. Paganin (2006), p. 24, Eq. (1.64),
+gives RS I; p. 25 states its angular-spectrum equivalence. See docs/light_propagation_modes.md
+for the supplied excerpt's scope and the convention conversion.
 """
 
 from __future__ import annotations
@@ -64,6 +68,9 @@ class RayleighSommerfeldPropagator:
                 # Stable r-z avoids cancellation for long X-ray distances.
                 excess = transverse2 / (r + self.distance)
                 phase = np.exp(-1j * self.k * excess) * np.exp(-1j * self.k * self.distance)
+                # Paganin (1.64) differentiates at the source: d/dz_source
+                # = -d/d(distance). Conjugate his exp(+ikr) convention.
+                # Full -d/dz [exp(-ikr)/(2*pi*r)] times source area.
                 kernel = (self.pixel_size**2 * self.distance / (2 * np.pi)
                           * phase * (1 + 1j * self.k * r) / r**3)
                 yield ds, ss, kernel

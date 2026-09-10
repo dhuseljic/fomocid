@@ -176,3 +176,21 @@ def test_wide_angle_single_source_matches_green_function_derivative(wavelength):
         return np.exp(-1j*k*r)/(2*np.pi*r)
     expected = -(green(z+dz)-green(z-dz))/(2*dz)*pitch**2
     np.testing.assert_allclose(op.forward(source), expected, rtol=1e-8)
+
+
+@pytest.mark.parametrize("dz", [0., .7, -.7])
+@pytest.mark.parametrize("frequency", [.95, 1., 1.05])
+def test_angular_spectrum_cutoff_and_evanescent_reversal(frequency, dz):
+    """Check Paganin's dispersion cutoff and our damped reversal convention."""
+    from scattering_calculator.beam_propagator.simple_propagation import scalar_wavefronts
+
+    # The fundamental FFT bin has exactly the requested frequency; lambda=1.
+    n = 16
+    pitch = 1 / (n * frequency)
+    if frequency <= 1:
+        expected = np.exp(-2j * np.pi * dz * np.sqrt(1 - frequency**2))
+    else:
+        expected = np.exp(-2 * np.pi * abs(dz) * np.sqrt(frequency**2 - 1))
+    for model in (scalar_wavefronts, wavefronts):
+        kernel = model._free_space_kernel(n, n, 1., dz, pitch)
+        np.testing.assert_allclose(kernel[0, 1], expected, atol=1e-12)

@@ -788,8 +788,121 @@ For the scalar diffraction derivation, see TU Delft's
 including the full Green-function derivative before its large-`kr` simplification.
 The user-supplied background reference is Pfau and Eisebitt, *X-ray holography*
 (2016), [DOI: 10.1007/978-3-319-14394-1_28](https://doi.org/10.1007/978-3-319-14394-1_28).
-Its bibliographic record was verified; the chapter full text was not available
-during implementation.
+The supplied PDF excerpt was reviewed against the implementation. It contains
+printed pages 1096–1103 and 1130–1133, including the propagation derivation,
+but not the complete chapter. Its filename says 2020; the excerpt has no
+bibliographic title or copyright page establishing a different edition, so the
+DOI-based citation above is retained.
+
+### Comparison with Pfau and Eisebitt
+
+Page numbers below are the printed chapter pages.
+
+| Chapter reference | Relation to this implementation |
+| --- | --- |
+| pp. 1099–1100, Eqs. (10)–(13) | Exact scalar angular-spectrum propagation retains `sqrt(k²-kx²-ky²)`. This is the dispersion relation used between multislice layers. Using FFTs does **not** itself impose a small-angle approximation. |
+| p. 1100, Eq. (14); p. 1101, Eq. (16) | The paraxial expansion produces Fresnel propagation. It is distinct from retaining the full square root. |
+| p. 1101, Eqs. (17)–(19) | The chapter's Fraunhofer derivation also assumes small angles; its linear coordinates are `kx=k X/z`, `ky=k Y/z`. Its far-field criterion is `Dmax²/(lambda*z) << 1`, with `Dmax` covering the full varying field, including the reference aperture. |
+| pp. 1102–1103, Eqs. (20)–(22) | A 3-D first-Born scattering amplitude samples the Ewald sphere. For axial incidence, `qz=sqrt(k²-qx²-qy²)-k`; setting `qz≈0` is an additional approximation. |
+| p. 1103, Eq. (23) | The sample projection approximation has a thickness condition `d << 2*Delta_xy²/lambda`. This concerns formation of the exit wave, separately from subsequent free-space propagation. |
+
+For notebook 16, the implication is to retain both linear and exact angular
+mapping for the FFT comparison. The latter uses `qx=k X/R`, `qy=k Y/R`, where
+`R=sqrt(X²+Y²+z²)`, but does not turn the legacy FFT into a full finite-distance
+boundary-field propagator. RS evaluates the field directly on that physical
+plane, so no subsequent Ewald/flat-detector remapping should be applied. This
+is an inference from the implemented operators and the chapter's distinction
+between propagation and 3-D scattering; the excerpt does not derive our RS
+kernel or its detector normalization. Neither method can recover depth
+information missing from the prescribed exit wave.
+
+The same exact angular-spectrum model could in principle propagate from the
+sample to the detector. The practical obstacle for this example is sampling:
+a nanometre source grid and a centimetre-wide detector require very different
+windows and pitches. An ordinary same-grid FFT needs sufficient padding and
+kernel sampling to avoid wraparound and aliasing. Direct RS permits independent
+source and detector grids, at much greater computational cost. This is not a
+physical divergence of forward propagation. The chapter also notes after
+Eq. (13) that reversing evanescent decay is excluded from its reversible
+propagation statement.
+
+**Phase conventions:** the chapter uses `exp(-i*omega*t)` and forward
+`exp(+i*kz*z)` in Eq. (11); the code uses forward `exp(-i*kz*z)`.
+Comparisons must account for these conventions, including the legacy FFT
+coordinate reversal discussed above. In the supplied printing, Eq. (15)
+appears to have a sign error: substituting Eq. (14) into Eq. (13) gives a
+**negative** transverse quadratic phase, whereas Eq. (15) prints a positive
+one. Do not copy that sign into a propagator without deriving it consistently.
+The chapter's scalar derivation also does not establish the validity of a full
+vector, wide-angle magnetic-scattering model.
+
+
+### Comparison with Paganin (2006)
+
+The supplied 21-page excerpt of David Paganin, *Coherent X-Ray Optics*
+(Oxford University Press, 2006; ISBN 9780198567288), covers printed pages
+**5–25**. It includes the angular-spectrum, Fresnel, Fraunhofer, and
+Rayleigh–Sommerfeld derivations. The Weyl expansion (2.83), cited on p. 25
+for the RS I / angular-spectrum equivalence, is outside this excerpt.
+
+| Reference | Formalism and implementation check |
+| --- | --- |
+| pp. 5–10, Eqs. (1.14), (1.19)–(1.25) | Time convention `exp(-i*omega*t)`; exact forward angular spectrum with `exp(+i*kz*z)`, including evanescent decay. Our multislice kernels use the conjugate spatial phase convention and the same exact dispersion relation. |
+| pp. 11–14, Eqs. (1.26)–(1.40) | Fresnel is a paraxial expansion, not a general large-angle model. Eq. (1.27) explicitly has the negative transverse quadratic phase, corroborating the apparent sign error in the supplied Pfau Eq. (15). |
+| pp. 17–18, Eqs. (1.47)–(1.50), footnote 12 | Fraunhofer additionally requires a small Fresnel number based on the full illuminated support. The derivation retains the preceding paraxial assumption; a small Fresnel number alone does not establish its validity at large camera angles. |
+| pp. 23–24, Eqs. (1.61)–(1.64) | RS I propagates the supplied boundary field, with no need to supply its normal derivative. Eq. (1.64) directly yields the implemented kernel after the convention conversion below. |
+| p. 25, Eq. (1.67) and closing remark | RS II instead takes the normal derivative of the field. RS I is equivalent to the exact angular-spectrum formalism. |
+
+In Eq. (1.64), differentiation is with respect to the **source coordinate**
+`z_s`, evaluated at zero, with the observation point held fixed. With detector
+height `Z > 0` and `r=sqrt((X-x)²+(Y-y)²+(Z-z_s)²)`,
+`d/dz_s = -d/dZ` on the Green function. Consequently, in Paganin's convention,
+
+```text
+K_Paganin = dx²*Z/(2*pi*r³) * (1 - i*k*r) * exp(+i*k*r).
+```
+
+Conjugating the spatial convention gives exactly our implementation:
+
+```text
+K_code = -dx²/(2*pi) * d/dZ [exp(-i*k*r)/r]
+       = dx²*Z/(2*pi*r³) * (1 + i*k*r) * exp(-i*k*r).
+```
+
+Both terms in `1 + i*k*r` are retained. There is no large-`kr`, Fresnel,
+or Fraunhofer expansion in this kernel. Source area is the midpoint quadrature
+weight. Changing conventions for a physical field requires consistently
+conjugating its complex boundary data, not just changing a propagation sign.
+This does not remove the separately documented legacy FFT coordinate reversal.
+
+The direct RS and FFT angular-spectrum implementations solve the same scalar
+boundary-value problem but use different numerical grids and boundary handling.
+RS assumes zero field outside the supplied window; an FFT has periodic replicas
+unless adequate padding is supplied. Exact continuous formulas do not guarantee
+convergence of a sampled calculation. Existing checks compare RS with a padded
+angular-spectrum calculation, an analytic circular-aperture integral, and an
+independent finite difference of the Green function at 60 degrees.
+
+**Evanescent waves and reversal:** p. 8, footnote 6, distinguishes propagating
+`f_perp <= 1/lambda` from evanescent `f_perp > 1/lambda` components. Page 10,
+footnote 8, explains why reversing evanescent decay causes exponential
+amplification. Our multislice kernels use `exp(-alpha*abs(dz))` for evanescent
+components, so negative-distance calls damp these components too: they are
+**not exact inverse propagation** for a field containing evanescent content.
+The RS operator accepts positive distances only; its discrete adjoint is also
+not an inverse. Tests cover the angular-spectrum response below, at, and above
+the cutoff, including this negative-distance behavior.
+
+**Intensity scope:** p. 5 explicitly introduces a scalar optical field whose
+squared modulus represents intensity, while referring the scalar/vector
+connection to other literature. Thus `abs(field)**2` is consistent with the
+book's scalar framework; an extra cosine factor should not be inferred merely
+from Eq. (1.64). These pages do not specify the camera's photon-count calibration,
+finite-pixel response, or a vector magnetic-scattering detector model. Our
+area conversion and channel summation remain detector-model assumptions;
+this source alone does not validate them as a complete vector Poynting-flux
+calculation at large angles. Ewald-sphere sampling of a 3-D object is also
+outside these pages. No numerical propagation-kernel correction was identified.
 
 ## References
 
