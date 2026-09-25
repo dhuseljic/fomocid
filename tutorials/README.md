@@ -53,7 +53,7 @@ from the `tutorials/` directory.
     compare full holograms, half-image composites, signed differences, ratios,
     and radial averages versus scattering angle.
 
-Every scattering notebook exposes `detector_propagation_method="fraunhofer"`
+Scattering notebooks 1–16 expose `detector_propagation_method="fraunhofer"`
 near the top. Choose `"rayleigh_sommerfeld"` for finite-distance propagation
 after the sample; use small grids for this direct solver. Notebooks that stop
 before detector propagation or only process supplied images document the
@@ -81,3 +81,14 @@ artifact reference and can be run independently.
 Historical experiments that may still be useful for reference are in
 [`legacy/`](legacy/README.md). They are not maintained as part of the numbered
 tutorial path and may require adaptation before execution.
+
+## Skyrmion rods and paper figures
+
+[Tutorial 17](17_skyrmion_lattice_ewald_rods.ipynb) compares a thick hexagonal
+skyrmion lattice at several sample tilts, checks Ewald-sphere geometry, and
+assembles Born and multislice signals in 3D reciprocal space. This focused
+benchmark uses explicit Ewald sampling and angular-spectrum far fields instead
+of the detector-model selector described for tutorials 1–16 above.
+The [paper workspace](../paper/scattering_calculator/README.md) includes a
+manuscript draft and figure notebooks for FTH, spectroscopy, polarization
+formalisms, and detector artifacts.
