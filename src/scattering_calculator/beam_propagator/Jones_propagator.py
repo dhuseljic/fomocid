@@ -49,6 +49,7 @@ class wavefronts:
         calculate_farfield=True,
         farfield_oversampling=1,
         farfield_background_jones=None,
+        layer_callback=None,
     ):
         """Initialize a wavefronts instance.
 
@@ -147,6 +148,7 @@ class wavefronts:
             ),
             jones_apply_zero_order_phase=jones_apply_zero_order_phase,
             store_intermediate_wavefields=store_intermediate_wavefields,
+            layer_callback=layer_callback,
         )
         if calculate_farfield:
             self.exit_wave_for_farfield = self._build_farfield_exit_wave(
@@ -211,9 +213,14 @@ class wavefronts:
         multislice_propagation_roi_merge_overlaps=True,
         jones_apply_zero_order_phase=True,
         store_intermediate_wavefields=False,
+        layer_callback=None,
     ):
         """
         Multislice propagation through a dielectric tensor stack.
+
+        Optional ``layer_callback(iz, field)`` receives the borrowed post-material
+        Jones field before free-space propagation. Consume synchronously, do not
+        mutate it, and copy it if retaining it. Default None adds no storage.
 
         Parameters
         ----------
@@ -270,6 +277,10 @@ class wavefronts:
                     dz,
                     aperture_support_regions=self.aperture_support_regions,
                 )
+
+            # Borrowed field: callbacks must not mutate it; copy if retaining.
+            if layer_callback is not None:
+                layer_callback(iz, E_in)
 
             if intermediate_wavefields is not None:
                 intermediate_wavefields.append(E_in.copy())

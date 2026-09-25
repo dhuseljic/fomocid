@@ -1867,6 +1867,9 @@ class SamplePropagatorConfig(_ConfigMixin):
         Propagation options. Set ``store_intermediate_wavefields=True`` to
         retain the post-slice Jones field at every depth, and
         ``calculate_farfield=False`` to stop at the sample exit surface.
+        Scalar and Jones also accept ``layer_callback(iz, field)`` to stream
+        each post-material field before free-space propagation without retaining
+        a stack in RAM. The callback must not mutate the borrowed field.
     """
 
     SampleConfig: SampleConfig
@@ -2039,6 +2042,7 @@ class SamplePropagatorConfig(_ConfigMixin):
             jones_apply_zero_order_phase=bool(
                 self.propagator_config.get("jones_apply_zero_order_phase", True)
             ),
+            layer_callback=self.propagator_config.get("layer_callback"),
             store_intermediate_wavefields=bool(
                 self.propagator_config.get("store_intermediate_wavefields", False)
             ),
@@ -2198,6 +2202,7 @@ class SamplePropagatorConfig(_ConfigMixin):
             ),
             propagate=bool(self.propagator_config.get("propagate", False)),
             scalar_apply_zero_order_phase=scalar_apply_zero_order_phase,
+            layer_callback=self.propagator_config.get("layer_callback"),
             propagation_padding_px=int(
                 self.propagator_config.get("propagation_padding_px", 0)
             ),
