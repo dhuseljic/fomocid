@@ -236,3 +236,16 @@ The pipeline usage notebook shows how to load:
 
 See [`09_hologram_pipeline.ipynb`](../tutorials/09_hologram_pipeline.ipynb)
 for plotting CR/CL, CR-CL, masks, magnetic patterns, and exit waves.
+
+## Skyrmion reciprocal-space tutorial and manuscript
+
+[Tutorial 17](../tutorials/17_skyrmion_lattice_ewald_rods.ipynb) demonstrates
+finite-thickness suppression of small-period skyrmion-lattice diffraction,
+angle-dependent rod intersections, and Ewald-aware reciprocal-space assembly.
+It includes an independent Born reference, weak-medium and tabulated-Co scalar
+multislice runs, coverage maps, and numerical checks.
+
+The [paper workspace](../paper/scattering_calculator/README.md) contains a
+software-methods manuscript draft, references, and executable figure notebooks
+covering this geometry, Pt/Co FTH, energy dependence, interaction modes, and
+detector effects. Validation limitations are stated explicitly in the draft.

@@ -159,6 +159,7 @@ class scalar_wavefronts:
         scalar_apply_zero_order_phase=True,
         farfield_oversampling=1,
         farfield_background_scalar=None,
+        layer_callback=None,
     ):
         self.polarization = light_beam.polarization_vector(beam_parameters.pol)
         self.E_in = self._as_scalar_field(E_in, self.polarization)
@@ -186,6 +187,7 @@ class scalar_wavefronts:
                 multislice_propagation_roi_merge_overlaps
             ),
             scalar_apply_zero_order_phase=scalar_apply_zero_order_phase,
+            layer_callback=layer_callback,
         )
         self.exit_wave_for_farfield = self._build_farfield_exit_wave(
             self.exit_wave,
@@ -268,7 +270,14 @@ class scalar_wavefronts:
         multislice_propagation_roi_padding_px=0,
         multislice_propagation_roi_merge_overlaps=True,
         scalar_apply_zero_order_phase=True,
+        layer_callback=None,
     ):
+        """Propagate; optionally call ``layer_callback(iz, field)`` post-material.
+
+        The callback runs before free-space propagation to the next slice.
+        Its field is borrowed: consume synchronously, do not mutate it, and
+        copy it if retaining it in memory. Default None adds no storage.
+        """
         E_in = np.asarray(E_in, dtype=complex)
         if E_in.ndim != 2:
             raise ValueError("E_in must have shape (Ny, Nx).")
@@ -316,6 +325,9 @@ class scalar_wavefronts:
                     E_in = self.apply_eps_slice(
                         E_in, eps_stack[iz], wavelength, dz, polarization
                     )
+
+            if layer_callback is not None:
+                layer_callback(iz, E_in)
 
             if iz < len(thicknesses) - 1:
                 if propagate:

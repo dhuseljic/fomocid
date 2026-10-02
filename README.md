@@ -127,3 +127,11 @@ This is a source-only repository. Built docs, checkpoints, cached artifacts, `eg
   for configuration and failure behavior.
 - Saturated binary-domain states bypass FFT sizing and smoothing entirely and
   return a uniform `-1` or `+1` pattern at the requested output shape.
+
+## Scattering-calculator paper examples
+
+The [paper workspace](paper/scattering_calculator/README.md) contains a manuscript
+draft and reproducible figure notebooks for Pt/Co holography, skyrmion tilt
+series, reciprocal-space assembly, energy scans, and detector artifacts.
+Start with [Tutorial 17](tutorials/17_skyrmion_lattice_ewald_rods.ipynb) for the
+skyrmion-lattice Ewald geometry.

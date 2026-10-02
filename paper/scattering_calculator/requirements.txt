@@ -1,0 +1,7 @@
+# Minimal figure environment; no SSL training dependencies required.
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+# For opening/executing the notebooks in Jupyter:
+jupyterlab>=4
+ipykernel>=6
