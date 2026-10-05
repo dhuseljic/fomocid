@@ -52,6 +52,12 @@ from the `tutorials/` directory.
     — propagate one shared FTH exit wave with Fraunhofer and Rayleigh–Sommerfeld;
     compare full holograms, half-image composites, signed differences, ratios,
     and radial averages versus scattering angle.
+17. [`17_skyrmion_lattice_ewald_rods.ipynb`](17_skyrmion_lattice_ewald_rods.ipynb)
+    — study skyrmion-tube diffraction, sample tilts and Ewald-sphere assembly.
+18. [`18_co_magnon_linear_analyzer.ipynb`](18_co_magnon_linear_analyzer.ipynb)
+    — illuminate a 30 nm Co film with linear light at the Co edge; inspect a
+    40 nm, 10% out-of-plane modulation, complex exit fields, FFT and physical
+    detector patterns with parallel, selectable and crossed linear analyzers.
 
 Scattering notebooks 1–16 expose `detector_propagation_method="fraunhofer"`
 near the top. Choose `"rayleigh_sommerfeld"` for finite-distance propagation
@@ -90,5 +96,6 @@ assembles Born and multislice signals in 3D reciprocal space. This focused
 benchmark uses explicit Ewald sampling and angular-spectrum far fields instead
 of the detector-model selector described for tutorials 1–16 above.
 The [paper workspace](../paper/scattering_calculator/README.md) includes a
-manuscript draft and figure notebooks for FTH, spectroscopy, polarization
-formalisms, and detector artifacts.
+manuscript draft, an API guide and a basic normal-incidence FTH walkthrough,
+followed by hyperspectral imaging, interaction/propagation options and validation.
+The earlier paper material is preserved in a dated backup.

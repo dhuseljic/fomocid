@@ -246,6 +246,7 @@ It includes an independent Born reference, weak-medium and tabulated-Co scalar
 multislice runs, coverage maps, and numerical checks.
 
 The [paper workspace](../paper/scattering_calculator/README.md) contains a
-software-methods manuscript draft, references, and executable figure notebooks
-covering this geometry, Pt/Co FTH, energy dependence, interaction modes, and
-detector effects. Validation limitations are stated explicitly in the draft.
+software-methods manuscript draft, an API guide and executable notebooks centred
+on normal-incidence Pt/Co FTH, the full sample-to-camera chain, hyperspectral
+imaging, interaction/propagation choices and validation. The earlier
+skyrmion-led paper and notebooks are preserved in a dated backup.

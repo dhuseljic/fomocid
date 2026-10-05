@@ -131,7 +131,8 @@ This is a source-only repository. Built docs, checkpoints, cached artifacts, `eg
 ## Scattering-calculator paper examples
 
 The [paper workspace](paper/scattering_calculator/README.md) contains a manuscript
-draft and reproducible figure notebooks for Pt/Co holography, skyrmion tilt
-series, reciprocal-space assembly, energy scans, and detector artifacts.
-Start with [Tutorial 17](tutorials/17_skyrmion_lattice_ewald_rods.ipynb) for the
-skyrmion-lattice Ewald geometry.
+draft and an API walkthrough for normal-incidence Pt/Co FTH: sample design,
+multislice, physical detector propagation, artifacts, hyperspectral series and
+validation. Start with the [basic FTH notebook](paper/scattering_calculator/notebooks/01_fth_basics.ipynb).
+The earlier paper is preserved in a dated backup; [Tutorial 17](tutorials/17_skyrmion_lattice_ewald_rods.ipynb)
+remains available for skyrmion-lattice Ewald geometry.
