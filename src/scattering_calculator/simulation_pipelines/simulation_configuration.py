@@ -137,11 +137,11 @@ class XRayConfig(_ConfigMixin):
         None
             The function completes in place.
         """
-        if self.linear_polarization_angle is not None and not np.isfinite(self.linear_polarization_angle):
+        if self.linear_polarization_angle is not None and not np.isfinite(self.linear_polarization_angle).all():
             raise ValueError("linear_polarization_angle must be finite")
-        if self.energy <= 0:
+        if np.any(np.asarray(self.energy) <= 0):
             raise ValueError(f"energy must be positive, got {self.energy}")
-        if self.photon_flux <= 0:
+        if np.any(np.asarray(self.photon_flux) <= 0):
             raise ValueError(f"photon_flux must be positive, got {self.photon_flux}")
         if np.isscalar(self.coherence_length):
             self.coherence_length = (
@@ -157,7 +157,8 @@ class XRayConfig(_ConfigMixin):
             raise ValueError(
                 f"coherence_length must be positive, got {self.coherence_length}"
             )
-        if self.pol not in ["CR", "CL", "LH", "LV", "x", "y"]:
+        if any(state not in ["CR", "CL", "LH", "LV", "x", "y"]
+               for state in (self.pol if isinstance(self.pol, list) else [self.pol])):
             raise ValueError(
                 f"Polarisation must be one of CR, CL, LH, LV, x, or y; got {self.pol}"
             )
@@ -364,6 +365,9 @@ class DetectorConfig(_ConfigMixin):
         ``qx = k * x / z`` and ``qy = k * y / z``. If ``False``, include the
         flat-detector angular q distortion. Default ``False`` preserves the
         original behavior.
+    projection_energy : float or None
+        Detector q-coordinate energy in eV; None follows the physical source.
+        Finite-distance diffraction always uses the physical source wavelength.
     detector_propagation_method : {"fraunhofer", "rayleigh_sommerfeld"}
         Default far-field FFT with detector projection, or direct finite-distance
         scalar diffraction. Rayleigh--Sommerfeld uses coherent fields or the
@@ -429,6 +433,7 @@ class DetectorConfig(_ConfigMixin):
     detector_pixel_footprint_samples: int = 3
     ignore_flat_detector_curvature: bool = False
     detector_propagation_method: Literal["fraunhofer", "rayleigh_sommerfeld"] = "fraunhofer"
+    projection_energy: float | None = None  # eV; coordinate convention only, None follows source
     analyzer_angle: float | None = None  # rad, +x towards +y; None disables it
     save_detected_hologram_without_beamstop: bool = False
 
@@ -445,9 +450,11 @@ class DetectorConfig(_ConfigMixin):
         None
             The function completes in place.
         """
-        if self.analyzer_angle is not None and not np.isfinite(self.analyzer_angle):
+        if self.analyzer_angle is not None and not np.isfinite(self.analyzer_angle).all():
             raise ValueError("analyzer_angle must be finite")
-        if self.detector_propagation_method not in ("fraunhofer", "rayleigh_sommerfeld"):
+        if any(method not in ("fraunhofer", "rayleigh_sommerfeld") for method in
+               (self.detector_propagation_method if isinstance(self.detector_propagation_method, list)
+                else [self.detector_propagation_method])):
             raise ValueError("Unknown detector_propagation_method")
         if (self.detector_propagation_method == "rayleigh_sommerfeld"
                 and self.ignore_flat_detector_curvature):
@@ -455,9 +462,9 @@ class DetectorConfig(_ConfigMixin):
                              "ignore_flat_detector_curvature must be False")
         if any(s <= 0 for s in self.shape):
             raise ValueError(f"shape dimensions must be positive, got {self.shape}")
-        if self.pixel_size <= 0:
+        if np.any(np.asarray(self.pixel_size) <= 0):
             raise ValueError(f"pixel_size must be positive, got {self.pixel_size}")
-        if self.sample_to_detector_distance <= 0:
+        if np.any(np.asarray(self.sample_to_detector_distance) <= 0):
             raise ValueError(
                 f"sample_to_detector_distance must be positive, got {self.sample_to_detector_distance}"
             )
@@ -603,7 +610,7 @@ class DetectorConfig(_ConfigMixin):
             coherence_length=beam_params.coherence_length,
         )
         if self.detector_propagation_method == "rayleigh_sommerfeld":
-            self._detect_rayleigh_sommerfeld(beam_params)
+            self._detect_rayleigh_sommerfeld(self.propagator.IlluminationConfig.beam_params)
         else:
             self.hologram_exp.gnomonic_projection(
                 use_pixel_footprint=self.use_detector_pixel_footprint,
@@ -781,7 +788,7 @@ class SimulationConfig(_ConfigMixin):
         """
         if any(s <= 0 for s in self.shape):
             raise ValueError(f"shape dimensions must be positive, got {self.shape}")
-        if self.real_space_pixel_size <= 0:
+        if np.any(np.asarray(self.real_space_pixel_size) <= 0):
             raise ValueError(
                 f"real_space_pixel_size must be positive, got {self.real_space_pixel_size}"
             )
@@ -1646,6 +1653,19 @@ class FrontApertureConfig(_ConfigMixin):
 
 
 @dataclass
+class SpectralComponentConfig:
+    """One mutually incoherent color; weights divide the total source photon flux.
+
+    Specify an absolute energy in eV, or an energy_factor relative to each scan
+    energy. Optional pol overrides the exposure polarization for this component.
+    """
+    energy: float | None = None
+    energy_factor: float = 1.
+    weight: float = 1.
+    pol: str | None = None
+
+
+@dataclass
 class IlluminationConfig(_ConfigMixin):
     """Configuration for the incident beam wavefield on the sample plane.
 
@@ -1659,6 +1679,16 @@ class IlluminationConfig(_ConfigMixin):
         Additional keyword arguments forwarded to the beam profile constructor
         (e.g. ``distance``, ``fwhm``, and ``alpha_beam=(alpha_y, alpha_x)`` for
         a Gaussian beam).
+    energies_eV : tuple of float or None
+        Energy scan for simulate_experiment. None uses the source's single energy.
+    spectral_components : sequence of SpectralComponentConfig or None
+        Simultaneous mutually incoherent colors, propagated individually and
+        summed as detector intensities. Weights divide the total source flux.
+        This collection is not a scan axis.
+    polarizations : tuple of str or None
+        Polarization scan for simulate_experiment. None uses the source state.
+        Explicit lists run all energy/state combinations. Component setup itself
+        builds one incident field; the common runner owns scan iteration.
     """
 
     XRayConfig: XRayConfig | None = None
@@ -1666,6 +1696,9 @@ class IlluminationConfig(_ConfigMixin):
     real_space_pixel_size: float | None = None
     illumination_function: Literal["gaussian"] | None = "gaussian"
     illumination_config: dict = field(default_factory=dict)
+    energies_eV: tuple[float, ...] | None = None
+    polarizations: tuple[str, ...] | None = None
+    spectral_components: tuple[SpectralComponentConfig, ...] | None = None
 
     def _apply_linear_polarization_angle(self) -> None:
         angle = self.XRayConfig.linear_polarization_angle

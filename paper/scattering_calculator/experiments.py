@@ -162,8 +162,8 @@ def _fth_experiment(config=None):
             magnetic_pattern={'pattern_config':{'period':config.domain_period_nm*1e-9}},
             aperture={'aperture_config':aperture},
             illumination={'illumination_config':{'center':(0.,0.),'distance':0.,
-                'fwhm':2*np.sqrt(np.log(2))*config.beam_sigma_nm*1e-9,'alpha_beam':(0.,0.)}},
-            propagation={'propagator_config':{'propagate':config.propagate}},energies_eV=config.energies_eV)
+                'fwhm':2*np.sqrt(np.log(2))*config.beam_sigma_nm*1e-9,'alpha_beam':(0.,0.)},'energies_eV':config.energies_eV},
+            propagation={'propagator_config':{'propagate':config.propagate}})
     raise TypeError('Use the standard ExperimentConfig')
 
 
@@ -185,7 +185,7 @@ def _fth_parameters(config=None):
         reference_xy_nm=(rx*1e9,ry*1e9),
         beam_sigma_nm=c.illumination.illumination_config['fwhm']/(2*np.sqrt(np.log(2)))*1e9,
         domain_period_nm=c.magnetic_pattern.pattern_config.get('period',110e-9)*1e9,
-        propagate=c.propagation.propagator_config.get('propagate',False),energies_eV=c.energies_eV)
+        propagate=c.propagation.propagator_config.get('propagate',False),energies_eV=c.scan_axes()[0])
 
 
 def _skyrmion_parameters(config=None):

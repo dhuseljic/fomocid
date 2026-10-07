@@ -16,15 +16,18 @@ experiment = experiment.with_changes(
     sample={"max_slice_thickness": 5e-9},
     detector={"shape": (128, 128), "detector_center": (64, 64)},
 )
-run = sim.ScatteringExperiment(experiment).setup()
-exit_wave = run.propagate().exit_wave
-ideal_detector = run.detect()
-measured_detector = run.detect(noise=True)
+experiment.outputs = sim.OutputConfig(path="outputs/fth.h5", overwrite=True)
+results = sim.simulate_experiment(experiment)
+results = sim.load_results(experiment.outputs.path)
+figure = sim.plot_results(results)
+# Or run, save, reload and plot at once:
+# results, figure = sim.run_experiment(experiment)
 ```
 
 The ordered sections are `xray`, `simulation`, `sample`, `magnetic_pattern`,
 `aperture`, `illumination`, `propagation`, `detector` and `beamstop`.
-`energies_eV` specifies a scan; `analysis` holds postprocessing settings.
+`illumination.energies_eV` and `illumination.polarizations` specify scans;
+`outputs` selects the HDF5 destination and saved products; `analysis` holds postprocessing settings.
 Use the same sections to build a different specimen, rather than defining a new
 notebook-specific configuration class. `setup(magnetization=..., mask=...)`
 accepts imported arrays on the configured grid.
@@ -50,9 +53,10 @@ construct a fresh run so optical constants, wavelength and camera q coordinates
 all refresh. A spectral scan uses the same declaration at every energy:
 
 ```python
-for energy in experiment.energies_eV:
-    run = sim.ScatteringExperiment(experiment.with_changes(xray={"energy": energy}))
-    image = run.run()
+scan = experiment.with_changes(illumination={
+    "energies_eV":(776.,778.,780.), "polarizations":("CR","CL"),
+}, outputs={"path":"outputs/fth_scan.h5"})
+results = sim.simulate_experiment(scan)
 ```
 
 The bundled Co circular magnetic channel covers 770–805 eV and the bundled linear
@@ -63,13 +67,14 @@ and [contrast guide](../../docs/optical_contrast_formalisms.md) for numerical op
 
 ## Paper analysis helpers
 
-The paper notebooks import `experiments` and `workflow` from this directory.
-These functions consume the same configuration:
+The primary paper notebooks use the standard HDF5 runner above. `experiments`
+and `workflow` retain optional paper-specific diagnostics and validation.
+These older analysis helpers consume the same configuration:
 
 ```python
 case, ideal, measurement = wf.baseline(wf.OUT, experiment)
-scan = experiment.with_changes(energies_eV=tuple(range(772, 801)))
-wf.spectral(wf.OUT, scan)
+scan = experiment.with_changes(illumination={"energies_eV":tuple(range(772, 801))})
+wf.analyze_fth(wf.OUT, scan)
 metrics = wf.validate(wf.OUT, experiment)
 ```
 
@@ -86,3 +91,25 @@ Validation reports representation agreement, slice refinement, projection
 sensitivity and seeded acquisition repeatability. See [VALIDATION.md](VALIDATION.md).
 
 Historical notebooks and documents remain in `paper/backups/` and `tutorials/legacy/`.
+
+Parameter lists in scalar fields request Cartesian scans: for example,
+`sample.recipe=["Co(20)","Co(30)"]`,
+`propagation.propagator_method=["Jones","Scalar"]`, and
+`detector.sample_to_detector_distance=[.03,.06]`. Detector/beamstop alternatives
+reuse matching sample propagation. Structural geometry lists and output selections
+retain their existing collection meaning. Inspect `results.parameter_axes` and
+select a combination with `results.read(..., scan_index=1)` or
+`sim.plot_results(results, scan_index=1)`.
+
+`detector.projection_energy=None` follows physical source energy. A scalar freezes
+the detector q-coordinate convention; a list scans coordinate conventions.
+Material constants and physical propagation continue to use `xray.energy`.
+Rayleigh–Sommerfeld diffraction always retains that physical wavelength.
+
+For simultaneous multichromatic illumination, set
+`illumination.spectral_components=(sim.SpectralComponentConfig(energy_factor=1.,weight=.95),
+sim.SpectralComponentConfig(energy_factor=2.,weight=.05))`.
+Weights divide total source photon flux. Colors propagate independently and their
+ideal intensities sum on physical detector pixels before one acquisition pass.
+This differs from `energies_eV`, which creates separate exposures. Individual
+color images are available at `spectral_components/000000/detector_ideal` etc.

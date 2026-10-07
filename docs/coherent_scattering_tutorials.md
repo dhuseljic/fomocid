@@ -1,5 +1,7 @@
 # Coherent-Scattering Tutorials
 
+Start with [Tutorial 00: configure, simulate, save and reload](../tutorials/00_experiment_workflow.ipynb) for the shared HDF5 workflow.
+
 Use the [standard experiment setup](experiment_setup.md) in every maintained notebook: one `ExperimentConfig`, consistent component sections, and the `setup → propagate → detect` lifecycle.
 
 The coherent-scattering notebooks in `tutorials/` are split by topic so users

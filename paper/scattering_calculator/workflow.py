@@ -172,7 +172,7 @@ def baseline(out=OUT, config=None, geometry=None, effects=None):
     return case, ideal, acquisition
 
 
-def spectral(out=OUT, config=None, geometry=None):
+def analyze_fth(out=OUT, config=None, geometry=None):
     """Both the common-q reconstruction cube and a fixed-camera energy series."""
     experiment = ex._fth_experiment(config)
     cfg, g = ex._fth_parameters(experiment), geometry or experiment.detector
@@ -195,6 +195,12 @@ def spectral(out=OUT, config=None, geometry=None):
             (out/f'{new}.{suffix}').write_bytes((folder/f'{old}.{suffix}').read_bytes())
     return metrics
 
+
+# Compatibility for existing callers; maintained notebooks use simulate_experiment
+# for execution and HDF5, and analyze_fth only for the older paper diagnostics.
+spectral = analyze_fth
+
+from scattering_calculator.simulation_pipelines import simulate_experiment, load_results, plot_results, run_experiment
 
 def validate(out=OUT, config=None):
     """FTH checks, with reported refinement differences rather than an accuracy claim."""
@@ -225,5 +231,5 @@ if __name__ == '__main__':
     parser.add_argument('--output',type=Path,default=OUT)
     args = parser.parse_args()
     if args.experiment in ('all','baseline'): baseline(args.output)
-    if args.experiment in ('all','spectral'): spectral(args.output)
+    if args.experiment in ('all','spectral'): analyze_fth(args.output)
     if args.experiment in ('all','validation'): print(json.dumps(validate(args.output),indent=2))

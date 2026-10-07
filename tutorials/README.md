@@ -1,5 +1,7 @@
 # Tutorials
 
+Start with [Tutorial 00: configure, simulate, save and reload](00_experiment_workflow.ipynb) for the shared HDF5 workflow.
+
 All maintained scattering examples share the [standard experiment setup](../docs/experiment_setup.md). Use its component sections, units and execution stages for new notebooks.
 
 The numbered notebooks are the maintained coherent-scattering learning path.
@@ -101,3 +103,7 @@ The [paper workspace](../paper/scattering_calculator/README.md) includes a
 manuscript draft, an API guide and a basic normal-incidence FTH walkthrough,
 followed by hyperspectral imaging, interaction/propagation options and validation.
 The earlier paper material is preserved in a dated backup.
+
+- [19 — Multichromatic illumination](19_multichromatic_illumination.ipynb):
+  simulate a 780 eV fundamental plus 1560 eV harmonic independently, then combine
+  their ideal detector intensities in one exposure.

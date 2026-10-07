@@ -35,7 +35,7 @@ def fth_experiment():
         illumination=sim.IlluminationConfig(illumination_function="gaussian", illumination_config={
             "center":(0.,0.), "distance":0., "fwhm":2*np.sqrt(np.log(2))*650e-9,
             "alpha_beam":(0.,0.),
-        }),
+        }, energies_eV=tuple(np.arange(772.,801.)), polarizations=("CR","CL")),
         propagation=sim.SamplePropagatorConfig(propagator_method="Jones", propagator_config={
             "propagate":True, "dielectric_tensor_compact":True,
         }),
@@ -51,7 +51,6 @@ def fth_experiment():
                               "average_cold_pixels":12.,"cosmic_rays_per_second":2.}),
         beamstop=sim.BeamstopConfig(bs_method="circular",bs_detector_distance=.01,
                                   bs_config={"radius":40.5e-6}),
-        energies_eV=tuple(np.arange(772.,801.)),
     )
     return experiment
 
@@ -94,7 +93,6 @@ def magnon_experiment():
             artifacts_config={"sigma_photon":0.},
             measurement_config={"exposure_time":1.,"number_frames":1,"max_counts_per_image":None}),
         beamstop=sim.BeamstopConfig(bs_method=None),
-        energies_eV=(778.,),
     )
     return experiment
 
@@ -128,7 +126,6 @@ def skyrmion_experiment():
             sample_to_detector_distance=.007,detector_center=(96,96),
             detector_propagation_method="fraunhofer",artifacts_config={"sigma_photon":0.}),
         beamstop=sim.BeamstopConfig(bs_method=None),
-        energies_eV=(778.,),
         analysis={
             "angles":np.deg2rad([-8.7947589,-4.3973795,0.,4.3973795,8.7947589]).tolist(),
             "scan_angles":np.deg2rad(np.linspace(-12,12,49)).tolist(),

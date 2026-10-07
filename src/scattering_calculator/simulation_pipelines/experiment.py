@@ -6,8 +6,9 @@ The sections use the existing production configuration classes, not example APIs
 """
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import asdict, dataclass, field, replace
+from copy import deepcopy, copy
+from dataclasses import asdict, dataclass, field, fields, replace
+from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
 
@@ -17,6 +18,23 @@ from .simulation_configuration import (
     DetectorConfig, BeamstopConfig,
 )
 from scattering_calculator.experimental_conditions import light_beam
+
+
+@dataclass
+class OutputConfig:
+    """HDF5 destination and saved observables for the common experiment runner.
+
+    Paths are relative to the working directory unless absolute. ``save`` names
+    data products; ``plots`` selects panels for run_experiment's summary figure.
+    Metadata and physical coordinates are always saved. Large sample volumes
+    are opt-in. Existing files require explicit ``overwrite=True``.
+    """
+    path: str | Path = "outputs/experiment.h5"
+    save: tuple[str, ...] = ("exit_wave", "fft_intensity", "detector_ideal", "detector_measured")
+    compression: str | None = "gzip"
+    overwrite: bool = False
+    plots: tuple[str, ...] = ("exit_wave", "fft_intensity", "detector_ideal", "detector_measured")
+    figure_path: str | Path | None = None
 
 
 def analyze_jones(field, angle):
@@ -62,8 +80,38 @@ class ExperimentConfig:
     propagation: SamplePropagatorConfig = field(default_factory=lambda: SamplePropagatorConfig(propagator_config={"propagate": True}))
     detector: DetectorConfig = field(default_factory=lambda: DetectorConfig(detector_center=(128, 128)))
     beamstop: BeamstopConfig = field(default_factory=lambda: BeamstopConfig(bs_method=None))
-    energies_eV: tuple[float, ...] = (778.,)
+    energies_eV: tuple[float, ...] | None = None  # compatibility alias; scans live in illumination
+    outputs: OutputConfig = field(default_factory=OutputConfig)
     analysis: dict = field(default_factory=dict)
+
+    def scan_axes(self):
+        """Resolve single-exposure defaults and explicit illumination scan axes.
+
+        Parameters
+        ----------
+        None
+            Uses source defaults and illumination scan lists.
+
+        Returns
+        -------
+        tuple
+            Energy and polarization tuples in execution order (energy then state).
+        """
+        energies = self.illumination.energies_eV
+        if energies is not None and self.energies_eV is not None and not np.array_equal(energies, self.energies_eV):
+            raise ValueError("Conflicting scan energies: use illumination.energies_eV")
+        if energies is None:
+            energies = self.energies_eV if self.energies_eV is not None else (self.xray.energy,)
+        energies = tuple(float(value) for value in energies)
+        if not energies or not np.isfinite(energies).all() or min(energies) <= 0:
+            raise ValueError("Scan energies must be a nonempty list of finite positive eV values")
+        states = self.illumination.polarizations
+        if isinstance(states, str):
+            raise ValueError("polarizations must be a list or tuple, e.g. ('CR', 'CL')")
+        states = tuple(states) if states is not None else (self.xray.pol,)
+        if not states or any(state not in ('CR','CL','LH','LV','x','y') for state in states):
+            raise ValueError("Scan polarizations must use CR, CL, LH, LV, x or y")
+        return energies, states
 
     def to_dict(self):
         """Return the standard experiment fields for provenance.
@@ -78,7 +126,11 @@ class ExperimentConfig:
         dict
             Dataclass fields for provenance of the experiment declaration.
         """
-        return asdict(self)
+        result = asdict(self)
+        result['outputs']['path'] = str(self.outputs.path)
+        if self.outputs.figure_path is not None:
+            result['outputs']['figure_path'] = str(self.outputs.figure_path)
+        return result
 
     def with_changes(self, **sections):
         """Return an independent config, e.g. with_changes(xray={"energy": 780.}).
@@ -248,6 +300,8 @@ class ScatteringExperiment:
         if not isinstance(config, ExperimentConfig):
             raise TypeError("Use ExperimentConfig with the standard component sections")
         self.config = deepcopy(config)
+        if config.illumination.spectral_components is not None:
+            self._spectral_declaration = deepcopy(config)
 
     @classmethod
     def from_exit_wave(cls, config, exit_wave):
@@ -395,6 +449,33 @@ class ScatteringExperiment:
         if not hasattr(self, "sample"):
             raise RuntimeError("Call setup() before propagate()")
         c = self.config
+        if c.illumination.spectral_components is not None:
+            specifications = c.illumination.spectral_components
+            if not specifications:
+                raise ValueError("spectral_components must contain at least one component")
+            weights = np.asarray([item.weight for item in specifications], dtype=float)
+            if not np.isfinite(weights).all() or np.any(weights <= 0):
+                raise ValueError("Spectral component weights must be finite and positive")
+            total_weight = weights.sum()
+            if not np.isfinite(total_weight):
+                raise ValueError("Sum of spectral weights must be finite")
+            weights /= total_weight
+            self.spectral_runs = []
+            self.spectral_weights = weights
+            for item, fraction in zip(specifications, weights):
+                energy = item.energy if item.energy is not None else c.xray.energy * item.energy_factor
+                if not np.isfinite(energy) or energy <= 0:
+                    raise ValueError("Spectral component energy must be finite and positive")
+                component = self._spectral_declaration.with_changes(
+                    xray={"energy":energy, "photon_flux":c.xray.photon_flux*float(fraction),
+                          "pol":item.pol or c.xray.pol},
+                    illumination={"spectral_components":None})
+                run = ScatteringExperiment(component).setup(
+                    magnetization=self.sample.magnetization, mask=self.sample.mask)
+                run.propagate()
+                self.spectral_runs.append(run)
+            self.wavefront = self.spectral_runs[0].wavefront
+            return self.wavefront
         if c.propagation.propagator_method != "Scalar":
             direction = light_beam.beam_direction_from_alpha(c.illumination.illumination_config.get("alpha_beam", (0.,0.)))
             c.sample.sample_structure.calculate_final_dielectric_tensor(
@@ -423,6 +504,21 @@ class ScatteringExperiment:
         if not hasattr(self, "wavefront"):
             raise RuntimeError("Call propagate() before detect()")
         c = self.config
+        if hasattr(self, "spectral_runs"):
+            images = []
+            for component in self.spectral_runs:
+                component.config.detector = DetectorConfig(**{item.name:deepcopy(getattr(c.detector,item.name))
+                    for item in fields(c.detector) if item.name != "beamstop_config"})
+                component.config.detector.beamstop_config = deepcopy(c.beamstop)
+                component.config.detector.setup()
+                component.spectral_ideal = component.detect().copy()
+                images.append(component.spectral_ideal)
+            # Components carry their flux fractions in the field amplitudes.
+            # Sum detector intensities, never complex amplitudes or noisy frames.
+            c.detector = copy(self.spectral_runs[0].config.detector)
+            c.detector.hologram_exp = copy(c.detector.hologram_exp)
+            c.detector.hologram_exp.hologram_detector = np.sum(images, axis=0)
+            return c.detector.return_detected_hologram() if noise else c.detector.return_ideal_hologram()
         if self.wavefront.hologram is None:
             # Exit-only Jones runs defer the FFT until the detector is requested.
             from scattering_calculator.utils.image_transformator import Fraunhofer_propagation_jones
@@ -434,7 +530,16 @@ class ScatteringExperiment:
             self.wavefront.detector_wave = Fraunhofer_propagation_jones(field)
             self.wavefront.hologram = np.sum(abs(self.wavefront.detector_wave)**2, axis=-1)
         c.detector.assign_propagated_wavefront(c.propagation)
-        c.detector.detect_hologram()
+        projection = c.illumination.beam_params
+        if c.detector.projection_energy is not None:
+            energy = c.detector.projection_energy
+            if not np.isfinite(energy) or energy <= 0:
+                raise ValueError("Detector projection_energy must be finite and positive")
+            source = deepcopy(c.xray)
+            source.energy = energy
+            projection = source.setup()
+        c.detector.calc_realspace_resolution(projection)
+        c.detector.detect_hologram(projection_beam_params=projection)
         return c.detector.return_detected_hologram() if noise else c.detector.return_ideal_hologram()
 
     def run(self, *, noise=False, **setup_arrays):

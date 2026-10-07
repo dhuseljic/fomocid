@@ -1,5 +1,7 @@
 # fo-mo-cid
 
+Start with [Tutorial 00: configure, simulate, save and reload](tutorials/00_experiment_workflow.ipynb) for the shared HDF5 workflow.
+
 `fo-mo-cid` is a tutorial-first repository for self-supervised learning and coherent-scattering simulation workflows. The current shipped scope includes:
 
 - `CIFAR-10` with `MAE`
