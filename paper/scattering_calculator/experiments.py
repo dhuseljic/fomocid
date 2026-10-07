@@ -29,12 +29,16 @@ from scattering_calculator.beam_propagator.simple_propagation import scalar_wave
 from scattering_calculator.beam_propagator.Jones_propagator import wavefronts
 from scattering_calculator.beam_propagator.Stokes_propagator import stokes_wavefronts
 
+from scattering_calculator.simulation_pipelines import ExperimentConfig, ScatteringExperiment
+from scattering_calculator.simulation_pipelines.examples import fth_experiment, skyrmion_experiment
+from scattering_calculator.sample_generator.structures import parse_recipe
+
 OUT = Path(__file__).resolve().parent / 'results'
 HC = 1239.8419843320026  # eV nm
 
 
 @dataclass(frozen=True)
-class SkyrmionConfig:
+class _SkyrmionParameters:
     """Notebook-editable geometry; lengths nm except explicitly marked metres.
 
     Radius is the compact texture radius (core to fully +z background).
@@ -96,7 +100,7 @@ class SkyrmionConfig:
 
 
 @dataclass(frozen=True)
-class FTHConfig:
+class _FTHParameters:
     """FTH specimen, illumination and numerical grid; dimensions in nm."""
     energy_eV: float = 778.
     n: int = 192
@@ -130,7 +134,7 @@ class FTHConfig:
 
 
 @dataclass(frozen=True)
-class DetectorEffectsConfig:
+class _DetectorParameters:
     """Synthetic expected count scale and production detector model settings."""
     expected_peak_counts: float = 2e4
     beamstop_radius_px: float = 3.
@@ -140,6 +144,92 @@ class DetectorEffectsConfig:
         readout_noise_average=0., readout_noise_sigma=2., detector_threshold=16000.))
     artifacts: dict = field(default_factory=lambda: dict(sigma_photon=0., camera_seed=31,
         average_hot_pixels=12., average_cold_pixels=12., cosmic_rays_per_second=2.))
+
+
+def _fth_experiment(config=None):
+    if config is None: return fth_experiment()
+    if isinstance(config, ExperimentConfig): return config
+    if isinstance(config, _FTHParameters):
+        layers = '/'.join(f'{m}({t:g})' for m,t in config.layers_nm)
+        base = fth_experiment()
+        aperture = dict(base.aperture.aperture_config)
+        aperture.update(apertures_radius=[config.object_radius_nm*1e-9,config.reference_radius_nm*1e-9],
+            apertures_center=[(0.,0.),(config.reference_xy_nm[1]*1e-9,config.reference_xy_nm[0]*1e-9)],
+            thickness_OH=sum(t for m,t in config.layers_nm if m=='Au')*1e-9)
+        return base.with_changes(xray={'energy':config.energy_eV},
+            simulation={'shape':(config.n,config.n),'real_space_pixel_size':config.dx_nm*1e-9},
+            sample={'recipe':layers,'max_slice_thickness':config.max_slice_nm*1e-9},
+            magnetic_pattern={'pattern_config':{'period':config.domain_period_nm*1e-9}},
+            aperture={'aperture_config':aperture},
+            illumination={'illumination_config':{'center':(0.,0.),'distance':0.,
+                'fwhm':2*np.sqrt(np.log(2))*config.beam_sigma_nm*1e-9,'alpha_beam':(0.,0.)}},
+            propagation={'propagator_config':{'propagate':config.propagate}},energies_eV=config.energies_eV)
+    raise TypeError('Use the standard ExperimentConfig')
+
+
+def _fth_parameters(config=None):
+    if isinstance(config, _FTHParameters): return config
+    c = _fth_experiment(config)
+    layers = parse_recipe(c.sample.recipe).layers
+    a = c.aperture.aperture_config
+    types = a.get('apertures_type', [])
+    if 'OH' not in types or 'RH' not in types:
+        raise ValueError('FTH analysis needs an OH and RH in the standard aperture configuration')
+    oh,rh = types.index('OH'),types.index('RH')
+    ry,rx = a['apertures_center'][rh]
+    return _FTHParameters(energy_eV=c.xray.energy,n=c.simulation.shape[0],
+        dx_nm=c.simulation.real_space_pixel_size*1e9,
+        layers_nm=tuple((l.material,l.thickness*1e9) for l in layers),
+        max_slice_nm=(c.sample.max_slice_thickness or min(l.thickness for l in layers))*1e9,
+        object_radius_nm=a['apertures_radius'][oh]*1e9,reference_radius_nm=a['apertures_radius'][rh]*1e9,
+        reference_xy_nm=(rx*1e9,ry*1e9),
+        beam_sigma_nm=c.illumination.illumination_config['fwhm']/(2*np.sqrt(np.log(2)))*1e9,
+        domain_period_nm=c.magnetic_pattern.pattern_config.get('period',110e-9)*1e9,
+        propagate=c.propagation.propagator_config.get('propagate',False),energies_eV=c.energies_eV)
+
+
+def _skyrmion_parameters(config=None):
+    if isinstance(config,_SkyrmionParameters): return config
+    c = skyrmion_experiment() if config is None else config
+    if not isinstance(c,ExperimentConfig): raise TypeError('Use the standard ExperimentConfig')
+    p,a = c.magnetic_pattern.resolved_pattern_config(),c.analysis
+    layers = parse_recipe(c.sample.recipe).layers
+    thickness = sum(l.thickness for l in layers)*1e9
+    n = c.detector.shape[0]
+    center = c.detector.detector_center
+    return _SkyrmionParameters(energy_eV=c.xray.energy,
+        lattice_nm=p.get('period',12e-9)*1e9,radius_nm=p.get('radius',3.4e-9)*1e9,
+        thickness_nm=thickness,
+        angles_deg=tuple(np.rad2deg(a.get('angles',np.deg2rad([-8.7947589,-4.3973795,0,4.3973795,8.7947589])))),
+        scan_angles_deg=tuple(np.rad2deg(a.get('scan_angles',np.deg2rad(np.linspace(-12,12,49))))),
+        volume_angles_deg=tuple(np.rad2deg(a.get('volume_angles',np.deg2rad(np.linspace(-12,12,25))))),
+        detector_n=n,detector_pitch_m=c.detector.pixel_size,detector_distance_m=c.detector.sample_to_detector_distance,
+        detector_center_offset_xy_px=(center[1]-n//2,center[0]-n//2),
+        beam_sigma_nm=c.illumination.illumination_config['fwhm']/(2*np.sqrt(np.log(2)))*1e9,
+        multislice_n=c.simulation.shape[0],multislice_dx_nm=c.simulation.real_space_pixel_size*1e9,
+        multislice_dz_nm=(c.sample.max_slice_thickness or 2e-9)*1e9,
+        born_n=a.get('born_n',256),born_dx_nm=a.get('born_pixel_size',.75e-9)*1e9,
+        volume_n=a.get('volume_n',128),q_bins=a.get('q_bins',101),q_limit_rad_nm=a.get('q_limit',.85e9)*1e-9,
+        fft_nz=a.get('fft_nz',512),fft_dz_nm=a.get('fft_pixel_size_z',2e-9)*1e9,
+        contrast_channel=a.get('contrast_channel','xmcd'),include_cobalt=a.get('include_cobalt',True))
+
+
+def skyrmion_geometry(config):
+    """Analytic geometry report derived from the standard experiment definition."""
+    return _skyrmion_parameters(config).geometry()
+
+
+def _detector_parameters(config=None):
+    from scattering_calculator.simulation_pipelines import DetectorConfig
+    if isinstance(config,_DetectorParameters): return config
+    c = fth_experiment().detector if config is None else config
+    if isinstance(c,ExperimentConfig): c=c.detector
+    if not isinstance(c,DetectorConfig): raise TypeError('Use the standard DetectorConfig')
+    measurement = dict(c.measurement_config)
+    peak = measurement.pop('max_counts_per_image',None) or 20000.
+    return _DetectorParameters(expected_peak_counts=peak,
+        beamstop_radius_px=3.,noise_seed=c.detector_params.get('noise_seed',17),
+        measurement={**measurement,'max_counts_per_image':None},detector=c.detector_params,artifacts=c.artifacts_config)
 
 
 def savefig(fig, name, out=OUT):
@@ -259,7 +349,7 @@ def grid_intensities(qs, intensity, bins=101, limit=.85):
 
 def skyrmion_born(out=OUT, config=None):
     out.mkdir(parents=True, exist_ok=True)
-    cfg = config or SkyrmionConfig()
+    cfg = _skyrmion_parameters(config)
     p = cfg.geometry()
     provenance(out, asdict(cfg))
     q, domega = configured_detector(cfg)
@@ -338,7 +428,7 @@ def skyrmion_multislice(theta, n=None, dx=None, dz=None, material='weak', propag
     Return physical q coordinates: with the code's exp(-ikz z) convention,
     transverse physical outgoing momenta are the negative FFT frequencies.
     """
-    cfg = config or SkyrmionConfig()
+    cfg = _skyrmion_parameters(config)
     n = cfg.multislice_n if n is None else n
     dx = cfg.multislice_dx_nm if dx is None else dx
     dz = cfg.multislice_dz_nm if dz is None else dz
@@ -387,11 +477,13 @@ def skyrmion_multislice(theta, n=None, dx=None, dz=None, material='weak', propag
 
 def configured_detector(cfg):
     """Physical flat-detector sampling shared by Born, multislice and FFT checks."""
+    cfg = _skyrmion_parameters(cfg)
     return ewald_pixels(cfg.detector_n, cfg.energy_eV, cfg.detector_pitch_m,
                         cfg.detector_distance_m, cfg.detector_center_offset_xy_px)
 
 
 def configured_transforms(cfg):
+    cfg = _skyrmion_parameters(cfg)
     return born_interpolators(cfg.born_n, cfg.born_dx_nm, cfg.lattice_nm,
                               cfg.beam_sigma_nm, cfg.radius_nm)
 
@@ -411,7 +503,7 @@ def sample_multislice_detector(result, cfg):
 
 
 def multislice_figure(out=OUT, config=None):
-    cfg = config or SkyrmionConfig()
+    cfg = _skyrmion_parameters(config)
     out.mkdir(parents=True, exist_ok=True)
     provenance(out, asdict(cfg))
     angles = cfg.angles_deg
@@ -466,7 +558,7 @@ def fft_volume_comparison(out=OUT, config=None):
     calculation, with fractional z-face occupancy. FFT values include dx² dz.
     """
     from scipy.fft import fftn, fftshift, ifftshift
-    cfg = config or SkyrmionConfig()
+    cfg = _skyrmion_parameters(config)
     out.mkdir(parents=True, exist_ok=True)
     provenance(out, asdict(cfg))
     p = cfg.geometry()
@@ -617,67 +709,51 @@ def set_sideband_view(ax, cfg):
 
 
 def fth_case(energy=None, mode='Jones', n=None, dx_nm=None, propagate=None, config=None):
-    """Au mask / SiN membrane / explicit Pt-Co-Pt; real tabulated material response."""
-    cfg = config or FTHConfig()
-    energy = cfg.energy_eV if energy is None else energy
-    n = cfg.n if n is None else n
-    dx_nm = cfg.dx_nm if dx_nm is None else dx_nm
-    propagate = cfg.propagate if propagate is None else propagate
-    dx=dx_nm*1e-9
-    mats=material_params(materials=['Au','SiN','Pt','Co'],x_ray_energy=energy)
-    sample=Structure(name='paper FTH',material_params=mats,sample_shape=[0,n,n],real_space_pixel_size=dx)
-    # Resolve longitudinal propagation in the mask and magnetic film.
-    layers = []
-    for mat, total in cfg.layers_nm:
-        count = int(np.ceil(total/cfg.max_slice_nm))
-        layers.extend([(mat, total/count)]*count)
-    for mat,t in layers: sample.add_layer(mat,t*1e-9)
-    u=(np.arange(n)-n//2)*dx_nm
-    x,y=np.meshgrid(u,u)
-    oh=x*x+y*y<cfg.object_radius_nm**2
-    rx, ry = cfg.reference_xy_nm
-    rh=(x-rx)**2+(y-ry)**2<cfg.reference_radius_nm**2
-    mz=np.tanh((np.sin(2*np.pi*x/cfg.domain_period_nm+1.4*np.sin(y/90))+ .5*np.cos(2*np.pi*y/160))/.22)
-    sample.mask=np.ones((len(layers),n,n))
-    sample.magnetization=np.zeros((len(layers),n,n,3))
-    for i,(mat,_) in enumerate(layers):
-        sample.mask[i,rh]=0  # reference hole drilled through the entire stack
-        if mat=='Au': sample.mask[i,oh]=0
-        if mat=='Co':
-            sample.magnetization[i,...,2]=mz
-            sample.magnetization[i,...,0]=np.sqrt(1-mz*mz)
-    beam=np.exp(-(x*x+y*y)/(2*cfg.beam_sigma_nm**2)).astype(complex)
-    if mode!='Scalar':
-        sample.calculate_final_dielectric_tensor(compact=True)
-    images=[]; exits=[]
-    for helicity,sign in [('CR',-1),('CL',1)]:
-        opts=dict(beam_parameters=SimpleNamespace(wavelength=HC/energy*1e-9,pol=helicity),
-                  layer_thicknesses=np.array([t for _,t in layers])*1e-9,real_space_pixel_size=dx,propagate=propagate)
-        if mode=='Scalar':
-            sample.calculate_final_scalar_refractive_index(helicity)
-            w=scalar_wavefronts(E_in=beam,refractive_index_stack=sample.final_scalar_refractive_index,**opts)
-            field=w.exit_wave
-            f=np.fft.fftshift(np.fft.fft2(field,norm='ortho'))
-            intensity=abs(f)**2
-        else:
-            factory=wavefronts if mode=='Jones' else stokes_wavefronts
-            w=factory(E_in=beam[...,None]*np.array([1,sign*1j])/np.sqrt(2),eps_stack=sample.final_dielectric_tensor,**opts)
-            field=w.exit_wave if mode=='Jones' else w.exit_jones
-            f=np.fft.fftshift(np.fft.fft2(field,axes=(0,1),norm='ortho'),axes=(0,1))
-            intensity=np.sum(abs(f)**2,axis=-1)
-        images.append(intensity); exits.append(field)
-    difference=images[0]-images[1]
-    reconstruction=np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(difference)))
-    return dict(images=np.array(images),difference=difference,reconstruction=reconstruction,
-                mz=mz,object_hole=oh,reference_hole=rh,extent_nm=[u[0],u[-1],u[0],u[-1]],
-                exits=np.array(exits),energy_eV=energy,dx_nm=dx_nm)
+    """Paired FTH calculation through the common production setup sequence."""
+    experiment = _fth_experiment(config)
+    if energy is not None: experiment = experiment.with_changes(xray={"energy": energy})
+    if n is not None or dx_nm is not None:
+        shape = experiment.simulation.shape if n is None else (n,n)
+        pitch = experiment.simulation.real_space_pixel_size if dx_nm is None else dx_nm*1e-9
+        experiment = experiment.with_changes(simulation={"shape":shape,"real_space_pixel_size":pitch})
+    options = dict(experiment.propagation.propagator_config)
+    if propagate is not None: options['propagate'] = propagate
+    options['calculate_farfield'] = False
+    experiment = experiment.with_changes(propagation={"propagator_method":mode,"propagator_config":options})
+    simulation = ScatteringExperiment(experiment).setup()
+    images, exits = [], []
+    for helicity in ('CR','CL'):
+        simulation.config.illumination.update_polarization(helicity)
+        w = simulation.propagate()
+        field = w.exit_jones if mode == 'Stokes' else w.exit_wave
+        axes = (0,1)
+        amplitude = np.fft.fftshift(np.fft.fft2(field,axes=axes,norm='ortho'),axes=axes)
+        power = abs(amplitude)**2
+        images.append(power if power.ndim == 2 else power.sum(axis=-1))
+        exits.append(field.copy())
+    images = np.asarray(images)
+    difference = images[0]-images[1]
+    reconstruction = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(difference)))
+    cfg = _fth_parameters(experiment)
+    n = experiment.simulation.shape[0]
+    u = (np.arange(n)-n//2)*cfg.dx_nm
+    x,y = np.meshgrid(u,u)
+    rx,ry = cfg.reference_xy_nm
+    generated,_ = simulation.config.magnetic_pattern.create_pattern()
+    mz = generated[...,2] if generated.ndim == 3 else generated
+    return dict(images=images,difference=difference,reconstruction=reconstruction,
+                mz=mz,object_hole=x*x+y*y<cfg.object_radius_nm**2,
+                reference_hole=(x-rx)**2+(y-ry)**2<cfg.reference_radius_nm**2,
+                extent_nm=[u[0],u[-1],u[0],u[-1]],exits=np.asarray(exits),
+                energy_eV=experiment.xray.energy,dx_nm=cfg.dx_nm)
 
 
 def fth_figures(out=OUT, config=None):
-    cfg = config or FTHConfig()
-    provenance(out, asdict(cfg))
+    experiment = _fth_experiment(config)
+    cfg = _fth_parameters(experiment)
+    provenance(out, experiment.to_dict())
     out.mkdir(parents=True,exist_ok=True)
-    results={mode:fth_case(mode=mode, config=cfg) for mode in ('Scalar','Jones','Stokes')}
+    results={mode:fth_case(mode=mode, config=experiment) for mode in ('Scalar','Jones','Stokes')}
     c=results['Jones']
     fig,axes=plt.subplots(1,4,figsize=(14,3.5),constrained_layout=True)
     axes[0].imshow(c['mz']*c['object_hole'],origin='lower',extent=c['extent_nm'],cmap='RdBu_r',vmin=-1,vmax=1)
@@ -704,7 +780,7 @@ def fth_figures(out=OUT, config=None):
     energies=np.asarray(cfg.energies_eV)
     cube=[]; recon=[]; optical=[]
     for energy in energies:
-        r=fth_case(energy=energy, config=cfg)
+        r=fth_case(energy=energy, config=experiment)
         cube.append(r['difference']); recon.append(r['reconstruction'])
         optical.append(material_params.load_refractive_index('Co',energy))
     cube=np.array(cube); recon=np.array(recon); optical=np.array(optical)
@@ -726,7 +802,7 @@ def fth_figures(out=OUT, config=None):
 def validation(out=OUT, config=None):
     """Physical checks with independent geometry and production-kernel comparisons."""
     out.mkdir(parents=True,exist_ok=True)
-    cfg = config or SkyrmionConfig()
+    cfg = _skyrmion_parameters(config)
     p=cfg.geometry(); k=2*np.pi/p['wavelength_nm']; q,_=configured_detector(cfg)
     np.testing.assert_allclose(np.linalg.norm(q+[0,0,k],axis=-1),k,rtol=1e-13)
     r=rotation_y(p['bragg_deg'])
@@ -767,8 +843,8 @@ def detector_figure(out=OUT, sample_config=None, detector_config=None):
     """Apply the production detector noise model on an explicitly reciprocal grid."""
     from scattering_calculator.experimental_conditions.detector import detector_hologram
     out.mkdir(parents=True,exist_ok=True)
-    cfg = sample_config or FTHConfig()
-    detector_cfg = detector_config or DetectorEffectsConfig()
+    cfg = _fth_parameters(sample_config)
+    detector_cfg = _detector_parameters(detector_config)
     provenance(out, dict(sample=asdict(cfg), detector=asdict(detector_cfg)))
     c=fth_case(config=cfg); raw=c['images']
     # A declared incident-field-to-counts scale, shared by both helicities.

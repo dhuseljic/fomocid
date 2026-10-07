@@ -1,5 +1,7 @@
 # Tutorials
 
+All maintained scattering examples share the [standard experiment setup](../docs/experiment_setup.md). Use its component sections, units and execution stages for new notebooks.
+
 The numbered notebooks are the maintained coherent-scattering learning path.
 Run them from the repository root after installing the project with
 `python -m pip install -e .`. Each notebook also locates `src/` when opened

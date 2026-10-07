@@ -6,6 +6,7 @@ from .pipelines.hologram_pipeline import (
     HologramPipelineRanges,
 )
 from .simulate_experiment import SetupSimulationExperiment
+from .experiment import ExperimentConfig, ScatteringExperiment
 from .simulation_configuration import (
     BeamstopConfig,
     DetectorConfig,
@@ -32,6 +33,8 @@ from .simulation_configuration_range import (
 )
 
 __all__ = [
+    "ExperimentConfig",
+    "ScatteringExperiment",
     "BeamstopConfig",
     "HologramPipeline",
     "HologramPipelineConfig",

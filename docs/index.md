@@ -1,5 +1,7 @@
 # `fo-mo-cid`
 
+All maintained scattering examples share the [standard experiment setup](experiment_setup.md). Use its component sections, units and execution stages for new notebooks.
+
 `fo-mo-cid` documents and ships tutorial-first workflows for self-supervised
 learning and coherent-scattering simulation.
 

@@ -1,4 +1,9 @@
 """Generate parameter sweeps of simulated FTH holograms."""
+from scattering_calculator.simulation_pipelines import (
+    ExperimentConfig, ScatteringExperiment, XRayConfig, SimulationConfig,
+    SampleConfig, MagneticPatternConfig, FrontApertureConfig, IlluminationConfig,
+    SamplePropagatorConfig, DetectorConfig, BeamstopConfig,
+)
 
 # %%
 ######################################
@@ -20,7 +25,6 @@ from scattering_calculator.simulation_pipelines import (
 )
 from scattering_calculator.simulation_pipelines.pipelines import (
     HologramPipeline,
-    HologramPipelineConfig,
     HologramPipelineRanges,
 )
 from scattering_calculator.sample_generator import structures
@@ -162,7 +166,7 @@ beamstop_config = {
 ######################################
 # --- Magnetic domain pattern ---
 pattern_type = "binary_labyrinth_pattern"
-stripe_width = 300e-9  # m
+period = 600e-9  # m; full positive/negative repeat
 sigma = 30e-9  # m
 # Sample every magnetic state from one binary-domain phase space. The
 # target-mean bounds are interpreted as -1 to +1.
@@ -204,7 +208,7 @@ labyrinth_config = {
     "crop_margin": None,
 }
 pattern_config = {
-    "stripe_width": stripe_width,
+    'period': period,
     "sigma": sigma,
 }
 pattern_config.update(labyrinth_config)
@@ -300,80 +304,73 @@ illumination_alpha_beam = (0.0, 0.0)  # rad (alpha_y, alpha_x); 0 keeps normal i
 ######################################
 # 04: PIPELINE CONFIGURATION
 ######################################
-config = HologramPipelineConfig(
-    # Sample material stack
-    recipe=recipe,
-    sample_name="Co_Pt_multilayer",
-    # X-ray source
-    xray_energy=x_ray_energy,
-    xray_photon_flux=x_ray_photon_flux,
-    xray_coherence_length=coherence_length,
-    # Detector geometry
-    detector_shape=detector_pixel_shape,
-    detector_pixel_size=detector_pixel_size,
-    detector_distance=detector_distance,
-    detector_center=detector_center,
-    detector_params=detector_params,
-    measurement_config=measurement_config,
-    artifacts_config=artifacts_config,
-    use_detector_pixel_footprint=use_detector_pixel_footprint,
-    detector_pixel_footprint_samples=detector_pixel_footprint_samples,
-    detector_propagation_method=detector_propagation_method,
-    ignore_flat_detector_curvature=(
-        ignore_flat_detector_curvature if detector_propagation_method == "fraunhofer" else False
-    ),
-    # Beamstop
-    beamstop_method=beamstop_method,
-    beamstop_distance=beamstop_distance,
-    beamstop_config=beamstop_config,
-    save_detected_hologram_without_beamstop=save_detected_hologram_without_beamstop,
-    # FTH holography mask
-    aperture_method="FTH_circular",
-    aperture_types=aperture_types,
-    aperture_radii=aperture_radii,
-    aperture_lengths=aperture_lengths,
-    aperture_centers=aperture_centers,
-    aperture_sigmas=aperture_sigmas,
-    aperture_angles=aperture_angles,
-    aperture_ellipticities=aperture_ellipticities,
-    aperture_roughnesses=aperture_roughnesses,
-    aperture_roughness_modes=aperture_roughness_modes,
-    aperture_seeds=aperture_seeds,
-    aperture_top_radius_factors=aperture_top_radius_factors,
-    # Illumination
-    illumination_function=illumination_function,
-    illumination_center=illumination_center,
-    illumination_focus_distance=illumination_focus_distance,
-    illumination_fwhm=illumination_fwhm,
-    illumination_alpha_beam=illumination_alpha_beam,
-    # Magnetic domain pattern
-    pattern_type=pattern_type,
-    pattern_config=pattern_config,
-    use_roi=use_roi,
-    magnetic_pattern_use_roi=True,
-    magnetic_pattern_classification_min_area=pattern_classification_min_area_px,
-    magnetic_pattern_bubble_max_eccentricity=pattern_bubble_max_eccentricity,
-    magnetic_pattern_bubble_min_circularity=pattern_bubble_min_circularity,
-    dielectric_tensor_use_roi=dielectric_tensor_use_roi,
-    dielectric_tensor_compact=dielectric_tensor_compact,
-    dielectric_tensor_local_k_projection=dielectric_tensor_local_k_projection,
-    propagator_method=propagator_method,
-    scalar_refractive_index_lazy=scalar_refractive_index_lazy,
-    propagate=propagate,
-    jones_apply_zero_order_phase=jones_apply_zero_order_phase,
-    multislice_propagation_roi=multislice_propagation_roi,
-    multislice_propagation_roi_padding_px=multislice_propagation_roi_padding_px,
-    multislice_propagation_roi_merge_overlaps=multislice_propagation_roi_merge_overlaps,
-    propagation_padding_px=propagation_padding_px,
-    propagation_padding_mode=propagation_padding_mode,
-    propagation_absorber_width_px=propagation_absorber_width_px,
-    propagation_absorber_strength=propagation_absorber_strength,
-    propagation_absorber_profile=propagation_absorber_profile,
-    farfield_oversampling=farfield_oversampling,
-    # Simulation grid: sample_shape = oversampling * detector_shape
-    oversampling=oversampling,
-    random_seed=pipeline_random_seed,
-)
+config = ExperimentConfig(
+             xray=XRayConfig(energy=x_ray_energy,
+                 photon_flux=x_ray_photon_flux,
+                 coherence_length=coherence_length),
+             simulation=SimulationConfig(other_config={'grid_mode':'detector','oversampling':oversampling,'random_seed':pipeline_random_seed}),
+             sample=SampleConfig(recipe=recipe,
+                 sample_name='Co_Pt_multilayer',
+                 sample_tilt_theta=0.0,
+                 sample_tilt_axis='x',
+                 sample_tilt_voxel_size=None,
+                 sample_tilt_antialias_samples=3),
+             magnetic_pattern=MagneticPatternConfig(pattern_type_method=pattern_type,
+                 pattern_config=pattern_config,pattern_config_length={}),
+             aperture=FrontApertureConfig(aperture_method='FTH_circular',
+                 use_roi=use_roi,aperture_config={
+                     'apertures_type': aperture_types,
+                     'apertures_radius': aperture_radii,
+                     'apertures_length': aperture_lengths,
+                     'apertures_center': aperture_centers,
+                     'apertures_sigma': aperture_sigmas,
+                     'apertures_angle': aperture_angles,
+                     'apertures_ellipticity': aperture_ellipticities,
+                     'apertures_roughness': aperture_roughnesses,
+                     'apertures_roughness_modes': aperture_roughness_modes,
+                     'apertures_seed': aperture_seeds,
+                     'apertures_top_radius_factor': aperture_top_radius_factors,
+                 }),
+             illumination=IlluminationConfig(illumination_function=illumination_function,
+                 illumination_config={'center':illumination_center,'distance':illumination_focus_distance,
+                                      'fwhm':illumination_fwhm,'alpha_beam':illumination_alpha_beam}),
+             propagation=SamplePropagatorConfig(propagator_method=propagator_method,propagator_config={
+                     'use_roi': use_roi,
+                     'magnetic_pattern_use_roi': True,
+                     'magnetic_pattern_classification_min_area': pattern_classification_min_area_px,
+                     'magnetic_pattern_bubble_max_eccentricity': pattern_bubble_max_eccentricity,
+                     'magnetic_pattern_bubble_min_circularity': pattern_bubble_min_circularity,
+                     'dielectric_tensor_use_roi': dielectric_tensor_use_roi,
+                     'dielectric_tensor_compact': dielectric_tensor_compact,
+                     'dielectric_tensor_local_k_projection': dielectric_tensor_local_k_projection,
+                     'propagate': propagate,
+                     'jones_apply_zero_order_phase': jones_apply_zero_order_phase,
+                     'propagation_padding_px': propagation_padding_px,
+                     'propagation_padding_mode': propagation_padding_mode,
+                     'propagation_absorber_width_px': propagation_absorber_width_px,
+                     'propagation_absorber_strength': propagation_absorber_strength,
+                     'propagation_absorber_profile': propagation_absorber_profile,
+                     'multislice_propagation_roi': multislice_propagation_roi,
+                     'multislice_propagation_roi_padding_px': multislice_propagation_roi_padding_px,
+                     'multislice_propagation_roi_merge_overlaps': multislice_propagation_roi_merge_overlaps,
+                     'farfield_oversampling': farfield_oversampling,
+                     'scalar_refractive_index_lazy': scalar_refractive_index_lazy,
+                 }),
+             detector=DetectorConfig(shape=detector_pixel_shape,
+                 pixel_size=detector_pixel_size,
+                 sample_to_detector_distance=detector_distance,
+                 detector_center=detector_center,
+                 detector_params=detector_params,
+                 artifacts_config=artifacts_config,
+                 measurement_config=measurement_config,
+                 detector_propagation_method=detector_propagation_method,
+                 use_detector_pixel_footprint=use_detector_pixel_footprint,
+                 detector_pixel_footprint_samples=detector_pixel_footprint_samples,
+                 ignore_flat_detector_curvature=ignore_flat_detector_curvature if detector_propagation_method == 'fraunhofer' else False,
+                 save_detected_hologram_without_beamstop=save_detected_hologram_without_beamstop),
+             beamstop=BeamstopConfig(bs_method=beamstop_method,bs_detector_distance=beamstop_distance,bs_config=beamstop_config),
+             energies_eV=(x_ray_energy,),
+         )
 
 # %%
 ######################################
@@ -398,10 +395,10 @@ def random_pattern_config(params):
     result : Any
         Return value produced by the function.
     """
-    stripe_width = Uniform(30e-9, 500e-9).sample()
+    period = Uniform(60e-9, 1000e-9).sample()
     config = {
-        "stripe_width": stripe_width,
-        "sigma": Uniform(np.minimum(3e-9,0.01*stripe_width), np.maximum(3e-9,0.12 * stripe_width)).sample(),
+        'period': period,
+        "sigma": Uniform(np.minimum(3e-9,0.01*(period / 2)), np.maximum(3e-9,0.12 * (period / 2))).sample(),
     }
     config.update(labyrinth_config)
     target_state = next(state_schedule_iterator)
@@ -448,7 +445,7 @@ def detector_distance_range(params):
     # already been sampled. It returns either a fixed detector distance or a
     # Uniform range that the pipeline samples immediately.
     wavelength = physics.photon_energy_wavelength(params["energy"])
-    stripe_width = params["pattern_config"]["stripe_width"]
+    stripe_width = params["pattern_config"]["period"] / 2
     detector_width = params["detector_shape"][0] * params["detector_pixel_size"]
 
     # Upper bound: keep the detector real-space resolution smaller than the
@@ -491,7 +488,7 @@ def random_aperture_config(params):
     # all aperture lists together so their lengths and geometric constraints
     # stay consistent.
     wavelength = physics.photon_energy_wavelength(params["energy"])
-    stripe_width = params["pattern_config"]["stripe_width"]
+    stripe_width = params["pattern_config"]["period"] / 2
     detector_width = params["detector_shape"][0] * params["detector_pixel_size"]
     detector_distance = params["detector_distance"]
 

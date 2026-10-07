@@ -19,7 +19,7 @@ config = HologramPipelineConfig(
     recipe="Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)",
     pattern_config={
         "angle_stripes": np.pi / 4,
-        "stripe_width": 20e-9,
+        "period": 40e-9,
         "sigma": 1e-9,
         "waviness_amplitude": 20e-9,
         "waviness_scale": 20e-9,
@@ -30,7 +30,7 @@ ranges = HologramPipelineRanges(
     xray_energy=Uniform(770, 790),
     detector_distance=Choice((0.02, 0.04)),
     pattern_config={
-        "stripe_width": Uniform(10e-9, 50e-9),
+        "period": Uniform(20e-9, 100e-9),
         "waviness_amplitude": Uniform(5e-9, 30e-9),
     },
 )
@@ -200,7 +200,7 @@ class HologramPipelineConfig:
         Pattern parameters forwarded to the generator. Physical-length entries
         are specified in metres and converted to pixels by
         :class:`MagneticPatternConfig` for the selected pattern type
-        (e.g. ``{"angle_stripes": np.pi/4, "stripe_width": 20e-9,
+        (e.g. ``{"angle": np.pi/4, "period": 40e-9,
         "sigma": 1e-9, "waviness_amplitude": 20e-9,
         "waviness_scale": 20e-9}``).
     pattern_config_length : dict
@@ -475,7 +475,7 @@ class HologramPipelineRanges:
     >>> ranges = HologramPipelineRanges(
     ...     xray_energy=Uniform(770, 790),
     ...     detector_distance=Choice((0.02, 0.04, 0.08)),
-    ...     pattern_config={"stripe_width": Uniform(10e-9, 50e-9)},
+    ...     pattern_config={"period": Uniform(20e-9, 100e-9)},
     ... )
     """
 
@@ -631,7 +631,8 @@ class HologramPipeline:
         None
             The instance is initialised in place.
         """
-        self.config = config
+        from ..experiment import ExperimentConfig
+        self.config = config.to_pipeline_config() if isinstance(config, ExperimentConfig) else config
         self.ranges = ranges
         self.output_path = Path(output_path)
         self.n_samples = n_samples
@@ -1498,7 +1499,7 @@ class HologramPipeline:
                 pattern_config.setdefault("placement_center", placement_center)
                 pattern_config.setdefault(
                     "placement_radius",
-                    oh_top_radius + float(pattern_config.get("stripe_width", 0.0)),
+                    oh_top_radius + float(2 * pattern_config.get("radius", pattern_config.get("stripe_width", 0.0) / 2)),
                 )
         magnetic_pattern_config = MagneticPatternConfig(
             pattern_type_method=p["pattern_type"],

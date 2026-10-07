@@ -78,6 +78,8 @@ Run a coherent FTH hologram sweep:
 python tutorials/simulate_hologram_sweep.py
 ```
 
+All scattering notebooks use the [standard experiment setup](docs/experiment_setup.md), with shared component sections and units.
+
 For the notebook-first path, start with [the coherent-scattering tutorial map](docs/coherent_scattering_tutorials.md), then open the focused notebooks under `tutorials/`.
 For micromagnetic inputs, use `tutorials/13_mumax_ovf_workflow.ipynb`;
 it reads Mumax/OOMMF OVF files from `DATA_ROOT/Data/mumax_files/`, checks the

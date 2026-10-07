@@ -3,7 +3,7 @@
 Run: MPLBACKEND=Agg python paper/scattering_calculator/workflow.py
 The count scale is a declared synthetic budget, not an absolute flux calibration.
 """
-from dataclasses import dataclass, asdict, replace
+from dataclasses import asdict
 from pathlib import Path
 import argparse
 import hashlib
@@ -16,28 +16,9 @@ from matplotlib.patches import Rectangle, Circle, FancyBboxPatch
 import experiments as ex
 from scattering_calculator.experimental_conditions import detector, light_beam
 from scattering_calculator.beam_propagator.detector_propagation import RayleighSommerfeldPropagator
+from scattering_calculator.simulation_pipelines.experiment import analyze_jones
 
 OUT = Path(__file__).parent / 'results' / 'fth_workflow'
-
-
-@dataclass(frozen=True)
-class DetectorGeometry:
-    """Physical parallel detector plane; SI lengths and (row, column) shape."""
-    shape: tuple = (128, 128)
-    pixel_size_m: float = 13.5e-6
-    distance_m: float = 0.05
-    method: str = 'fraunhofer'
-    footprint_samples: int = 1
-
-    def __post_init__(self):
-        if self.method not in ('fraunhofer', 'rayleigh_sommerfeld'):
-            raise ValueError('Unknown detector propagation method')
-        if len(self.shape) != 2 or any(int(n) != n or n < 1 for n in self.shape):
-            raise ValueError('shape must contain two positive integers')
-        if not all(np.isfinite(v) and v > 0 for v in (self.pixel_size_m, self.distance_m)):
-            raise ValueError('Detector pitch and distance must be finite and positive')
-        if int(self.footprint_samples) != self.footprint_samples or self.footprint_samples < 1:
-            raise ValueError('footprint_samples must be a positive integer')
 
 
 def project(case, geometry=None):
@@ -48,37 +29,43 @@ def project(case, geometry=None):
     The two backends have different raw normalizations. Do not compare their
     raw amplitudes as calibrated photon counts.
     """
-    g = geometry or DetectorGeometry()
+    g = geometry or ex.fth_experiment().detector
     beam = light_beam.beam_parameters(case['energy_eV'], 'CR', 1., (1., 1.))
     beam.calc_wavevector()
-    layout = detector.detector_layout(g.pixel_size_m, g.shape, g.distance_m,
-                                      tuple(n // 2 for n in g.shape))
+    layout = detector.detector_layout(g.pixel_size, g.shape, g.sample_to_detector_distance,
+                                      g.detector_center)
     layout.calc_q_space_coordinates(beam)
     images = []
     for image, field in zip(case['images'], case['exits']):
-        if g.method == 'fraunhofer':
+        if g.detector_propagation_method == 'fraunhofer':
+            if g.analyzer_angle is not None:
+                amplitude = np.fft.fftshift(np.fft.fft2(field, axes=(0,1), norm='ortho'), axes=(0,1))
+                image = abs(analyze_jones(amplitude, g.analyzer_angle))**2
             model = detector.detector_hologram(layout, image, beam,
                                               case['dx_nm'] * 1e-9, None)
             images.append(model.gnomonic_projection(
-                use_pixel_footprint=g.footprint_samples > 1,
-                pixel_footprint_samples=g.footprint_samples))
+                use_pixel_footprint=(g.detector_pixel_footprint_samples if g.use_detector_pixel_footprint else 1) > 1,
+                pixel_footprint_samples=(g.detector_pixel_footprint_samples if g.use_detector_pixel_footprint else 1),
+                ignore_flat_detector_curvature=g.ignore_flat_detector_curvature))
         else:
             power = np.zeros(g.shape)
-            offsets = ((np.arange(g.footprint_samples)+.5)/g.footprint_samples-.5)*g.pixel_size_m
+            offsets = ((np.arange((g.detector_pixel_footprint_samples if g.use_detector_pixel_footprint else 1))+.5)/(g.detector_pixel_footprint_samples if g.use_detector_pixel_footprint else 1)-.5)*g.pixel_size
             for oy in offsets:
                 for ox in offsets:
                     op = RayleighSommerfeldPropagator(field.shape[:2], case['dx_nm']*1e-9,
-                        beam.wavelength, g.distance_m, layout.detx+ox, layout.dety+oy)
+                        beam.wavelength, g.sample_to_detector_distance, layout.detx+ox, layout.dety+oy)
                     amplitude = op.forward(field)
+                    if g.analyzer_angle is not None:
+                        amplitude = analyze_jones(amplitude, g.analyzer_angle)
                     value = abs(amplitude)**2
                     power += value if value.ndim == 2 else value.sum(axis=-1)
-            images.append(power/g.footprint_samples**2 * (g.pixel_size_m/(case['dx_nm']*1e-9))**2)
+            images.append(power/(g.detector_pixel_footprint_samples if g.use_detector_pixel_footprint else 1)**2 * (g.pixel_size/(case['dx_nm']*1e-9))**2)
     return np.asarray(images), layout
 
 
 def acquire(ideal, layout, effects=None):
     """Apply one common synthetic photon scale to both helicities, then noise."""
-    cfg = effects or ex.DetectorEffectsConfig()
+    cfg = ex._detector_parameters(effects)
     if not np.isfinite(ideal).all() or ideal.min() < 0 or ideal.max() <= 0:
         raise ValueError('Expected finite nonnegative intensities with nonzero power')
     scale = cfg.expected_peak_counts / ideal.max()
@@ -107,7 +94,8 @@ def acquire(ideal, layout, effects=None):
 
 def setup_figure(out=OUT, config=None, geometry=None):
     """Vector schematic, built from the same sample/detector settings as Fig. 2."""
-    cfg, g = config or ex.FTHConfig(), geometry or DetectorGeometry()
+    experiment = ex._fth_experiment(config)
+    cfg, g = ex._fth_parameters(experiment), geometry or experiment.detector
     fig = plt.figure(figsize=(13, 7.2), facecolor='white')
     ax = fig.add_axes([.04, .41, .92, .55]); ax.set(xlim=(0, 13), ylim=(0, 5)); ax.axis('off')
     ax.text(0, 4.7, 'a  Normal-incidence Fourier-transform holography', weight='bold', fontsize=15)
@@ -126,10 +114,10 @@ def setup_figure(out=OUT, config=None, geometry=None):
         ax.plot([5.2, 10.8], [y, .9], color='#247a9b', alpha=.45)
         ax.plot([5.2, 10.8], [y, 3.8], color='#247a9b', alpha=.45)
     ax.annotate('', (10.4, .35), (5.4, .35), arrowprops=dict(arrowstyle='<->', color='#555'))
-    ax.text(7.9, .55, f'free space · L = {g.distance_m*100:g} cm', ha='center', fontsize=11)
+    ax.text(7.9, .55, f'free space · L = {g.sample_to_detector_distance*100:g} cm', ha='center', fontsize=11)
     ax.add_patch(Rectangle((10.8, .8), .6, 3.1, facecolor='#dde8ee', edgecolor='#247a9b'))
     ax.text(11.1, 4.2, 'Flat detector', ha='center', fontsize=12)
-    ax.text(11.5, 2.4, f'{g.shape[0]} × {g.shape[1]}\n{g.pixel_size_m*1e6:g} µm pixels', fontsize=10)
+    ax.text(11.5, 2.4, f'{g.shape[0]} × {g.shape[1]}\n{g.pixel_size*1e6:g} µm pixels', fontsize=10)
     inset = fig.add_axes([.07, .44, .16, .15]); inset.set_aspect('equal')
     inset.set(xlim=(-250, 750), ylim=(-250, 250)); inset.axis('off')
     inset.add_patch(Rectangle((-250,-250),1000,500,facecolor='#e6e8eb'))
@@ -159,13 +147,14 @@ def setup_figure(out=OUT, config=None, geometry=None):
 
 
 def baseline(out=OUT, config=None, geometry=None, effects=None):
-    cfg, g, eff = config or ex.FTHConfig(), geometry or DetectorGeometry(), effects or ex.DetectorEffectsConfig()
-    ex.provenance(out, dict(sample=asdict(cfg), geometry=asdict(g), acquisition=asdict(eff)))
+    experiment = ex._fth_experiment(config)
+    cfg, g, eff = ex._fth_parameters(experiment), geometry or experiment.detector, ex._detector_parameters(effects or experiment.detector)
+    ex.provenance(out, experiment.to_dict())
     record = json.loads((out/'provenance.json').read_text())
     record['source_sha256']['paper/scattering_calculator/workflow.py'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     (out/'provenance.json').write_text(json.dumps(record,indent=2)+'\n')
-    setup_figure(out, cfg, g)
-    case = ex.fth_case(config=cfg)
+    setup_figure(out, experiment, g)
+    case = ex.fth_case(config=experiment)
     ideal, layout = project(case, g)
     acquisition = acquire(ideal, layout, eff)
     np.savez_compressed(out/'baseline.npz', **case, detector_ideal=ideal,
@@ -185,16 +174,17 @@ def baseline(out=OUT, config=None, geometry=None, effects=None):
 
 def spectral(out=OUT, config=None, geometry=None):
     """Both the common-q reconstruction cube and a fixed-camera energy series."""
-    cfg, g = config or ex.FTHConfig(), geometry or DetectorGeometry()
+    experiment = ex._fth_experiment(config)
+    cfg, g = ex._fth_parameters(experiment), geometry or experiment.detector
     if any(not 770 <= e <= 805 for e in cfg.energies_eV):
         raise ValueError('This Co example needs energies within the magnetic-table window, 770–805 eV')
     folder = out/'spectral'; folder.mkdir(parents=True,exist_ok=True)
     # Shared existing implementation generates optical curves, mode comparison,
     # and a common-q complex reconstruction cube with raw arrays.
-    metrics = ex.fth_figures(folder, config=cfg)
+    metrics = ex.fth_figures(folder, config=experiment)
     frames, qx, qy = [], [], []
     for energy in cfg.energies_eV:
-        case = ex.fth_case(energy=energy,config=cfg)
+        case = ex.fth_case(energy=energy,config=experiment)
         image, layout = project(case,g)
         frames.append(image); qx.append(layout.detqx); qy.append(layout.detqy)
     np.savez_compressed(folder/'fixed_detector_series.npz', energies_eV=cfg.energies_eV,
@@ -208,17 +198,18 @@ def spectral(out=OUT, config=None, geometry=None):
 
 def validate(out=OUT, config=None):
     """FTH checks, with reported refinement differences rather than an accuracy claim."""
-    cfg = config or ex.FTHConfig()
-    cases = {m: ex.fth_case(mode=m,config=cfg) for m in ('Scalar','Jones','Stokes')}
+    experiment = ex._fth_experiment(config)
+    cfg = ex._fth_parameters(experiment)
+    cases = {m: ex.fth_case(mode=m,config=experiment) for m in ('Scalar','Jones','Stokes')}
     ref = cases['Jones']; den = np.linalg.norm(ref['difference'])
     metrics = {m:float(np.linalg.norm(c['difference']-ref['difference'])/den) for m,c in cases.items()}
     np.testing.assert_allclose(cases['Stokes']['difference'],ref['difference'],rtol=1e-10,atol=1e-12)
-    refined = ex.fth_case(config=replace(cfg,max_slice_nm=cfg.max_slice_nm/2))
+    refined = ex.fth_case(config=experiment.with_changes(sample={'max_slice_thickness':cfg.max_slice_nm*1e-9/2}))
     metrics['slice_halving_relative_L2'] = float(np.linalg.norm(refined['difference']-ref['difference'])/den)
-    projected = ex.fth_case(config=replace(cfg,propagate=False))
+    projected = ex.fth_case(config=experiment.with_changes(propagation={'propagator_config':{**experiment.propagation.propagator_config,'propagate':False}}))
     metrics['projection_control_relative_L2'] = float(np.linalg.norm(projected['difference']-ref['difference'])/den)
-    ideal,layout = project(ref)
-    a,b = acquire(ideal,layout),acquire(ideal,layout)
+    ideal,layout = project(ref,experiment.detector)
+    a,b = acquire(ideal,layout,experiment.detector),acquire(ideal,layout,experiment.detector)
     np.testing.assert_array_equal(a['measured'],b['measured'])
     assert np.isfinite(ideal).all() and ideal.min() >= 0
     metrics['seeded_acquisition_repeatable'] = True

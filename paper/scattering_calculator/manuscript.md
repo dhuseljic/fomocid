@@ -22,7 +22,7 @@ The executable teaching interface is [workflow.py](workflow.py); it calls the pr
 
 ### 2.1 Sample design and optical constants
 
-`FTHConfig.layers_nm` defines explicit material interfaces. Object and reference radii and the reference offset determine masks, which act on material occupancy in each slice. `n`, `dx_nm` and `max_slice_nm` set the transverse grid and longitudinal discretization. Magnetization is a three-component array. The sample builder in `fth_case` is the place to replace the demonstration domains with an externally supplied texture or change which layers each hole penetrates.
+`experiment.sample.recipe` defines explicit material interfaces. Object and reference radii and the reference offset determine masks, which act on material occupancy in each slice. `experiment.simulation.shape`, `real_space_pixel_size` and `experiment.sample.max_slice_thickness` set the transverse grid and longitudinal discretization. Magnetization is a three-component array. The shared `ScatteringExperiment.setup(magnetization=..., mask=...)` accepts externally supplied arrays; aperture configuration controls hole penetration. All maintained examples follow the same [experiment setup](../../docs/experiment_setup.md).
 
 For each photon energy, `material_params` loads the charge, circular and linear optical channels `(n0, nc, nl)`. The convention is n0 = 1 − δ − iβ with negative spatial propagation phases, so positive β produces attenuation. The bundled Co magnetic channel is available in the loader's 770–805 eV window. Generic material loading supplies zero circular and linear channels, and the linear channel in this Co example is zero. Users must check channel availability; specifying a magnetic element alone does not provide its dichroic spectrum.
 
@@ -38,7 +38,7 @@ With `propagate=False`, local material interactions remain active but transverse
 
 ### 2.3 Free-space propagation and projection onto detector pixels
 
-`DetectorGeometry(method="fraunhofer")` computes the ideal reciprocal intensity by FFT and projects it onto physical flat-detector pixels. Angular mapping and a relative flat-pixel solid-angle factor are retained. `footprint_samples=3` averages nine sample points per pixel rather than using pixel centres alone. Detector distance and pitch control angular acceptance independently of the sample grid.
+`experiment.detector.detector_propagation_method="fraunhofer"` computes the ideal reciprocal intensity by FFT and projects it onto physical flat-detector pixels. Angular mapping and a relative flat-pixel solid-angle factor are retained. `detector_pixel_footprint_samples=3` averages nine sample points per pixel rather than using pixel centres alone. Detector distance and pitch control angular acceptance independently of the sample grid.
 
 `method="rayleigh_sommerfeld"` evaluates finite-distance scalar diffraction directly at detector coordinates, propagating each coherent channel before adding its intensity. This option changes only the exit-to-detector step. It can be expensive because direct integration couples source and detector pixels. The kernel uses zero exterior field outside the supplied sample window, so source-window and sampling convergence matter. A two-component input does not turn this scalar free-space operator into a full vector Maxwell boundary calculation.
 
@@ -46,7 +46,7 @@ In the production API, these options are `DetectorConfig.detector_propagation_me
 
 ### 2.4 Acquisition and detector artifacts
 
-The walkthrough assigns one multiplicative synthetic photon budget to the two ideal helicity images together. Separate peak normalization of CR and CL would distort their difference. `DetectorEffectsConfig` controls this budget, exposure, frame count, efficiency, readout noise, saturation, photon spreading, hot/cold pixels and cosmic rays. A central beamstop mask is applied in detector pixels. This simple teaching mask does not model a beamstop wire or its diffraction; the production `BeamstopConfig` offers additional shadow geometry controls.
+The walkthrough assigns one multiplicative synthetic photon budget to the two ideal helicity images together. Separate peak normalization of CR and CL would distort their difference. The standard `experiment.detector` section controls exposure, frame count, efficiency, readout noise, saturation, photon spreading, hot/cold pixels and cosmic rays. A central beamstop mask is applied in detector pixels. This simple teaching mask does not model a beamstop wire or its diffraction; the production `BeamstopConfig` offers additional shadow geometry controls.
 
 The baseline illustrates a peak budget of 20,000 before acquisition scaling, unit exposure and efficiency, two-count readout noise and saturation at 16,000 counts. Camera and exposure seeds allow repeated realizations. The raw ideal intensity, expected synthetic budget, measured counts and beamstop mask are saved separately. Absolute photon-flux calibration is outside this example.
 

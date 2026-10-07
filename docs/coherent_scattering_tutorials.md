@@ -1,5 +1,7 @@
 # Coherent-Scattering Tutorials
 
+Use the [standard experiment setup](experiment_setup.md) in every maintained notebook: one `ExperimentConfig`, consistent component sections, and the `setup → propagate → detect` lifecycle.
+
 The coherent-scattering notebooks in `tutorials/` are split by topic so users
 do not need to start from the full scattering notebook when they only want to
 understand one part of the simulation.
