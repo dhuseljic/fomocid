@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import numpy as np
+from copy import copy
 from numpy.typing import ArrayLike, NDArray
 import matplotlib.pyplot as plt
 from scipy import signal
@@ -396,6 +397,7 @@ class detector_hologram:
         "readout_noise_sigma": 3,
         "detector_threshold": 64e3,
         "counts_per_photon": 100,
+        "nonlinear_response": None,
         "quantum_efficiency": 1.0,
         "noise_seed": None,
     }
@@ -440,6 +442,7 @@ class detector_hologram:
         self.detector_layout = detector_layout
         self.hologram = hologram
         self.beam_parameters = beam_parameters
+        self.photon_energy_eV = getattr(beam_parameters, 'energy', None)
         self.real_space_pixel_size = real_space_pixel_size
         self.beamstop = beamstop
         self.coherence_length = coherence_length
@@ -773,6 +776,7 @@ class detector_hologram:
                 "readout_noise_sigma",
                 "detector_threshold",
                 "counts_per_photon",
+                "nonlinear_response",
                 "quantum_efficiency",
                 "noise_seed",
             },
@@ -823,79 +827,119 @@ class detector_hologram:
             hologram_shape[0] * real_space_resolution / coherence_length_x
         )
 
-    def add_noise(
-        self,
-        apply_beamstop_mask: bool = True,
-        apply_detector_threshold: bool = True,
-        store_no_beamstop: bool = False,
-    ):
-        """
-        Given the hologram, the function simulates the holograms introducing drift,
-         coherence effects and Poisson noise
-        INPUT:
-                readout_noise_average, readout_noise_sigma: readout noise of the camera
-                sigma_h_px: sigma of drift in pixles. Takes into account also the spatial incoherence, so that has to be be taken ito accout too
-                max_counts_per_image: max number of counts the camera can take in one image
-                counts_per_photon:
-                number_of_frames: number of acquired frames. The more, the lower the noise
-                apply_beamstop_mask: if True, apply the beamstop shadow to the
-                    detected hologram.
-                apply_detector_threshold: if True, cap the detected image at the
-                    detector threshold.
-                store_no_beamstop: if True, also store a detected hologram made
-                    from the same photon/readout noise draw but without applying
-                    the beamstop shadow or detector-threshold cap.
+    def _gain_at_energy(self, energy):
+        """Evaluate constant or energy-dependent ADU per detected photon.
 
+        Parameters
         ----------
-        Author: RB_2020
+        energy : float or None
+            Physical photon energy in eV; required only for a gain callable.
+
+        Returns
+        -------
+        float
+            Finite positive gain, evaluated independently for each color.
         """
+        gain = self.counts_per_photon
+        if callable(gain):
+            if energy is None or not np.isfinite(energy) or energy <= 0:
+                raise ValueError(
+                    "Energy-dependent counts_per_photon requires a physical photon energy in eV"
+                )
+            gain = gain(float(energy))
+        if np.iscomplexobj(gain):
+            raise ValueError("counts_per_photon must be real ADU per photon")
+        value = np.asarray(gain, dtype=float)
+        if value.ndim != 0 or not np.isfinite(value) or value <= 0:
+            raise ValueError("counts_per_photon must evaluate to a finite positive scalar")
+        return float(value)
 
-        # 0. we start with holo, the FFT of the exit wave, hence the distribution of photons (or counts) at a certain point in the detector for a single image
-        rng = np.random.default_rng(getattr(self, "noise_seed", None))
-        holo = np.array(self.hologram_detector, dtype=float, copy=True)
-        effective_exposure = 1.0 if self.exposure_time is None else float(self.exposure_time)
-        if effective_exposure < 0:
-            raise ValueError("exposure_time must be non-negative or None.")
-        if self.max_counts_per_image is None:
-            holo *= effective_exposure * self.quantum_efficiency
+    def _expected_photon_components(self):
+        """Prepare per-frame detected photon means and energy-specific gains.
 
-        npx, npy = holo.shape
-        self._set_coherence_sigmas(holo.shape)
+        Parameters
+        ----------
+        None
+            Uses ideal photon rates, exposure, efficiency and optional count budget.
 
-        # 1. convolution with a gaussian to simulate vibrations and partial transversal coherence
-        if (self.sigma_x > 0) or (self.sigma_y > 0):
-            kernel = np.outer(
-                signal.windows.gaussian(npx, self.sigma_y),
-                signal.windows.gaussian(npx, self.sigma_x),
-            )
-            if kernel.sum() > 0:
-                kernel /= kernel.sum()
-                holo = signal.fftconvolve(holo, kernel, mode="same")
-
-        # 2. optionally rescale to a requested maximum detector count per image.
-        # If None, preserve the physical scale set by photon flux and exposure time.
+        Returns
+        -------
+        list of tuple
+            (gain_ADU_per_photon, expected_detected_photons) for each color.
+        """
+        energy = getattr(
+            self,
+            "photon_energy_eV",
+            getattr(getattr(self, "beam_parameters", None), "energy", None),
+        )
+        components = getattr(
+            self, "photon_rate_components", ((energy, self.hologram_detector),)
+        )
+        if not components:
+            raise ValueError("At least one photon-rate component is required")
+        exposure = 1.0 if self.exposure_time is None else float(self.exposure_time)
+        if not np.isfinite(exposure) or exposure < 0:
+            raise ValueError("exposure_time must be finite and non-negative or None")
+        efficiency = np.asarray(self.quantum_efficiency, dtype=float)
+        if not np.isfinite(efficiency).all() or np.any((efficiency < 0) | (efficiency > 1)):
+            raise ValueError("quantum_efficiency must lie between zero and one")
+        self._set_coherence_sigmas(self.hologram_detector.shape)
+        prepared = []
+        for energy, rate in components:
+            gain = self._gain_at_energy(energy)
+            rate = np.array(rate, dtype=float, copy=True)
+            if (
+                rate.shape != self.hologram_detector.shape
+                or not np.isfinite(rate).all()
+                or np.any(rate < 0)
+            ):
+                raise ValueError(
+                    "Photon-rate components must match the ideal image and be finite/nonnegative"
+                )
+            if self.max_counts_per_image is None:
+                rate *= exposure * efficiency
+            if self.sigma_x > 0 or self.sigma_y > 0:
+                rows, columns = rate.shape
+                kernel = np.outer(
+                    signal.windows.gaussian(rows, self.sigma_y),
+                    signal.windows.gaussian(columns, self.sigma_x),
+                )
+                if kernel.sum() > 0:
+                    rate = signal.fftconvolve(rate, kernel / kernel.sum(), mode="same")
+            prepared.append((gain, np.maximum(rate, 0.0)))
         if self.max_counts_per_image is not None:
-            max_unblocked = np.amax((1.0 - self.beamstop.beamstop) * holo)
-            if max_unblocked > 0:
-                holo *= self.max_counts_per_image / max_unblocked
+            budget = float(self.max_counts_per_image)
+            if not np.isfinite(budget) or budget < 0:
+                raise ValueError(
+                    "max_counts_per_image must be finite and non-negative or None"
+                )
+            expected_adu = sum(gain * mean for gain, mean in prepared)
+            shadow = 0.0 if self.beamstop is None else self.beamstop.beamstop
+            peak = np.max((1.0 - shadow) * expected_adu)
+            scale = budget / peak if peak > 0 else 0.0
+            prepared = [(gain, mean * scale) for gain, mean in prepared]
+        return prepared
 
-        # 3. multiply by frame number to get counts of the entire set
-        holo *= self.number_frames
+    def _spread_photons(self, photon_counts, rng):
+        """Distribute independently sampled photon events across sensor pixels.
 
-        # 4. divide by counts_per_photons to get photon number
-        expected_photons = holo / self.counts_per_photon
-        expected_photons[expected_photons < 0] = 0
+        Parameters
+        ----------
+        photon_counts : ndarray
+            Realized photons for one spectral component.
+        rng : numpy.random.Generator
+            Acquisition generator shared across the component sampling steps.
 
-        # 5. Poisson photon sampling. Add poisson noise to number of photons
-        photon_counts = rng.poisson(expected_photons).astype(np.int64)
-
-        # 6. photon splatting with spatial kernel classes + event variants
-        # this makes the photon events blobs affecting multiple pixels
+        Returns
+        -------
+        ndarray
+            Photon-event response, before conversion to ADU.
+        """
         if self.sigma_photon > 0:
             # Create class map if it does not exist yet
             if not hasattr(self, "photon_class_map"):
                 self.photon_class_map = self.make_tile_class_map(
-                    holo.shape,
+                    photon_counts.shape,
                     tile_size=getattr(self, "photon_tile_size", self.photon_tile_size),
                     n_classes=getattr(self, "photon_n_classes", self.photon_n_classes),
                     seed=getattr(self, "photon_class_seed", None),
@@ -907,9 +951,7 @@ class detector_hologram:
             if regenerate or not hasattr(self, "photon_kernel_bank"):
                 self.photon_kernel_bank = self.make_photon_kernel_bank(
                     n_classes=getattr(self, "photon_n_classes", self.photon_n_classes),
-                    n_variants=getattr(
-                        self, "photon_n_variants", self.photon_n_variants
-                    ),
+                    n_variants=getattr(self, "photon_n_variants", self.photon_n_variants),
                     size=getattr(self, "photon_kernel_size", self.photon_kernel_size),
                     sigma_range=getattr(
                         self,
@@ -934,21 +976,136 @@ class detector_hologram:
                 rng=rng,
             )
 
-        # 7. convert photons back to detector counts
-        holo_counts = photon_counts.astype(float) * self.counts_per_photon
+        return photon_counts
+
+    def _acquire_frames(
+        self, rng, apply_beamstop_mask, apply_detector_threshold, store_no_beamstop
+    ):
+        """Convert, read out and clip each physical frame before averaging.
+
+        Parameters
+        ----------
+        rng : numpy.random.Generator
+            Generator supplying independent per-frame acquisition seeds.
+        apply_beamstop_mask, apply_detector_threshold, store_no_beamstop : bool
+            Same acquisition controls as add_noise.
+
+        Returns
+        -------
+        None
+            Stores frame-averaged measurements and optional unmasked variant.
+        """
+        frame = copy(self)
+        frame.number_frames = 1
+        total = np.zeros_like(self.hologram_detector, dtype=float)
+        unmasked = np.zeros_like(total) if store_no_beamstop else None
+        tracks = []
+        for _ in range(self.number_frames):
+            frame.noise_seed = int(rng.integers(0, np.iinfo(np.uint32).max))
+            frame.add_noise(
+                apply_beamstop_mask, apply_detector_threshold, store_no_beamstop
+            )
+            total += frame.hologram_exp
+            tracks.append(frame.cosmic_ray_tracks.copy())
+            if store_no_beamstop:
+                unmasked += frame.hologram_exp_no_beamstop
+        self.hologram_exp = total / self.number_frames
+        self.camera_defect_map = frame.camera_defect_map
+        self.cosmic_ray_tracks = np.concatenate(tracks, axis=0)
+        self.cosmic_ray_count = len(self.cosmic_ray_tracks)
+        for name in ("photon_class_map", "photon_kernel_bank"):
+            if hasattr(frame, name):
+                setattr(self, name, getattr(frame, name))
+        if store_no_beamstop:
+            self.hologram_exp_no_beamstop = unmasked / self.number_frames
+
+    def add_noise(
+        self,
+        apply_beamstop_mask: bool = True,
+        apply_detector_threshold: bool = True,
+        store_no_beamstop: bool = False,
+    ):
+        """Sample photons, convert energy to signal and apply camera acquisition.
+
+        Physical ideal images are photon rates, not ADU. Colors are sampled
+        independently, weighted by their energy-specific gains and then summed.
+        An optional nonlinear curve acts on the summed per-frame linear ADU;
+        it is never applied to an exposure mean or separately to each color.
+
+        Parameters
+        ----------
+        apply_beamstop_mask : bool
+            Apply the configured detector-plane beamstop shadow.
+        apply_detector_threshold : bool
+            Apply the final ADC threshold.
+        store_no_beamstop : bool
+            Also save an unmasked/unclipped variant from the same event draws.
+
+        Returns
+        -------
+        None
+            Stores the frame-averaged acquired image in hologram_exp.
+        """
+
+        rng = np.random.default_rng(getattr(self, "noise_seed", None))
+        if int(self.number_frames) != self.number_frames or self.number_frames < 1:
+            raise ValueError("number_frames must be a positive integer")
+        self.number_frames = int(self.number_frames)
+        response = getattr(self, "nonlinear_response", None)
+        if response is not None and not callable(response):
+            raise TypeError("nonlinear_response must be a callable of linear ADU, or None")
+        if self.number_frames > 1:
+            self._acquire_frames(
+                rng, apply_beamstop_mask, apply_detector_threshold, store_no_beamstop
+            )
+            return
+
+        # Photon statistics are independent of electronic gain. Each color has
+        # its own Poisson realization and ADU/photon before signals are summed.
+        signal_adu = np.zeros_like(self.hologram_detector, dtype=float)
+        for gain, expected_photons in self._expected_photon_components():
+            photons = rng.poisson(expected_photons).astype(np.int64)
+            signal_adu += gain * self._spread_photons(photons, rng)
+        if response is not None:
+            converted = np.asarray(response(signal_adu.copy()))
+            if np.iscomplexobj(converted):
+                raise ValueError("nonlinear_response must return real ADU")
+            converted = converted.astype(float)
+            try:
+                converted = np.broadcast_to(converted, signal_adu.shape)
+            except ValueError as error:
+                raise ValueError(
+                    "nonlinear_response output must match the detector image"
+                ) from error
+            if not np.isfinite(converted).all() or np.any(converted < 0):
+                raise ValueError("nonlinear_response must return finite nonnegative ADU")
+            signal_adu = converted.copy()
         artifact_seed = int(rng.integers(0, np.iinfo(np.uint32).max))
 
-        # 8. draw one readout-noise image and reuse it for optional variants.
+        # Draw one readout image and reuse it for the optional unmasked variant.
         readout_noise = 0.0
         if self.readout_noise_average > 0 or self.readout_noise_sigma > 0:
             readout_noise = np.random.normal(
-                self.readout_noise_average * self.number_frames,
-                self.readout_noise_sigma * np.sqrt(self.number_frames),
-                holo_counts.shape,
+                self.readout_noise_average,
+                self.readout_noise_sigma,
+                signal_adu.shape,
             )
 
         def finalize_detection(image, apply_mask=True, apply_threshold=True):
-            """Apply detector mask, readout noise, thresholding, and averaging."""
+            """Finish one physical frame using the same readout/artifact draws.
+
+            Parameters
+            ----------
+            image : ndarray
+                Converted ADU before readout.
+            apply_mask, apply_threshold : bool
+                Apply the beamstop shadow and ADC clipping.
+
+            Returns
+            -------
+            ndarray
+                One acquired frame, before multi-frame averaging.
+            """
             detected = np.array(image, dtype=float, copy=True)
             if apply_mask:
                 detected *= 1.0 - self.beamstop.beamstop
@@ -963,12 +1120,7 @@ class detector_hologram:
             # Round to integer counts and optionally cap at the camera threshold.
             detected = np.round(detected, 0)
             if apply_threshold:
-                detected = np.minimum(
-                    detected, self.number_frames * self.detector_threshold
-                )
-
-            # Divide by frame number: the saved image is a frame average.
-            detected /= self.number_frames
+                detected = np.minimum(detected, self.detector_threshold)
 
             # Just making sure the final product is positive.
             detected[detected < 0] = 0
@@ -976,13 +1128,13 @@ class detector_hologram:
 
         if store_no_beamstop:
             self.hologram_exp_no_beamstop = finalize_detection(
-                holo_counts,
+                signal_adu,
                 apply_mask=False,
                 apply_threshold=False,
             )
 
         self.hologram_exp = finalize_detection(
-            holo_counts,
+            signal_adu,
             apply_mask=apply_beamstop_mask,
             apply_threshold=apply_detector_threshold,
         )

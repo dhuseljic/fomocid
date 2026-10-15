@@ -230,13 +230,34 @@ def _coherency_to_modes(stokes: np.ndarray, *, atol: float = 1e-12):
 
 
 def _field_for_mode(template: np.ndarray, weight: float, vector: np.ndarray) -> np.ndarray:
-    """Build a Jones field with ``template`` intensity and one polarization mode."""
+    """Build one polarization carrier, retaining the template's spatial phase.
+
+    Parameters
+    ----------
+    template : ndarray
+        Uniform-polarization Jones field with a common spatial wavefront.
+    weight : float
+        Nonnegative intensity weight of the incoherent polarization mode.
+    vector : ndarray
+        Unit Jones polarization of the mode.
+
+    Returns
+    -------
+    ndarray
+        Mode amplitude with the original envelope and spatial phase.
+    """
     template = np.asarray(template, dtype=complex)
     if template.ndim < 1 or template.shape[-1] != 2:
         raise ValueError("Jones template must have shape (..., 2).")
     intensity_envelope = np.sum(np.abs(template) ** 2, axis=-1)
     amplitude = np.sqrt(np.maximum(intensity_envelope, 0.0) * weight)
-    return amplitude[..., np.newaxis] * vector
+    # Uniform input polarization makes either nonzero component a reference
+    # for the common spatial phase. A constant polarization phase is irrelevant.
+    reference = np.where(np.abs(template[..., 0]) >= np.abs(template[..., 1]),
+                         template[..., 0], template[..., 1])
+    phase = np.divide(reference, np.abs(reference), out=np.ones_like(reference),
+                      where=np.abs(reference) > 0)
+    return (amplitude * phase)[..., np.newaxis] * vector
 
 
 class stokes_wavefronts:
@@ -249,7 +270,7 @@ class stokes_wavefronts:
     polarization state explicit, while ``hologram`` is detector-plane ``I``.
     """
 
-    def __init__(self, *args, input_stokes=None, **kwargs):
+    def __init__(self, *args, input_stokes=None, farfield_background_modes=None, **kwargs):
         """Initialize a Stokes wavefront around the coherent propagator.
 
         Parameters
@@ -262,6 +283,9 @@ class stokes_wavefronts:
             preserving the original Jones-equivalent behavior.  If supplied,
             the Stokes vector may be partially polarized and is decomposed into
             incoherent coherent modes before propagation.
+        farfield_background_modes : sequence of ndarray or None
+            Optional pretransmitted background for each polarization mode, in
+            coherency-eigenmode order. Includes mode weights and material response.
         **kwargs : dict
             Keyword arguments accepted by ``Jones_propagator.wavefronts``.
 
@@ -305,10 +329,14 @@ class stokes_wavefronts:
             self.exit_stokes = 0.0
             self.detector_stokes = 0.0
             self.exit_stokes_for_farfield = 0.0
-            for weight, vector in mode_specs:
+            if farfield_background_modes is not None and len(farfield_background_modes) != len(mode_specs):
+                raise ValueError('One transmitted background is required per polarization mode')
+            for mode_index, (weight, vector) in enumerate(mode_specs):
                 mode_kwargs = dict(kwargs)
                 mode_kwargs["E_in"] = _field_for_mode(jones_template, weight, vector)
-                if background_template is not None:
+                if farfield_background_modes is not None:
+                    mode_kwargs['farfield_background_jones'] = farfield_background_modes[mode_index]
+                elif background_template is not None:
                     mode_kwargs["farfield_background_jones"] = _field_for_mode(
                         background_template, weight, vector
                     )

@@ -442,6 +442,8 @@ class HologramPipelineConfig:
     farfield_oversampling: int = 1
     propagator_method: str = "Jones"
     scalar_refractive_index_lazy: bool = True
+    refractive_index_database: str | None = None
+    optical_responses: tuple = ()  # optional nonmagnetic material contributions
     sample_tilt_theta: float = 0.0  # rad
     sample_tilt_axis: str = "x"
     sample_tilt_voxel_size: float | None = None  # m
@@ -1402,6 +1404,8 @@ class HologramPipeline:
             real_space_pixel_size=real_space_pixel_size,
             xray_config=xray_config,
             sample_name=cfg.sample_name,
+            optical_responses=cfg.optical_responses,
+            refractive_index_database=cfg.refractive_index_database,
             sample_tilt_theta=cfg.sample_tilt_theta,
             sample_tilt_axis=cfg.sample_tilt_axis,
             sample_tilt_voxel_size=cfg.sample_tilt_voxel_size,

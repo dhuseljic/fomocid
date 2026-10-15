@@ -4,7 +4,7 @@
 
 ## Abstract
 
-We introduce the scattering calculator in fo-mo-cid as a tool for studying coherent diffractive techniques in transmission geometry. The simulator follows illumination through a structured sample to a detector in four stages: incident-field construction, multislice light–matter interaction, free-space propagation and detector-signal simulation. Scalar refractive-index and Jones dielectric-tensor descriptions provide alternative material-interaction models; a Stokes interface represents polarization mixtures through coherent Jones carriers. Exit-to-detector propagation uses either a Fraunhofer approximation or finite-distance Rayleigh–Sommerfeld integration. A separate acquisition model adds photon statistics and configurable sensor effects. We illustrate the workflow with normal-incidence Fourier-transform holography (FTH), generating the interference of object and reference waves and a synthetic detector image. This example demonstrates the simulator's use and the consequences of its model choices, without restricting the tool to holography.
+We introduce the scattering calculator in fo-mo-cid as a tool for studying coherent diffractive techniques in transmission geometry. The simulator follows illumination through a structured sample to a detector in four stages: incident-field construction, multislice light–matter interaction, free-space propagation and detector-signal simulation. Scalar refractive-index and Jones dielectric-tensor descriptions provide alternative material-interaction models; a Stokes interface represents polarization mixtures through coherent Jones carriers. Optional nonmagnetic terms describe natural linear/circular response and prescribed ferroelectric-axis anisotropy. Exit-to-detector propagation uses either a Fraunhofer approximation or finite-distance Rayleigh–Sommerfeld integration. A separate acquisition model adds photon statistics and configurable sensor effects. We illustrate the workflow with normal-incidence Fourier-transform holography (FTH), generating the interference of object and reference waves and a synthetic detector image. This example demonstrates the simulator's use and the consequences of its model choices, without restricting the tool to holography.
 
 ## 1. A transmission experiment as the organizing example
 
@@ -42,6 +42,36 @@ $$
 A plane wave uses constant A and phase. At its waist, the Gaussian option has A(r) ∝ exp(−r²/w₀²); away from the waist it includes beam expansion, wavefront curvature and Gouy phase. These are the standard Gaussian-beam and scalar-wave descriptions [3]. Normal incidence uses zero beam tilt. The Gaussian helper normalizes peak amplitude, so its envelope alone does not establish a physical photon flux.
 
 `experimental_conditions/light_beam.py` implements `illumination.plane_wave`, `gauss_beam` and `scalar_to_jones`. Source parameters select energy, beam size, position, waist distance and polarization. The circular states are p_CR = (1,−i)/√2 and p_CL = (1,+i)/√2; horizontal, vertical and arbitrary linear states are also available. Physical flux and exposure are configured for acquisition. The Stokes option additionally accepts a physical input Stokes vector for a uniform polarization mixture; this does not by itself specify arbitrary spatial partial coherence.
+
+**Spatial envelope, wavefront and normalization.** `illumination_function=None` or `"plane_wave"` selects a uniform entrance field; `"gaussian"` selects a Gaussian beam. Its `center` is a displacement in metres in (y,x) order, `fwhm` is the waist intensity width, and `distance` locates the evaluation plane relative to the waist. Defocus retains the complex curvature and Gouy phase. For Gaussian illumination, `alpha_beam=(alpha_y,alpha_x)` specifies tilt in radians and modifies the entrance wavefront and beam geometry. Gaussian focus and tilt settings are not applied by the plane-wave generator. `IlluminationConfig` rescales the sampled entrance power to the configured `xray.photon_flux` in photons/s. Thus the beam helper's peak normalization is intermediate; changing beam width or grid does not silently change this declared flux. The finite window still needs adequate support and sampling.
+
+**Pure and partially polarized illumination.** Named CR, CL, LH and LV states supply pure polarization; `linear_polarization_angle` sets a linear angle from laboratory +x towards +y. The Stokes interface additionally accepts general uniform pure elliptical, partially polarized or unpolarized input through `input_stokes=[I,Q,U,V]`. We use I=1 to preserve the configured source flux. A physical state obeys I ≥ √(Q²+U²+V²), with equality for a pure state. Its polarization coherency matrix is decomposed as
+
+$$
+\mathbf C=\sum_{b=1}^{B}v_b\mathbf p_b\mathbf p_b^\dagger,\quad
+B\leq2,\quad v_b\geq0,\quad\sum_bv_b=1. \tag{2a}
+$$
+
+The simulator propagates √v_b A exp(iφ) **p**_b as coherent Jones carriers and sums their intensities and Stokes vectors afterward [4]. Spatial wavefront phase is retained within every carrier. For example, `[1,0,0,0.7]` corresponds to .85 CR plus .15 CL, while `[1,0,0,0]` is unpolarized. An explicit input Stokes vector supplies the polarization state instead of the named source polarization. These are polarization modes with a shared spatial envelope, not an arbitrary spatial mutual-coherence model.
+
+**Multiple simultaneous components and separate scans.** `illumination.spectral_components` specifies mutually incoherent components by absolute `energy` or relative `energy_factor`, positive `weight`, and optional pure-state `pol`. Weights are normalized and divide the total incident photon flux. Each component independently refreshes wavelength, Gaussian field and optical constants, transmits through the same sample, and reaches the same physical detector pixels. With normalized spectral weights w_a and polarization weights v_ab,
+
+$$
+I_{\mathrm{ideal}}(X,Y)=\sum_{a,b}w_av_{ab}
+\left\|\mathcal D_a\mathcal T_a\mathbf E_{ab}\right\|^2. \tag{2b}
+$$
+
+Here **E**_ab denotes a unit-weight entrance mode and T_a includes multislice propagation. Production carrier amplitudes already contain the square roots of the flux weights, so these weights are not applied twice. Material energy dependence and detector q coordinates belong to each component. Intensities add before one detector acquisition; the model assumes temporal cross terms average out. It does not simulate pulse waveforms or ultrafast beating. Colors may share an energy, and a Stokes mixture can occur within each color. Explicit `input_stokes` applies the same polarization mixture to the components. HDF5 retains separate component products and their detector coordinates.
+
+By contrast, `illumination.energies_eV` and `polarizations` declare separate exposures over their Cartesian product. A two-energy scan produces two measurements, whereas two spectral components produce one summed measurement. An incoherent ensemble follows the mode-intensity sum above [8]. A phase-coherent superposition at one frequency instead requires adding amplitudes before forming intensity; complex `E_in` inputs to the low-level propagators permit such supplied fields. The standard Gaussian/plane-wave configuration does not expose an arbitrary spatial-mode ensemble or a cross-spectral-density solver.
+
+**Spatial partial coherence.** `xray.coherence_length=(ξ_y,ξ_x)` supplies the existing Gaussian acquisition-blur approximation. Schematically,
+
+$$
+I_{\mathrm{blur}}=G_{\sigma_y,\sigma_x}*I_{\mathrm{ideal}}. \tag{2c}
+$$
+
+The detector implementation maps coherence lengths to blur widths and convolves before photon sampling. This operates during acquisition: it does not alter the stored exit fields or ideal intensity and does not propagate a general mutual-coherence function. Its fringe-visibility approximation must be distinguished from the explicit polarization and spectral mode sums, particularly for finite-distance diffraction. Photon spreading is a separate sensor response. The [illumination guide](../../docs/illumination.md) and first notebook expose these controls and their scope.
 
 ### 2.2 Stage 2: multislice transmission through the sample
 
@@ -85,6 +115,31 @@ $$
 
 The σ matrices are the Hermitian basis for this Stokes convention [4]. `Stokes_propagator` implements the conversions and retains coherent Jones carriers during diffraction. It sums mixed modes incoherently after propagation; Fourier-transforming the four real Stokes images would discard the spatial phase needed for holography.
 
+**Optional nonmagnetic optical response.** Magnetic linear dichroism is already present in Eq. (4). Natural linear/circular dichroism and polar-axis anisotropy are added separately through `sample.optical_responses`, an empty collection by default. Each `OpticalResponseConfig` specifies a target layer material, response kind and spatial axis/strength. Its energy-dependent coefficient is retrieved by `material_params` from the material refractive-index datasets, through the same lifecycle as the magnetic channels; neither constant corrections nor inline spectra are supplied in sample configuration. Matching material layers, including their slices, receive the contribution. This does not modify the bundled magnetic spectra or activate new physics in the baseline FTH example.
+
+For `natural_linear` and `ferroelectric`, the implemented lab-frame response is the uniaxial weak-anisotropy increment
+
+$$
+\Delta\boldsymbol\epsilon_{\mathrm{lin}}
+=2n_0\Delta n\,s\,\mathbf u\mathbf u^T, \tag{5a}
+$$
+
+where **u** is a prescribed unit structural or polar axis, independent of **m**, and s is a dimensionless spatial strength. Projection into the transverse basis retains polarization conversion. Real and imaginary increments represent birefringence and dichroism. Natural linear dichroism can encode structural orientation [10]; the ferroelectric option is a prescribed-axis linear optical model relevant to polar-domain imaging [11]. It does not solve ferroelectric order or switching, and its response is even under **u** → −**u**. Consequently, this term alone cannot distinguish otherwise identical 180-degree domains. The axis magnitude is normalized; polarization-magnitude dependence must be supplied through s. Material-specific background constants and anisotropic spectra remain required inputs.
+
+For `natural_circular`, a reciprocal effective gyration model supplies
+
+$$
+G=2n_0\Delta n\,s\,I\quad\text{or}\quad
+G=2n_0\Delta n\,s\,\mathbf u\mathbf u^T,\qquad
+c_N=\widehat{\mathbf k}^{T}G\widehat{\mathbf k},\qquad
+\Delta\epsilon_{\perp,N}=
+\begin{pmatrix}0&i c_N\\-i c_N&0\end{pmatrix}. \tag{5b}
+$$
+
+The isotropic form uses `axis=None`; a supplied axis selects the uniaxial form, and signed s can reverse handedness. Δn is half the circular index splitting to first order. The lab gyrotropic vector G **k̂** depends on propagation direction, unlike the fixed magnetic vector. This preserves the reciprocal direction-reversal symmetry of the effective response. Physical wavevector-magnitude dependence is included in the supplied energy-dependent coefficients. The isotropic/uniaxial parametrization does not implement every crystal gyrotropy tensor or derive microscopic electric-dipole–quadrupole matrix elements [9].
+
+All contributions are added to the dielectric tensor before applying Eq. (5). Material fractions exclude vacuum, and nominal/local-direction projection uses the same tensor machinery as magnetic propagation. Opting in currently uses dense response channels, with a corresponding memory cost. Named material response tables contain energy, differential δ and differential β alongside the existing material files. Their index increment is −δ−iβ; interpolation rejects extrapolation. Each scan energy and simultaneous color loads its own coefficients. `sample.refractive_index_database` selects the common dataset root for all channels. No natural/ferroelectric tables are bundled yet; enabling an absent channel fails explicitly. Evaluated coefficients, dataset paths and hashes accompany the normal experiment metadata. Scalar mode is available when the specified polarization is an eigenstate of the total response; polarization mixing requires Jones/Stokes. The model-options notebook keeps these controls behind a disabled-by-default switch and requires the corresponding material datasets before activation.
+
 **Propagation within the sample.** Multislice alternates local transmission with transverse diffraction [5]:
 
 $$
@@ -127,20 +182,35 @@ Coordinate orientation, normalization, source support and pixel integration must
 
 ### 2.4 Stage 4: simulation of the detector signal
 
-The ideal intensity is converted into an acquisition using flux, exposure, efficiency and sensor settings. In a simple limit, for photon-rate density Φ and pixel area A_d,
+The ideal optical image is a photon-rate product. For spectral component a at physical energy E_a and detector pixel d, the expected detected photons in one frame are
 
 $$
-\mu_d=t\eta_d\int_{A_d}\Phi(X,Y)\,dA,\qquad
-N_d\sim\operatorname{Poisson}(\mu_d),\qquad
-C_d=\operatorname{clip}(gN_d+b_d+\xi_d,0,C_{\max}),\quad
-\xi_d\sim\mathcal N(0,\sigma_r^2). \tag{10}
+\mu_{ad}=t\eta_d\int_{A_d}\Phi_a(X,Y)\,dA,\qquad
+N_{ad}\sim\operatorname{Poisson}(\mu_{ad}),\qquad
+S_d=\sum_a g(E_a)\,[\mathcal K N_a]_d,\qquad
+C_d=\operatorname{clip}\!\left(\operatorname{round}[F(S_d)+b_d+\xi_d],0,C_{\max}\right),
+\quad\xi_d\sim\mathcal N(0,\sigma_r^2). \tag{10}
 $$
 
-This separates expected detected photons, photon statistics and digitized counts, following standard camera-noise modeling [7]. Equation (10) describes the elementary limit, not every optional artifact or the complete ordering of the implemented acquisition chain.
+Here g is ADU per detected photon, K is optional photon-event spreading, and F is an optional nonlinear characteristic curve. The default uses a constant g and F(S)=S. This separates photon arrival/detection statistics, charge/signal conversion and electronic noise [7]. Gain does not divide the physical photon mean: without spreading and readout noise, one-energy linear signal has mean gμ and variance g²μ. Quantum efficiency is a separate probability factor, not a second gain.
 
-The production implementation is `experimental_conditions.detector.detector_hologram.add_noise`, with sensor artifacts in `_add_sensor_artifacts`. The experiment's `detector` configuration controls exposure, frame count, efficiency, counts per photon, readout noise, saturation, photon spreading, persistent hot/cold pixels and cosmic-ray realizations. `beamstop` controls the beamstop shadow. Photon spreading distributes an event over neighboring pixels; persistent sensor defects and exposure-dependent random events play different roles. Recorded seeds permit repeatable synthetic acquisitions.
+**Energy-dependent ADU per photon.** `detector.detector_params["counts_per_photon"]` accepts either a positive constant or a callable `gain(energy_eV)`. Energy-dependent CCD counts per detected X-ray photon have been measured, for example in the detector calibration of Fenter et al. [12]. Their coefficient is instrument-specific; direct and scintillator-coupled detectors need appropriate calibration. The simulator evaluates g at every physical source/component energy, including secondary harmonics. A `projection_energy` override changes detector coordinates, not the energy used for material response or gain. The optical ideal image remains independent of this electronic conversion.
 
-Gaussian blur can approximate unresolved drift or fringe-visibility loss phenomenologically. It is not equivalent to specifying a general mutual-coherence function at illumination. Likewise, realistic-looking artifacts do not establish quantitative agreement with a particular camera. The production runner uses configured flux and exposure; older paper-figure helpers also offer a separate synthetic display-count budget, which must be identified when used.
+For simultaneous colors, each N_a is sampled independently and multiplied by its own g(E_a). Their signals then accumulate on the same pixels. This is a compound-Poisson signal: replacing all photon energies by a single effective gain can change both its mean and variance. Even if two spectra produce the same total photon number, they need not produce the same charge or ADU. This matters in hyperspectral scans and when higher-energy harmonics contaminate a nominal exposure.
+
+**Nonlinear response.** `detector_params["nonlinear_response"]` optionally supplies F as a callable of the per-frame linear ADU array. It returns finite nonnegative ADU on compatible pixel coordinates. This can be a measured lookup, spline or other calibrated characteristic. EMVA 1288 General treats cameras without imposing a linear characteristic [7]; CHEOPSim provides an example of incorporating a measured CCD nonlinear response using a quadratic-spline calibration [13]. Scientific CMOS characterization also requires calibration of camera/readout-mode linearity [14]. No universal CCD/CMOS compression coefficient is assumed.
+
+At one energy, F(gN) can be expressed as a count-dependent effective photon gain. For a mixture, F must act once on S=∑g(E_a)N_a rather than independently on each color. It also acts on each realized frame, not on its photon mean. For M frames, the saved image is
+
+$$
+\overline C_d=M^{-1}\sum_{f=1}^{M} C_{df}. \tag{10a}
+$$
+
+The same single-frame acquisition code is used for both linear and nonlinear response, including readout and ADC clipping before frame averaging. In general, mean F(S_f) differs from F(mean S_f). The pointwise F model describes a calibrated characteristic curve; it does not by itself simulate blooming, persistence, dead time or the charge-driven neighboring-pixel correlations associated with brighter-fatter effects [15]. Those effects require additional spatial or temporal response models.
+
+The production implementation is `experimental_conditions.detector.detector_hologram.add_noise`, supported by the existing photon-spreading and sensor-artifact functions. The experiment's `detector` configuration controls exposure, frame count, efficiency, conversion, readout noise, thresholds, persistent defects and cosmic-ray realizations. `beamstop` controls the beamstop shadow. Persistent camera response and acquisition draws use recorded seeds. The HDF5 runner saves the evaluated energy/gain pairs and callback identifiers; complete reproducibility also requires retaining the calibration functions and files.
+
+Gaussian acquisition blur remains the spatial-coherence approximation described in Stage 1, separate from sensor charge spreading. `max_counts_per_image` remains an explicit synthetic display budget: it rescales the expected pre-nonlinearity linear ADU using one common photon scaling across colors. It is not a calibrated physical exposure or an inverse nonlinear-response calibration. Physical acquisitions instead use the declared flux, exposure and efficiency. See the [detector-response guide](../../docs/detector_response.md) for runnable configuration examples.
 
 ## 3. Demonstration: a normal-incidence FTH hologram
 
@@ -180,3 +250,13 @@ The main paper has three figures: (1) sample schematic and four-stage workflow; 
 5. K. Li, M. Wojcik and C. Jacobsen, “Multislice does it all—calculating the performance of nanofocusing X-ray optics,” *Optics Express* **25**, 1831–1846 (2017). [doi:10.1364/OE.25.001831](https://doi.org/10.1364/OE.25.001831).
 6. D. M. Paganin, *Coherent X-Ray Optics*, Oxford University Press (2006). Rayleigh–Sommerfeld and approximate propagation; Eq. (9) uses the conjugate spatial-phase convention.
 7. European Machine Vision Association, *EMVA Standard 1288, Release 4.0, General* (2021). [Sensor characterization and noise](https://www.emva.org/wp-content/uploads/EMVA1288General_4.0Release.pdf). Cited for noise concepts, not as a claim that the simulator or synthetic camera is EMVA compliant.
+
+8. M. Sanchez del Rio et al., “A fast and lightweight tool for partially coherent beamline simulations in fourth-generation storage rings based on coherent mode decomposition,” *Journal of Synchrotron Radiation* **29**, 1354–1367 (2022). [doi:10.1107/S1600577522008736](https://doi.org/10.1107/S1600577522008736).
+9. A. P. Oreshko et al., “X-ray natural circular dichroism in langasite crystal,” *Journal of Synchrotron Radiation* **25**, 222–231 (2018). [doi:10.1107/S1600577517015387](https://doi.org/10.1107/S1600577517015387).
+10. A. Apseros et al., “X-ray linear dichroic tomography of crystallographic and topological defects,” *Nature* **636**, 354–360 (2024). [doi:10.1038/s41586-024-08233-y](https://doi.org/10.1038/s41586-024-08233-y).
+11. M. Schneider et al., “Linear dichroic soft X-ray microscopy of ferroelectric stripe domains in epitaxial K₀.₆Na₀.₄NbO₃,” preprint (2026). [arXiv:2603.14079](https://arxiv.org/abs/2603.14079). This supports the imaging motivation, not a supplied material calibration.
+
+12. P. Fenter, J. G. Catalano, C. Park and Z. Zhang, “On the use of CCD area detectors for high-resolution specular X-ray reflectivity,” *Journal of Synchrotron Radiation* **13**, 293–303 (2006). [doi:10.1107/S0909049506018000](https://doi.org/10.1107/S0909049506018000).
+13. D. Futyan et al., “Expected performances of the Characterising Exoplanet Satellite (CHEOPS). II. The CHEOPS simulator,” *Astronomy & Astrophysics* **635**, A23 (2020). [doi:10.1051/0004-6361/201936616](https://doi.org/10.1051/0004-6361/201936616).
+14. “High-precision photometry with a scientific CMOS camera: I lab testing of the Marana camera,” *RAS Techniques and Instruments* (2025). [doi:10.1093/rasti/rzaf049](https://doi.org/10.1093/rasti/rzaf049).
+15. P. Antilogus et al., “The brighter-fatter effect and pixel correlations in CCD sensors,” *Journal of Instrumentation* **9**, C03048 (2014). [arXiv:1402.0725](https://arxiv.org/abs/1402.0725).

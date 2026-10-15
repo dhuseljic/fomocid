@@ -11,7 +11,7 @@ Declare sections in this order, using the same names in notebooks and scripts:
 | --- | --- | --- |
 | `xray` | `XRayConfig` | Energy (eV), photon flux (photons/s), polarization, coherence lengths, optional linear polarization angle |
 | `simulation` | `SimulationConfig` | Grid shape `(y,x)` and sample-plane pitch |
-| `sample` | `SampleConfig` | Recipe, maximum slice thickness, tilt and specimen metadata |
+| `sample` | `SampleConfig` | Recipe, maximum slice thickness, tilt, optional `optical_responses` and specimen metadata |
 | `magnetic_pattern` | `MagneticPatternConfig` | Pattern name, physical pattern parameters and magnetic materials |
 | `aperture` | `FrontApertureConfig` | Object/reference/slit openings, their locations and depths; `None` retains a film without holes |
 | `illumination` | `IlluminationConfig` | Spatial profile, focus, direction, energy list and polarization list |
@@ -135,9 +135,15 @@ For component diagnostics, the underlying same engine remains available:
 
 ```python
 run = sim.ScatteringExperiment(experiment).setup()
-wavefront = run.propagate()
-ideal_detector = run.detect(noise=False)
+wavefront = run.propagate()                   # sample transmission / multislice
+ideal_detector = run.propagate_to_detector()   # free space → physical pixels
+measured_counts = run.acquire()               # exposure, noise and sensor response
 ```
+
+`acquire()` uses the existing ideal image and does not repeat optical propagation.
+`detect(noise=False)` combines the detector propagation step with returning ideal
+intensity; `detect(noise=True)` also runs acquisition. Both retain the same
+configuration and numerical operators as the explicit stages.
 
 This lower-level object is useful for intermediate previews and independent
 validation; `simulate_experiment` is the standard complete run/save command.
@@ -392,3 +398,16 @@ combined = results.read('detector_ideal')
 ```
 
 See `tutorials/19_multichromatic_illumination.ipynb` for an executable example.
+
+Optional natural dichroism and ferroelectric-axis anisotropy use
+`sample.optical_responses`; their energy-dependent coefficients come from the
+same material database as XMCD/XMLD. `sample.refractive_index_database` selects
+the common dataset root; the empty response default retains the original model. See the [optical-response guide](optical_contrast_formalisms.md#optional-natural-dichroism-and-ferroelectric-optical-anisotropy)
+and the [illumination guide](illumination.md) for the separate source options.
+
+Detector ADU/photon may be constant or a callable of physical photon energy.
+An optional nonlinear characteristic curve acts on accumulated per-frame linear
+ADU before electronic readout and clipping. See the
+[detector response guide](detector_response.md) for calibration and frame
+averaging, and the [material dataset guide](material_datasets.md) for future
+natural/ferroelectric optical tables.

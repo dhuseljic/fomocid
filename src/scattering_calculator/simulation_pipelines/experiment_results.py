@@ -37,10 +37,66 @@ def _json_default(value):
         JSON-compatible value; unsupported types raise TypeError.
     """
     if isinstance(value, Path): return str(value)
+    if isinstance(value, complex): return {'real':value.real, 'imag':value.imag}
     if isinstance(value, np.ndarray): return value.tolist()
     if isinstance(value, np.generic): return value.item()
-    if callable(value): return {'callback':f'{value.__module__}.{value.__qualname__}'}
+    if callable(value):
+        module = getattr(value, '__module__', type(value).__module__)
+        name = getattr(value, '__qualname__', type(value).__qualname__)
+        return {'callback':f'{module}.{name}'}
     raise TypeError(f'Cannot record experiment value {type(value).__name__} in JSON')
+
+
+def _write_optical_response_data(group, sample):
+    """Record the evaluated material channels and their source dataset hashes.
+
+    Parameters
+    ----------
+    group : h5py.Group
+        Material or spectral-component group.
+    sample : Structure
+        Sample whose material database contains the evaluated optical channels.
+
+    Returns
+    -------
+    None
+        Adds a group only when optional material channels were loaded.
+    """
+    database = sample.material_params
+    if not database.optical_response_database:
+        return
+    channels = group.create_group('optical_responses')
+    for index, ((material, channel), value) in enumerate(database.optical_response_database.items()):
+        record = channels.create_group(f'{index:06d}')
+        path = database.optical_response_path(material, channel, database.db_path)
+        record.attrs.update(material=material, channel=channel, energy_eV=database.x_ray_energy,
+                            dataset_path=str(path.resolve()), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+        record.create_dataset('index_increment', data=value)
+
+
+def _write_detector_response_data(group, run):
+    """Record the actual physical energies and gains used for one acquisition.
+
+    Parameters
+    ----------
+    group : h5py.Group
+        Exposure result group.
+    run : ScatteringExperiment
+        Optically propagated experiment, including any spectral components.
+
+    Returns
+    -------
+    None
+        Stores evaluated ADU/photon and the optional response callback identifier.
+    """
+    components = run.spectral_runs if hasattr(run, 'spectral_runs') else [run]
+    energies = [component.config.xray.energy for component in components]
+    model = run.config.detector.hologram_exp
+    response = group.create_group('detector_response')
+    response.create_dataset('energies_eV', data=energies)
+    response.create_dataset('counts_per_photon', data=[model._gain_at_energy(e) for e in energies])
+    response.attrs['nonlinear_response_json'] = json.dumps(
+        getattr(model, 'nonlinear_response', None), default=_json_default)
 
 
 def _scan_parameters(config):
@@ -48,7 +104,7 @@ def _scan_parameters(config):
     axes = {}
     structural = {'shape', 'coherence_length', 'detector_center', 'center', 'alpha_beam',
                   'reference_xy', 'magnetic_materials', 'cosmic_ray_length_range',
-                  'cosmic_ray_aspect_ratio_range', 'spectral_components', 'input_stokes', 'aperture_thicknesses',
+                  'cosmic_ray_aspect_ratio_range', 'spectral_components', 'optical_responses', 'input_stokes', 'aperture_thicknesses',
                   'aperture_layer_names', 'sample_shape', 'aperture_shape', 'bs_center',
                   'ellipticity', 'roughness_modes', 'direction', 'magnetization_direction'}
     def visit(value, path):
@@ -336,7 +392,7 @@ def simulate_experiment(config, *, magnetization=None, mask=None):
                             if remaining[key] > 1: stage_cache[key] = run
                         remaining[key] -= 1
                         if remaining[key] == 0: stage_cache.pop(key, None)
-                        ideal=run.detect().copy()
+                        ideal=run.propagate_to_detector().copy()
                         if not np.isfinite(ideal).all() or np.any(ideal<0):
                             raise ValueError('Detector projection produced invalid ideal intensity')
                         group=file.create_group(f'runs/{(scan_index*len(energies)+i)*len(states)+j:06d}')
@@ -360,6 +416,7 @@ def simulate_experiment(config, *, magnetization=None, mask=None):
                                 part.create_dataset('qx', data=component.config.detector.detector_layout.detqx)
                                 part.create_dataset('qy', data=component.config.detector.detector_layout.detqy)
                                 part.create_dataset('refractive_indices', data=component.sample.layer_refractive_indices)
+                                _write_optical_response_data(part, component.sample)
                                 for observable in ('exit_wave','exit_wave_for_farfield'):
                                     if observable in saved:
                                         part.create_dataset(observable, data=_coherent_fields(component,farfield=observable.endswith('for_farfield')),
@@ -373,6 +430,9 @@ def simulate_experiment(config, *, magnetization=None, mask=None):
                         materials.create_dataset('layer_names',data=material_sample.layer_names,dtype=h5py.string_dtype())
                         materials.create_dataset('thickness_m',data=material_sample.layer_thicknesses)
                         materials.create_dataset('refractive_indices',data=material_sample.layer_refractive_indices)
+                        _write_optical_response_data(materials, material_sample)
+                        if 'detector_measured' in saved:
+                            _write_detector_response_data(group, run)
                         fourier=None
                         if set(saved)&{'fft','fft_intensity','reconstruction'}:
                             field=_coherent_fields(run,farfield=True)
@@ -394,7 +454,7 @@ def simulate_experiment(config, *, magnetization=None, mask=None):
                                 previous=np.random.get_state() if seed is not None else None
                                 try:
                                     if seed is not None: np.random.seed(current.detector.detector_params['noise_seed'])
-                                    data=run.config.detector.return_detected_hologram()
+                                    data=run.acquire()
                                 finally:
                                     if previous is not None: np.random.set_state(previous)
                             elif name=='magnetization': data=run.sample.magnetization

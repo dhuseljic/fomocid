@@ -60,3 +60,50 @@ normalization before quantitative Fraunhofer/RS comparisons.
 The earlier skyrmion validation record and its known near-zero-pixel Jones test
 observation are preserved unchanged in the
 [dated backup](../backups/scattering_calculator_2026-10-02/VALIDATION.md).
+
+
+## Dataset-driven optical response and detector calibration — 15 October 2026
+
+The optional optical response interface now takes channel selectors and spatial
+axis/strength fields only. All coefficients come from the common material
+refractive-index datasets; the earlier inline-spectrum prototype has been removed.
+No natural or ferroelectric datasets are bundled, and missing enabled channels
+raise explicit errors. Isolated test directories supply synthetic material tables
+for numerical checks; those coefficients are not package or notebook defaults.
+
+Executed checks cover:
+
+- Original empty/default material behavior and a zero added material channel on
+  a masked FTH specimen, retaining its magnetic support treatment.
+- Independent matrix-exponential transmission, axis reversal, circular
+  handedness/reciprocity, vacuum masking, nominal/local projection and scalar
+  eigenmodes. Named magnetic linear tables use the same response loader.
+- Material-table interpolation and range failures, per-energy and per-color
+  refresh, and recorded evaluated coefficients/source hashes in HDF5.
+- Mixed Stokes tilt/defocus with transmitted padding backgrounds against
+  independent Jones carriers.
+- Physical Poisson mean/variance with gain applied afterward, constant/callable
+  gain equivalence, independently sampled simultaneous colors, one shared
+  nonlinear signal conversion, and per-frame clipping before averaging.
+- Coordinate-energy overrides leave physical gain evaluation unchanged.
+  Hyperspectral/harmonic acquisitions record evaluated gains and reproduce
+  seeded outputs. Invalid calibration values and shapes fail explicitly.
+- Both updated notebooks executed all default cells. All optional illumination
+  and detector controls executed together using a small camera, three frames
+  and 50 nm maximum slices. The enabled optical notebook executed against
+  isolated test material files with 50 nm maximum slices. These are smoke checks,
+  not convergence results or calibration of a real camera/material.
+
+The focused material/propagation/detector suite passed **198 tests**. The same
+pre-existing near-zero Jones FFT assertion remains excluded; it was reproduced
+on the original propagator code during the preceding refactor. Notebook schemas
+and source cells were validated. The paper and guides distinguish calibrated
+nonlinear response from spatial/temporal sensor effects such as brighter-fatter
+charge redistribution, blooming or persistence, which are not claimed here.
+
+Physical acquisitions with nonunit ADU/photon now have the correct gain-scaled
+mean and variance; the older divide-before-Poisson conversion canceled gain from
+the mean. Multiple frames now undergo acquisition and clipping independently,
+then are averaged. These corrections intentionally change affected detector
+counts. Constant gain, linear response and disabled additional optical channels
+remain the defaults.

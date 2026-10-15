@@ -224,3 +224,69 @@ def test_maintained_notebooks_do_not_reintroduce_example_specific_config_classes
                             assert not keys & aliases,(path.name,'use shared magnetic parameter names',keys & aliases)
             if isinstance(node,ast.ClassDef):
                 assert node.name!='Config',(path.name,'notebook-local Config')
+
+
+@pytest.mark.parametrize('mode', ['Scalar', 'Jones', 'Stokes'])
+@pytest.mark.parametrize('method', ['fraunhofer', 'rayleigh_sommerfeld'])
+def test_explicit_detector_stages_preserve_combined_api(mode, method):
+    """Check ideal intensity and seeded acquisition through both public paths.
+
+    Parameters
+    ----------
+    mode : str
+        Scalar, Jones or Stokes sample interaction.
+    method : str
+        Exit-to-detector propagation method.
+
+    Returns
+    -------
+    None
+        Asserts equal outputs and that acquisition does not repeat propagation.
+    """
+    from unittest.mock import patch
+
+    config = small_config().with_changes(
+        propagation={'propagator_method': mode},
+        detector={
+            'detector_propagation_method': method,
+            'detector_params': {
+                'noise_seed': 12, 'readout_noise_sigma': 2.,
+                'readout_noise_average': 0., 'counts_per_photon': 1.,
+                'quantum_efficiency': .8, 'detector_threshold': 1e6,
+            },
+        },
+    )
+    staged = sim.ScatteringExperiment(config).setup()
+    staged.propagate()
+    ideal = staged.propagate_to_detector().copy()
+    # Legacy readout noise draws use NumPy's global RNG in addition to noise_seed.
+    readout_state = np.random.get_state()
+    with patch.object(staged, 'propagate_to_detector', side_effect=AssertionError):
+        measured = staged.acquire()
+    np.testing.assert_array_equal(staged.config.detector.return_ideal_hologram(), ideal)
+
+    # Reuse the same exit field to isolate the two detector APIs from setup.
+    combined = staged
+    np.testing.assert_allclose(combined.detect(), ideal, rtol=1e-12, atol=1e-15)
+    np.random.set_state(readout_state)
+    np.testing.assert_array_equal(combined.detect(noise=True), measured)
+
+
+def test_explicit_detector_stages_require_the_preceding_stage():
+    """Check useful errors before exit propagation or ideal projection exists.
+
+    Parameters
+    ----------
+    None
+        Uses a small configured transmission experiment.
+
+    Returns
+    -------
+    None
+        Asserts that calls out of physical order fail explicitly.
+    """
+    run = sim.ScatteringExperiment(small_config()).setup()
+    with pytest.raises(RuntimeError, match='propagate_to_detector'):
+        run.acquire()
+    with pytest.raises(RuntimeError, match='propagate'):
+        run.propagate_to_detector()

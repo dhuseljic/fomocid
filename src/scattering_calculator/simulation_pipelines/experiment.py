@@ -192,6 +192,8 @@ class ExperimentConfig:
             pattern_type=m.pattern_type_method,pattern_config=m.pattern_config,pattern_config_length=m.pattern_config_length,
             propagator_method=p.propagator_method,
             sample_tilt_theta=s.sample_tilt_theta,sample_tilt_axis=s.sample_tilt_axis,
+            optical_responses=s.optical_responses,
+            refractive_index_database=s.refractive_index_database,
             sample_tilt_voxel_size=s.sample_tilt_voxel_size,sample_tilt_antialias_samples=s.sample_tilt_antialias_samples,
             oversampling=self.simulation.other_config.get('oversampling',2),
             random_seed=self.simulation.other_config.get('random_seed'),
@@ -283,7 +285,14 @@ def vector_pattern(config):
 
 
 class ScatteringExperiment:
-    """setup → propagate → detect, shared by all complete experiment examples."""
+    """Run illumination → sample transmission → detector propagation → acquisition.
+
+    ``setup`` prepares the sample, incident field and instrument. ``propagate``
+    computes the sample exit field. ``propagate_to_detector`` returns ideal
+    intensity, and ``acquire`` applies the configured detector response.
+    ``detect(noise=...)`` remains the convenience entry point for both steps.
+    """
+
     def __init__(self, config: ExperimentConfig):
         """Store the standard experiment declaration.
 
@@ -324,31 +333,48 @@ class ScatteringExperiment:
             Prepared run that starts at the supplied exit plane.
         """
         result = cls(config)
-        c = result.config
-        field = np.array(exit_wave,dtype=complex,copy=True)
-        if field.shape[:2] != tuple(c.simulation.shape) or field.ndim not in (2,3):
-            raise ValueError('Exit field must match simulation.shape and have scalar or Jones channels')
+        config = result.config
+        field = np.array(exit_wave, dtype=complex, copy=True)
+        if field.shape[:2] != tuple(config.simulation.shape) or field.ndim not in (2, 3):
+            raise ValueError(
+                "Exit field must match simulation.shape and have scalar or Jones channels"
+            )
         if field.ndim == 3 and field.shape[-1] != 2:
-            raise ValueError('Jones exit fields require two components')
-        if not np.isfinite(field).all(): raise ValueError('Exit field must be finite')
-        factor = c.propagation.propagator_config.get('farfield_oversampling',1)
-        if int(factor) != factor or factor < 1: raise ValueError('farfield_oversampling must be a positive integer')
-        pads = [(n*(int(factor)-1)//2,n*(int(factor)-1)-n*(int(factor)-1)//2) for n in field.shape[:2]]
-        if field.ndim == 3: pads.append((0,0))
-        extended = np.pad(field,pads)
-        fourier = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(extended,axes=(0,1)),axes=(0,1)),axes=(0,1))
-        power = abs(fourier)**2
-        result.wavefront = SimpleNamespace(exit_wave=field,exit_wave_for_farfield=extended,
-            hologram=power if power.ndim == 2 else power.sum(axis=-1))
-        c.propagation.propagator_method = 'Scalar' if field.ndim == 2 else 'Jones'
-        c.propagation.wavefront = result.wavefront
-        c.propagation.SampleConfig = c.sample
-        c.propagation.IlluminationConfig = c.illumination
-        c.sample.real_space_pixel_size = c.simulation.real_space_pixel_size
-        c.illumination.beam_params = c.xray.setup()
-        c.detector.beamstop_config = c.beamstop
-        c.detector.setup()
-        c.detector.calc_realspace_resolution(c.illumination.beam_params)
+            raise ValueError("Jones exit fields require two components")
+        if not np.isfinite(field).all():
+            raise ValueError("Exit field must be finite")
+        factor = config.propagation.propagator_config.get("farfield_oversampling", 1)
+        if int(factor) != factor or factor < 1:
+            raise ValueError("farfield_oversampling must be a positive integer")
+        pads = [
+            (
+                n * (int(factor) - 1) // 2,
+                n * (int(factor) - 1) - n * (int(factor) - 1) // 2,
+            )
+            for n in field.shape[:2]
+        ]
+        if field.ndim == 3:
+            pads.append((0, 0))
+        extended = np.pad(field, pads)
+        fourier = np.fft.fftshift(
+            np.fft.fft2(np.fft.ifftshift(extended, axes=(0, 1)), axes=(0, 1)),
+            axes=(0, 1),
+        )
+        power = abs(fourier) ** 2
+        result.wavefront = SimpleNamespace(
+            exit_wave=field,
+            exit_wave_for_farfield=extended,
+            hologram=power if power.ndim == 2 else power.sum(axis=-1),
+        )
+        config.propagation.propagator_method = "Scalar" if field.ndim == 2 else "Jones"
+        config.propagation.wavefront = result.wavefront
+        config.propagation.SampleConfig = config.sample
+        config.propagation.IlluminationConfig = config.illumination
+        config.sample.real_space_pixel_size = config.simulation.real_space_pixel_size
+        config.illumination.beam_params = config.xray.setup()
+        config.detector.beamstop_config = config.beamstop
+        config.detector.setup()
+        config.detector.calc_realspace_resolution(config.illumination.beam_params)
         return result
 
     def setup(self, *, magnetization=None, mask=None):
@@ -369,93 +395,198 @@ class ScatteringExperiment:
         ScatteringExperiment
             This run with all source/grid references and component stages prepared.
         """
-        c = self.config
-        if c.simulation.other_config.get('grid_mode') == 'detector':
-            factor = c.simulation.other_config.get('oversampling',2)
-            if not isinstance(factor,int) or factor < 1:
-                raise ValueError('Detector-derived grid oversampling must be a positive integer')
-            c.xray.setup()
-            c.detector.setup()
-            c.simulation.shape = tuple(factor*n for n in c.detector.shape)
-            c.simulation.real_space_pixel_size = c.detector.calc_realspace_resolution(c.xray.beam_params)/factor
-        c.simulation.setup()
-        shape, pitch = c.simulation.shape, c.simulation.real_space_pixel_size
-        c.xray.setup()
-        c.sample.sample_shape = (0, *shape)
-        c.sample.real_space_pixel_size = pitch
-        c.sample.xray_config = c.xray
-        c.sample.setup()
-        sample = c.sample.sample_structure
-        nz = len(sample.layer_thicknesses)
-        c.aperture.aperture_shape = (nz, *shape)
-        c.aperture.real_space_pixel_size = pitch
-        c.aperture.aperture_thicknesses = list(sample.layer_thicknesses)
-        c.aperture.aperture_layer_names = list(sample.layer_names)
-        if mask is None:
-            if c.aperture.aperture_method is None:
-                mask = np.ones((nz, *shape))  # no hole: retain the film
-            else:
-                c.aperture.setup()
-                mask = c.aperture.return_aperture()
-        mask = np.asarray(mask)
-        if mask.shape != (nz, *shape):
-            raise ValueError("Mask shape must match the subdivided sample grid")
-        c.sample.assign_aperture_mask(mask)
-        c.magnetic_pattern.shape = shape
-        c.magnetic_pattern.real_space_pixel_size = pitch
-        if magnetization is None:
-            generated, _ = c.magnetic_pattern.create_pattern()
-            if generated.shape == shape:
-                generated = np.stack((np.zeros_like(generated),np.zeros_like(generated),generated),axis=-1)
-            if generated.shape != (*shape, 3):
-                raise ValueError("Magnetic pattern must be (Ny,Nx) or (Ny,Nx,3)")
-            magnetization = np.zeros((nz, *shape, 3))
-            for iz, name in enumerate(sample.layer_names):
-                if any(material in name for material in c.magnetic_pattern.magnetic_materials):
-                    magnetization[iz] = generated
-        magnetization = np.asarray(magnetization)
-        if magnetization.shape == (*shape, 3):
-            magnetization = np.broadcast_to(magnetization, (nz,*shape,3))
-        if magnetization.shape != (nz,*shape,3) or not np.isfinite(magnetization).all():
-            raise ValueError("Magnetization must be finite and match the sample grid")
-        c.sample.assign_magnetic_pattern(magnetization)
-        c.illumination.XRayConfig = c.xray
-        c.illumination.shape = shape
-        c.illumination.real_space_pixel_size = pitch
-        if c.illumination.illumination_function == "gaussian" and c.illumination.illumination_config.get("center") is None:
-            c.illumination.illumination_config = {**c.illumination.illumination_config, "center":(0.,0.)}
-        c.illumination.setup()
-        c.propagation.SampleConfig = c.sample
-        c.propagation.IlluminationConfig = c.illumination
-        c.detector.beamstop_config = c.beamstop
-        c.detector.setup()
-        c.detector.calc_realspace_resolution(c.illumination.beam_params)
-        self.sample, self.illumination = sample, c.illumination
+        sample = self._setup_sample_grid()
+        self._setup_apertures(sample, mask)
+        self._setup_magnetization(sample, magnetization)
+        self._setup_illumination()
+
+        config = self.config
+        config.propagation.SampleConfig = config.sample
+        config.propagation.IlluminationConfig = config.illumination
+        config.detector.beamstop_config = config.beamstop
+        config.detector.setup()
+        config.detector.calc_realspace_resolution(config.illumination.beam_params)
+        self.sample = sample
+        self.illumination = config.illumination
         return self
 
-    def propagate(self):
-        """Store the standard experiment declaration.
+    def _setup_sample_grid(self):
+        """Resolve transverse sampling and subdivide the material layer recipe.
 
         Parameters
         ----------
         None
-            Uses the stored experiment state.
+            Uses the configured source, grid and sample recipe.
+
+        Returns
+        -------
+        Structure
+            Sample with resolved grid and subdivided material layers.
+        """
+        config = self.config
+        if config.simulation.other_config.get("grid_mode") == "detector":
+            factor = config.simulation.other_config.get("oversampling", 2)
+            if not isinstance(factor, int) or factor < 1:
+                raise ValueError(
+                    "Detector-derived grid oversampling must be a positive integer"
+                )
+            config.xray.setup()
+            config.detector.setup()
+            config.simulation.shape = tuple(factor * n for n in config.detector.shape)
+            config.simulation.real_space_pixel_size = (
+                config.detector.calc_realspace_resolution(config.xray.beam_params) / factor
+            )
+        config.simulation.setup()
+        shape, pitch = config.simulation.shape, config.simulation.real_space_pixel_size
+        config.xray.setup()
+        config.sample.sample_shape = (0, *shape)
+        config.sample.real_space_pixel_size = pitch
+        config.sample.xray_config = config.xray
+        config.sample.setup()
+        sample = config.sample.sample_structure
+        return sample
+
+    def _setup_apertures(self, sample, mask):
+        """Assign supplied occupancy or generate holes through the sliced stack.
+
+        Parameters
+        ----------
+        sample : Structure
+            Sliced sample supplying layer names and thicknesses.
+        mask : ndarray or None
+            Supplied occupancy, or None to generate the aperture mask.
+
+        Returns
+        -------
+        None
+            Assigns material occupancy to the sample.
+        """
+        config = self.config
+        shape = config.simulation.shape
+        pitch = config.simulation.real_space_pixel_size
+        nz = len(sample.layer_thicknesses)
+        config.aperture.aperture_shape = (nz, *shape)
+        config.aperture.real_space_pixel_size = pitch
+        config.aperture.aperture_thicknesses = list(sample.layer_thicknesses)
+        config.aperture.aperture_layer_names = list(sample.layer_names)
+        if mask is None:
+            if config.aperture.aperture_method is None:
+                mask = np.ones((nz, *shape))  # no hole: retain the film
+            else:
+                config.aperture.setup()
+                mask = config.aperture.return_aperture()
+        mask = np.asarray(mask)
+        if mask.shape != (nz, *shape):
+            raise ValueError("Mask shape must match the subdivided sample grid")
+        config.sample.assign_aperture_mask(mask)
+
+    def _setup_magnetization(self, sample, magnetization):
+        """Assign a vector texture to the configured magnetic layers.
+
+        Parameters
+        ----------
+        sample : Structure
+            Sliced sample supplying the magnetic layer names.
+        magnetization : ndarray or None
+            Supplied vector texture, or None to generate the configured pattern.
+
+        Returns
+        -------
+        None
+            Assigns magnetization to the sample.
+        """
+        config = self.config
+        shape = config.simulation.shape
+        pitch = config.simulation.real_space_pixel_size
+        nz = len(sample.layer_thicknesses)
+        config.magnetic_pattern.shape = shape
+        config.magnetic_pattern.real_space_pixel_size = pitch
+        if magnetization is None:
+            generated, _ = config.magnetic_pattern.create_pattern()
+            if generated.shape == shape:
+                generated = np.stack(
+                    (np.zeros_like(generated), np.zeros_like(generated), generated),
+                    axis=-1,
+                )
+            if generated.shape != (*shape, 3):
+                raise ValueError("Magnetic pattern must be (Ny,Nx) or (Ny,Nx,3)")
+            magnetization = np.zeros((nz, *shape, 3))
+            for iz, name in enumerate(sample.layer_names):
+                if any(
+                    material in name
+                    for material in config.magnetic_pattern.magnetic_materials
+                ):
+                    magnetization[iz] = generated
+        magnetization = np.asarray(magnetization)
+        if magnetization.shape == (*shape, 3):
+            magnetization = np.broadcast_to(magnetization, (nz, *shape, 3))
+        if (
+            magnetization.shape != (nz, *shape, 3)
+            or not np.isfinite(magnetization).all()
+        ):
+            raise ValueError("Magnetization must be finite and match the sample grid")
+        config.sample.assign_magnetic_pattern(magnetization)
+
+    def _setup_illumination(self):
+        """Build the coherent entrance field on the resolved sample grid.
+
+        Parameters
+        ----------
+        None
+            Uses the configured source, grid and illumination profile.
+
+        Returns
+        -------
+        None
+            Prepares the coherent entrance field.
+        """
+        config = self.config
+        shape = config.simulation.shape
+        pitch = config.simulation.real_space_pixel_size
+        config.illumination.XRayConfig = config.xray
+        config.illumination.shape = shape
+        config.illumination.real_space_pixel_size = pitch
+        if (
+            config.illumination.illumination_function == "gaussian"
+            and config.illumination.illumination_config.get("center") is None
+        ):
+            config.illumination.illumination_config = {
+                **config.illumination.illumination_config,
+                "center": (0.0, 0.0),
+            }
+        config.illumination.setup()
+
+    def propagate(self):
+        """Transmit the entrance field through the sample and return its wavefront.
+
+        Scalar uses local refractive indices; Jones and Stokes use projected
+        dielectric tensors. Multislice alternates local material transmission
+        and, when enabled, diffraction between slices.
+
+        Parameters
+        ----------
+        None
+            Uses the sample and illumination prepared by setup.
 
         Returns
         -------
         object
-            Production wavefront with coherent exit channels and optional far field.
+            Wavefront containing the complex sample exit field.
         """
         if not hasattr(self, "sample"):
             raise RuntimeError("Call setup() before propagate()")
-        c = self.config
-        if c.illumination.spectral_components is not None:
-            specifications = c.illumination.spectral_components
+        config = self.config
+        if config.illumination.spectral_components is not None:
+            specifications = config.illumination.spectral_components
             if not specifications:
-                raise ValueError("spectral_components must contain at least one component")
+                raise ValueError(
+                    "spectral_components must contain at least one component"
+                )
             weights = np.asarray([item.weight for item in specifications], dtype=float)
             if not np.isfinite(weights).all() or np.any(weights <= 0):
-                raise ValueError("Spectral component weights must be finite and positive")
+                raise ValueError(
+                    "Spectral component weights must be finite and positive"
+                )
             total_weight = weights.sum()
             if not np.isfinite(total_weight):
                 raise ValueError("Sum of spectral weights must be finite")
@@ -463,87 +594,178 @@ class ScatteringExperiment:
             self.spectral_runs = []
             self.spectral_weights = weights
             for item, fraction in zip(specifications, weights):
-                energy = item.energy if item.energy is not None else c.xray.energy * item.energy_factor
+                energy = (
+                    item.energy
+                    if item.energy is not None
+                    else config.xray.energy * item.energy_factor
+                )
                 if not np.isfinite(energy) or energy <= 0:
-                    raise ValueError("Spectral component energy must be finite and positive")
+                    raise ValueError(
+                        "Spectral component energy must be finite and positive"
+                    )
                 component = self._spectral_declaration.with_changes(
-                    xray={"energy":energy, "photon_flux":c.xray.photon_flux*float(fraction),
-                          "pol":item.pol or c.xray.pol},
-                    illumination={"spectral_components":None})
+                    xray={
+                        "energy": energy,
+                        "photon_flux": config.xray.photon_flux * float(fraction),
+                        "pol": item.pol or config.xray.pol,
+                    },
+                    illumination={"spectral_components": None},
+                )
                 run = ScatteringExperiment(component).setup(
-                    magnetization=self.sample.magnetization, mask=self.sample.mask)
+                    magnetization=self.sample.magnetization, mask=self.sample.mask
+                )
                 run.propagate()
                 self.spectral_runs.append(run)
             self.wavefront = self.spectral_runs[0].wavefront
             return self.wavefront
-        if c.propagation.propagator_method != "Scalar":
-            direction = light_beam.beam_direction_from_alpha(c.illumination.illumination_config.get("alpha_beam", (0.,0.)))
-            c.sample.sample_structure.calculate_final_dielectric_tensor(
-                compact=bool(c.propagation.propagator_config.get("dielectric_tensor_compact", True)),
-                use_aperture_roi=bool(c.propagation.propagator_config.get("dielectric_tensor_use_roi", True)),
-                beam_direction=None if np.allclose(direction,[0,0,1]) else direction,
-                local_k_projection=bool(c.propagation.propagator_config.get("dielectric_tensor_local_k_projection", False)),
+        if config.propagation.propagator_method != "Scalar":
+            direction = light_beam.beam_direction_from_alpha(
+                config.illumination.illumination_config.get("alpha_beam", (0.0, 0.0))
             )
-        c.propagation.setup()
-        self.wavefront = c.propagation.return_wavefront()
+            config.sample.sample_structure.calculate_final_dielectric_tensor(
+                compact=bool(
+                    config.propagation.propagator_config.get(
+                        "dielectric_tensor_compact", True
+                    )
+                ),
+                use_aperture_roi=bool(
+                    config.propagation.propagator_config.get(
+                        "dielectric_tensor_use_roi", True
+                    )
+                ),
+                beam_direction=None if np.allclose(direction, [0, 0, 1]) else direction,
+                local_k_projection=bool(
+                    config.propagation.propagator_config.get(
+                        "dielectric_tensor_local_k_projection", False
+                    )
+                ),
+            )
+        config.propagation.setup()
+        self.wavefront = config.propagation.return_wavefront()
         return self.wavefront
 
-    def detect(self, *, noise=False):
-        """Detect the configured analyzer image.
+    def propagate_to_detector(self):
+        """Propagate the exit field to physical pixels; return ideal intensity.
+
+        Fraunhofer projects the far-field FFT onto the camera; Rayleigh–Sommerfeld
+        integrates finite-distance diffraction. Mutually incoherent spectral
+        components are propagated separately and summed as intensities. Their
+        photon-rate images and energies remain available for energy-dependent
+        detector conversion during acquisition.
 
         Parameters
         ----------
-        noise : bool
-            Apply acquisition and sensor response when True.
+        None
+            Uses the completed sample exit field and detector configuration.
 
         Returns
         -------
         ndarray
-            Ideal or measured detector intensity on the configured camera grid.
+            Ideal intensity sampled on physical detector pixels.
         """
         if not hasattr(self, "wavefront"):
-            raise RuntimeError("Call propagate() before detect()")
-        c = self.config
+            raise RuntimeError("Call propagate() before propagate_to_detector()")
+        config = self.config
         if hasattr(self, "spectral_runs"):
             images = []
             for component in self.spectral_runs:
-                component.config.detector = DetectorConfig(**{item.name:deepcopy(getattr(c.detector,item.name))
-                    for item in fields(c.detector) if item.name != "beamstop_config"})
-                component.config.detector.beamstop_config = deepcopy(c.beamstop)
+                component.config.detector = DetectorConfig(
+                    **{
+                        item.name: deepcopy(getattr(config.detector, item.name))
+                        for item in fields(config.detector)
+                        if item.name != "beamstop_config"
+                    }
+                )
+                component.config.detector.beamstop_config = deepcopy(config.beamstop)
                 component.config.detector.setup()
-                component.spectral_ideal = component.detect().copy()
+                component.spectral_ideal = component.propagate_to_detector().copy()
                 images.append(component.spectral_ideal)
             # Components carry their flux fractions in the field amplitudes.
             # Sum detector intensities, never complex amplitudes or noisy frames.
-            c.detector = copy(self.spectral_runs[0].config.detector)
-            c.detector.hologram_exp = copy(c.detector.hologram_exp)
-            c.detector.hologram_exp.hologram_detector = np.sum(images, axis=0)
-            return c.detector.return_detected_hologram() if noise else c.detector.return_ideal_hologram()
+            config.detector = copy(self.spectral_runs[0].config.detector)
+            config.detector.hologram_exp = copy(config.detector.hologram_exp)
+            config.detector.hologram_exp.hologram_detector = np.sum(images, axis=0)
+            config.detector.hologram_exp.photon_rate_components = tuple(
+                (component.config.xray.energy, image)
+                for component, image in zip(self.spectral_runs, images)
+            )
+            return config.detector.return_ideal_hologram()
         if self.wavefront.hologram is None:
             # Exit-only Jones runs defer the FFT until the detector is requested.
-            from scattering_calculator.utils.image_transformator import Fraunhofer_propagation_jones
+            from scattering_calculator.utils.image_transformator import (
+                Fraunhofer_propagation_jones,
+            )
+
             factor = self.wavefront.farfield_oversampling
             shape = tuple(n * factor for n in self.wavefront.exit_wave.shape[:2])
-            background = c.propagation._background_exit_jones(shape) if factor > 1 else None
-            field = self.wavefront._build_farfield_exit_wave(self.wavefront.exit_wave, background, factor)
+            background = (
+                config.propagation._background_exit_jones(shape) if factor > 1 else None
+            )
+            field = self.wavefront._build_farfield_exit_wave(
+                self.wavefront.exit_wave, background, factor
+            )
             self.wavefront.exit_wave_for_farfield = field
             self.wavefront.detector_wave = Fraunhofer_propagation_jones(field)
-            self.wavefront.hologram = np.sum(abs(self.wavefront.detector_wave)**2, axis=-1)
-        c.detector.assign_propagated_wavefront(c.propagation)
-        projection = c.illumination.beam_params
-        if c.detector.projection_energy is not None:
-            energy = c.detector.projection_energy
+            self.wavefront.hologram = np.sum(
+                abs(self.wavefront.detector_wave) ** 2, axis=-1
+            )
+        config.detector.assign_propagated_wavefront(config.propagation)
+        projection = config.illumination.beam_params
+        if config.detector.projection_energy is not None:
+            energy = config.detector.projection_energy
             if not np.isfinite(energy) or energy <= 0:
-                raise ValueError("Detector projection_energy must be finite and positive")
-            source = deepcopy(c.xray)
+                raise ValueError(
+                    "Detector projection_energy must be finite and positive"
+                )
+            source = deepcopy(config.xray)
             source.energy = energy
             projection = source.setup()
-        c.detector.calc_realspace_resolution(projection)
-        c.detector.detect_hologram(projection_beam_params=projection)
-        return c.detector.return_detected_hologram() if noise else c.detector.return_ideal_hologram()
+        config.detector.calc_realspace_resolution(projection)
+        config.detector.detect_hologram(projection_beam_params=projection)
+        return config.detector.return_ideal_hologram()
+
+    def acquire(self):
+        """Apply exposure, photon statistics and sensor response to ideal intensity.
+
+        Call propagate_to_detector first. Acquisition does not repeat optical
+        propagation; it returns frame-averaged detector counts.
+
+        Parameters
+        ----------
+        None
+            Uses ideal intensity from propagate_to_detector.
+
+        Returns
+        -------
+        ndarray
+            Frame-averaged detector counts.
+        """
+        detector = self.config.detector
+        if not hasattr(detector, "hologram_exp"):
+            raise RuntimeError("Call propagate_to_detector() before acquire()")
+        return detector.return_detected_hologram()
+
+    def detect(self, *, noise=False):
+        """Propagate to detector pixels and optionally simulate acquisition.
+
+        Use propagate_to_detector and acquire separately to inspect ideal
+        intensity before applying the sensor response.
+
+        Parameters
+        ----------
+        noise : bool
+            Apply detector acquisition effects after optical propagation.
+
+        Returns
+        -------
+        ndarray
+            Ideal detector intensity or acquired detector counts.
+        """
+        ideal = self.propagate_to_detector()
+        return self.acquire() if noise else ideal
 
     def run(self, *, noise=False, **setup_arrays):
-        """Store the standard experiment declaration.
+        """Run setup, sample transmission, detector propagation and optional acquisition.
 
         Parameters
         ----------

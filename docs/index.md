@@ -21,6 +21,11 @@ Start here:
 - Read the [tutorial guide](tutorials.md)
 - Use the [coherent-scattering tutorial map](coherent_scattering_tutorials.md)
   for FTH simulation notebooks and pipeline usage
+- Follow the [simulator source walkthrough](simulator_code.md) to trace the four
+  physical stages in the code
+- See [illumination and coherence](illumination.md) for beam profiles, polarization, simultaneous colors and separate scans
+- Use the [material dataset guide](material_datasets.md) for energy-dependent optical channels
+- Read the [detector response guide](detector_response.md) for energy-dependent ADU gain and nonlinear calibration
 - Read the [optical contrast formalisms](optical_contrast_formalisms.md) for
   the scalar refractive-index model, Jones dielectric tensors, XMCD/XMLD
   equations, and vector contrast with local light momentum
@@ -40,6 +45,10 @@ Start here:
 configuration
 tutorials
 coherent_scattering_tutorials
+simulator_code
+illumination
+material_datasets
+detector_response
 optical_contrast_formalisms
 light_propagation_modes
 simulate_hologram_sweep

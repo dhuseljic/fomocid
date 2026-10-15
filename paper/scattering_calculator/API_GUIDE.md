@@ -37,6 +37,7 @@ accepts imported arrays on the configured grid.
 | Photon energy / linear angle | `experiment.xray.energy` / `linear_polarization_angle` |
 | Sample grid / pitch | `experiment.simulation.shape` / `real_space_pixel_size` |
 | Layers / longitudinal discretization | `experiment.sample.recipe` / `max_slice_thickness` |
+| Optional natural/ferroelectric anisotropy | `experiment.sample.optical_responses` (empty by default) |
 | Vector texture | `experiment.magnetic_pattern.pattern_type_method` / `pattern_config` |
 | Object/reference geometry | `experiment.aperture.aperture_config` |
 | Gaussian profile | `experiment.illumination.illumination_config` (`fwhm`, `center`, `distance`, `alpha_beam`) |
@@ -113,3 +114,25 @@ Weights divide total source photon flux. Colors propagate independently and thei
 ideal intensities sum on physical detector pixels before one acquisition pass.
 This differs from `energies_eV`, which creates separate exposures. Individual
 color images are available at `spectral_components/000000/detector_ideal` etc.
+
+## Illumination and nonmagnetic response options
+
+The first notebook exposes optional partial polarization, simultaneous spectral
+components and the spatial-coherence blur approximation, alongside Gaussian
+size/position/focus/tilt controls. See the [illumination guide](../../docs/illumination.md)
+for the distinction between coherent carriers, incoherent sums and separate scans.
+The model-options notebook adds a disabled-by-default natural/ferroelectric
+response example using `sim.OpticalResponseConfig`. See the
+[response guide](../../docs/optical_contrast_formalisms.md#optional-natural-dichroism-and-ferroelectric-optical-anisotropy)
+for spectra, axis maps, scalar eigenmode restrictions and the even-in-polar-axis
+ferroelectric approximation.
+
+Optical coefficients for every enabled natural/ferroelectric channel now come
+from the same material refractive-index dataset root as XMCD/XMLD, via
+`sample.refractive_index_database`. `OpticalResponseConfig` only specifies spatial
+order and channel selection. See the [dataset guide](../../docs/material_datasets.md).
+`detector_params["counts_per_photon"]` accepts a constant or `gain(energy_eV)`.
+`nonlinear_response=None` retains linear conversion; a callable maps total
+per-frame linear ADU to nonlinear ADU before readout and clipping. See the
+[detector-response guide](../../docs/detector_response.md) for mixed-energy
+acquisition, calibration examples and literature.

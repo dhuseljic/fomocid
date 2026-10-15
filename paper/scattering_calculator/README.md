@@ -9,10 +9,14 @@ models. Energy scans and reconstruction provide supplementary examples.
 - [Manuscript](manuscript.md): the four-stage methods and three-figure main-paper plan.
 - [API guide](API_GUIDE.md): runnable calls, options, units and outputs.
 - [01 — Basic FTH experiment](notebooks/01_fth_basics.ipynb): sample, exit fields,
-  physical detector projection and acquisition saved to HDF5.
+  physical detector projection and acquisition saved to HDF5, with optional
+  partial-polarization, multiple-color, coherence-blur, energy-dependent gain
+  and nonlinear detector controls.
 - [02 — Hyperspectral series](notebooks/02_hyperspectral.ipynb): optical constants,
   common-q reconstructions and a fixed-camera energy series in the same HDF5 workflow.
-- [03 — Interaction and propagation options](notebooks/03_model_options.ipynb).
+- [03 — Interaction and propagation options](notebooks/03_model_options.ipynb),
+  including disabled-by-default natural dichroism and ferroelectric-axis
+  selectors that require future material datasets.
 - [04 — FTH validation](notebooks/04_fth_validation.ipynb).
 - [Validation record](VALIDATION.md).
 
