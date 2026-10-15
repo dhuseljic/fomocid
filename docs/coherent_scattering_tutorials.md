@@ -254,3 +254,12 @@ software-methods manuscript draft, an API guide and executable notebooks centred
 on normal-incidence Pt/Co FTH, the full sample-to-camera chain, hyperspectral
 imaging, interaction/propagation choices and validation. The earlier
 skyrmion-led paper and notebooks are preserved in a dated backup.
+
+## Square-window magnetic SAXS
+
+[Tutorial 21](../tutorials/21_square_window_saxs.ipynb) uses vertical linear
+illumination near the Co L₃ edge for the SiN/Ta/Pt/[Co/Pt/Al]×15/Pt film,
+200 nm stripes and a 50 µm clear square rotated 45°. It computes pixel-integrated Fresnel
+and far-field patterns on a 1300 × 1300, 20 µm-pitch camera at 40 cm.
+The surrounding thick tapered support is approximated by a perfectly opaque
+exterior; wall scattering and vignetting are omitted.

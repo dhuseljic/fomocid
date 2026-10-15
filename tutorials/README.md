@@ -63,6 +63,17 @@ from the `tutorials/` directory.
     40 nm, 10% out-of-plane modulation, complex exit fields, FFT and physical
     detector patterns with parallel, selectable and crossed linear analyzers.
 
+20. [`20_magnetic_state_dataset.ipynb`](20_magnetic_state_dataset.ipynb)
+    — generate 24 magnetic states at the Co L3 absorption maximum with Tutorial
+    12 geometry and illumination; save per-state CR/CL HDF5 observations and
+    masks for the physical hysteresis reconstruction notebook.
+
+21. [`21_square_window_saxs.ipynb`](21_square_window_saxs.ipynb) — simulate
+    200 nm magnetic stripes in a uniformly illuminated 50 µm square SiN window rotated 45°
+    with vertical linear polarization, projected multilayer Jones transmission,
+    finite-distance Fresnel diffraction and pixel-integrated SAXS on a
+    1300 × 1300 detector at 40 cm.
+
 Scattering notebooks 1–16 expose `detector_propagation_method="fraunhofer"`
 near the top. Choose `"rayleigh_sommerfeld"` for finite-distance propagation
 after the sample; use small grids for this direct solver. Notebooks that stop
