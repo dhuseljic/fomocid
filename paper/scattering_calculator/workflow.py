@@ -130,18 +130,17 @@ def setup_figure(out=OUT, config=None, geometry=None):
     flow = fig.add_axes([.035, .05, .93, .32]); flow.set(xlim=(-.1, 13.1), ylim=(0, 3)); flow.axis('off')
     flow.text(0, 2.8, 'b  Simulation workflow and user controls', weight='bold', fontsize=15)
     boxes = [
-        ('1  Sample + optical data', 'layers · holes · m(x,y,z)\nenergy → $n_0$, $n_c$, $n_l$'),
-        ('2  Light–matter interaction', 'Scalar / Jones / Stokes\nlocal transmission per slice'),
-        ('3  Within-sample propagation', 'multislice on / off\nangular spectrum · slice size'),
-        ('4  Exit wave → detector', 'Fraunhofer / finite-distance RS\ndistance · pitch · pixel footprint'),
-        ('5  Acquisition', 'photon budget · beamstop\nnoise · saturation · defects')]
+        ('1  Illumination', 'energy · envelope · polarization\nplane wave / Gaussian'),
+        ('2  Sample: multislice', 'Scalar / Jones / Stokes\ntransmission + diffraction'),
+        ('3  Free-space propagation', 'Fraunhofer / finite-distance RS\ndistance · pitch · pixel footprint'),
+        ('4  Detector signal', 'flux · exposure · beamstop\nphoton noise · sensor effects')]
     for i,(title,body) in enumerate(boxes):
-        x = i*2.62
-        flow.add_patch(FancyBboxPatch((x+.05,.8),2.42,1.5,boxstyle='round,pad=.06',
+        x = i*3.28
+        flow.add_patch(FancyBboxPatch((x+.05,.8),3.04,1.5,boxstyle='round,pad=.06',
                                      facecolor='#edf4f7',edgecolor='#247a9b'))
-        flow.text(x+1.26,1.96,title,ha='center',fontsize=9,weight='bold')
-        flow.text(x+1.26,1.42,body,ha='center',va='center',fontsize=9)
-        if i < 4: flow.annotate('',(x+2.64,1.55),(x+2.48,1.55),arrowprops=dict(arrowstyle='->'))
+        flow.text(x+1.57,1.96,title,ha='center',fontsize=10,weight='bold')
+        flow.text(x+1.57,1.42,body,ha='center',va='center',fontsize=9)
+        if i < 3: flow.annotate('',(x+3.30,1.55),(x+3.15,1.55),arrowprops=dict(arrowstyle='->'))
     flow.text(0,.22,'Outputs: complex exit fields → ideal holograms → detector counts; FTH sidebands are a downstream diagnostic.',fontsize=11)
     ex.savefig(fig, 'fig01_setup_workflow', out)
 

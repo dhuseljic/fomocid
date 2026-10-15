@@ -1,11 +1,12 @@
-# Scattering calculator: a normal-incidence FTH walkthrough
+# Scattering calculator: transmission simulation with an FTH example
 
-Start with one conventional magnetic Fourier-transform holography sample and
-follow the light from the incident beam to detector counts. The paper explains
-what users configure at each stage, then extends the example to a Co-edge energy
-series, selectable interaction/propagation schemes and validation.
+The paper introduces the simulator as a tool for coherent diffractive techniques
+in transmission geometry. A normal-incidence FTH example follows four stages:
+illumination, multislice transmission through the sample, free-space propagation
+and detector-signal simulation. Each stage connects equations, code and selectable
+models. Energy scans and reconstruction provide supplementary examples.
 
-- [Manuscript](manuscript.md): the experiment, methods and five-figure narrative.
+- [Manuscript](manuscript.md): the four-stage methods and three-figure main-paper plan.
 - [API guide](API_GUIDE.md): runnable calls, options, units and outputs.
 - [01 — Basic FTH experiment](notebooks/01_fth_basics.ipynb): sample, exit fields,
   physical detector projection and acquisition saved to HDF5.
