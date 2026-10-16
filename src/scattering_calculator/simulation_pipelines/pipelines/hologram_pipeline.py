@@ -1213,6 +1213,8 @@ class HologramPipeline:
         roi_pattern_types = {
             "wavy_stripe_pattern",
             "binary_labyrinth_pattern",
+            "domain_pattern",
+            "constrained_domain_pattern",
             "disordered_skyrmion_lattice_pattern",
         }
         if not enabled or pattern_type not in roi_pattern_types or pixel_size <= 0:

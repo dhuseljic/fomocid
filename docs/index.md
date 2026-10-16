@@ -56,3 +56,7 @@ roadmap
 contributing
 api
 ```
+
+- [General magnetic domains and measured parameter atlas](magnetic_domain_catalogue.md)
+
+- [Experimental constrained dipolar domains](constrained_magnetic_domains.md)

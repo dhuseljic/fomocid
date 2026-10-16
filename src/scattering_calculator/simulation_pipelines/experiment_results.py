@@ -307,7 +307,7 @@ def simulate_experiment(config, *, magnetization=None, mask=None):
         config.simulation.real_space_pixel_size=camera.calc_realspace_resolution(reference)/factor
         config.simulation.other_config.update(grid_mode='explicit',sampling_reference_energy_eV=config.xray.energy)
     if magnetization is None and any(method in (
-        'wavy_stripe_pattern','binary_labyrinth_pattern','skyrmion_pattern','disordered_skyrmion_lattice_pattern')
+        'wavy_stripe_pattern','binary_labyrinth_pattern','domain_pattern','constrained_domain_pattern','skyrmion_pattern','disordered_skyrmion_lattice_pattern')
         for method in parameter_axes.get('magnetic_pattern.pattern_type_method',
                                         [config.magnetic_pattern.pattern_type_method])):
         if config.magnetic_pattern.pattern_config.get('seed') is None:

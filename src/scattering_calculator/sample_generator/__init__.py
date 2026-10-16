@@ -11,6 +11,8 @@ from .domain_analysis import DomainComponent, classify_magnetic_domains
 from .pattern_generator import (
     create_lattice,
     create_binary_labyrinth_pattern,
+    create_domain_pattern,
+    create_constrained_domain_pattern,
     create_disordered_skyrmion_lattice_pattern,
     create_image_pattern,
     create_saturated_pattern,
@@ -48,6 +50,8 @@ __all__ = [
     "create_lattice",
     "classify_magnetic_domains",
     "create_binary_labyrinth_pattern",
+    "create_domain_pattern",
+    "create_constrained_domain_pattern",
     "create_disordered_skyrmion_lattice_pattern",
     "create_image_pattern",
     "create_saturated_pattern",

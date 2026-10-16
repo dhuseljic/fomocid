@@ -424,3 +424,13 @@ clips the texture, allowing partial skyrmions at its boundary. Explicit
 For direct component use, pass the aperture dictionary to
 `magnetic_pattern.create_pattern(aperture_config=aperture.aperture_config)`.
 Without aperture geometry the generator covers the supplied grid.
+
+### Experimental fixed-magnetization textures
+
+`MagneticPatternConfig(pattern_type_method="constrained_domain_pattern",
+pattern_config={"target_magnetization": 0.4, "characteristic_length": 100e-9,
+"alignment": 0., "disorder_length": 4e-9, "seed": 7})` selects the experimental
+dipolar scalar relaxation model. Lengths are metres in configuration dictionaries.
+It returns fully magnetized +/-1 domains with a fixed generated-grid area ratio.
+The target repeat is measured and calibrated with bounded work; inspect the
+size and convergence flags. See [the model and measured trial](constrained_magnetic_domains.md).

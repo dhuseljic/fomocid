@@ -12,6 +12,7 @@ from scattering_calculator.sample_generator.gray_scott_generator_binary import (
     generate as generate_binary,
 )
 from scattering_calculator.utils.masking import circle_mask
+from .constrained_domains import create_constrained_domain_pattern
 
 
 def _profile_antialias_samples(*lengths: float) -> int:
@@ -1349,6 +1350,9 @@ def create_binary_labyrinth_pattern(
     saturation_fraction_threshold: float = 0.01,
     max_hole_area: int = 0,
     requested_state: str | None = None,
+    up_fraction: float | None = None,
+    rescale_mode: str = "measured",
+    threshold_mode: str = "auto",
     **generator_overrides,
 ) -> tuple[NDArray[np.float64], dict]:
     """Create binary labyrinth domains rescaled to a requested stripe width.
@@ -1445,6 +1449,12 @@ def create_binary_labyrinth_pattern(
     result : tuple[NDArray[np.float64], dict]
         Return value produced by the function.
     """
+    if threshold_mode not in ("auto", "zero", "median"):
+        raise ValueError("threshold_mode must be auto, zero or median")
+    if rescale_mode not in ("measured", "nominal", "native"):
+        raise ValueError("rescale_mode must be measured, nominal or native")
+    if up_fraction is not None and (not np.isfinite(up_fraction) or not 0 <= up_fraction <= 1):
+        raise ValueError("up_fraction must be between 0 and 1")
     generator_overrides.pop("coordinate_offset", None)
     rows, cols = tuple(sz_array)
     if stripe_width <= 0:
@@ -1504,7 +1514,7 @@ def create_binary_labyrinth_pattern(
     # Stripe-width rescaling is meaningless for a saturated state, so return a
     # uniform requested-size pattern immediately when the probe has no resolved
     # minority phase.
-    if target_mean is not None:
+    if target_mean is not None and up_fraction is None:
         _, _, probe_continuous, probe_meta = generate_binary(
             batch=batch,
             H=requested_H,
@@ -1605,7 +1615,9 @@ def create_binary_labyrinth_pattern(
         )
         base = np.asarray(continuous[0], dtype=float)
         measured_width, measured_period = _estimate_labyrinth_stripe_width_fft(base)
-        scale = stripe_width / measured_width if measured_width > 0 else 1.0
+        source_width = estimated_source_width if rescale_mode == "nominal" else measured_width
+        scale = (1.0 if rescale_mode == "native" else
+                 stripe_width / source_width if source_width > 0 else 1.0)
         scale = max(scale, 1e-3)
         scaled_rows = int(np.round(base.shape[0] * scale))
         scaled_cols = int(np.round(base.shape[1] * scale))
@@ -1662,7 +1674,9 @@ def create_binary_labyrinth_pattern(
     if scaled.size == 0:
         scaled = base
     pattern = _center_crop(scaled, (rows, cols))
-    threshold = 0.0 if target_mean is not None else float(np.median(pattern))
+    threshold = (0.0 if threshold_mode == "zero" or
+                 (threshold_mode == "auto" and target_mean is not None)
+                 else float(np.median(pattern)))
     pattern = pattern - threshold
 
     if max_hole_area:
@@ -1671,6 +1685,15 @@ def create_binary_labyrinth_pattern(
     if sigma is not None:
         pattern = gaussian_filter(pattern, sigma)
 
+    if up_fraction is not None:
+        # Calibrate occupancy on the final, smoothed output grid. This is a
+        # geometrical control, distinct from a mean constraint during evolution.
+        if 0 < up_fraction < 1:
+            correction = float(np.quantile(pattern, 1 - up_fraction))
+            pattern = pattern - correction
+            threshold += correction
+        else:
+            pattern = np.full_like(pattern, 1.0 if up_fraction == 1 else -1.0)
     conversion = str(domain_conversion).lower()
     if conversion == "hard":
         pattern = np.where(pattern >= 0, 1.0, -1.0)
@@ -1702,6 +1725,9 @@ def create_binary_labyrinth_pattern(
             "target_stripe_width_px": stripe_width,
             "rescale_factor": scale,
             "resample_method": "cubic_antialias",
+            "up_fraction_requested": up_fraction,
+            "up_fraction_measured": float(np.mean(pattern > 0)),
+            "mean_mz": float(np.mean(pattern)),
             "requested_H": requested_H,
             "requested_W": requested_W,
             "generated_H": current_H,
@@ -1818,3 +1844,66 @@ def create_stripe_pattern(
         plt.ylabel(ylabel)
 
     return pattern, stripe_centers
+
+
+def create_domain_pattern(
+    sz_array, period, *, up_fraction=None, target_mean=None,
+    k0=0.7, eps=0.8, quadratic_coefficient=0.0, field_bias=0.0,
+    lattice_order=0.0, lattice_angle=0.0, n_steps=80, noise_amp=0.0,
+    sigma=None, domain_conversion="hard", softness=1.0, seed=None,
+    rescale_mode="nominal", stable_evolution=True, threshold_mode="zero",
+    real_space_pixel_size=1, **options,
+):
+    """Generate a scalar domain family with one spectral evolution model.
+
+    ``period`` is the full up/down repeat in pixels (metres in pipeline configs).
+    ``target_mean`` constrains the continuous evolving field; it is NOT the
+    final mean magnetization or an area fraction. ``up_fraction`` independently
+    sets final positive-domain occupancy by a quantile after smoothing, within
+    output-pixel resolution. By default every pixel is +1 or -1: the fraction
+    changes occupied area, never domain amplitude. Optional domain_conversion="soft"
+    enables continuous wall contrast and can change mean_mz at fixed occupancy.
+    ``quadratic_coefficient`` and ``field_bias`` break sign symmetry during
+    evolution. ``lattice_order`` interpolates random initial conditions (0) and
+    a hexagonal three-wave seed (1); it does not guarantee the final phase.
+    Nominal rescaling uses k0 to set the length scale, avoiding unstable FFT
+    feedback near uniform phases. Set rescale_mode="measured" for legacy FFT
+    wavelength calibration. rescale_mode="native" runs at the output grid
+    directly and ignores period: k0 then determines the native wavelength.
+    These are scalar textures, not vector skyrmions.
+    Exact legacy labyrinth behavior is recovered with domain_conversion="soft",
+    stable_evolution=False,
+    rescale_mode="measured", threshold_mode="median", lattice_order=0, and no
+    bias or occupancy constraint. Metadata records measured output values.
+    """
+    for name, value in dict(period=period, k0=k0, eps=eps,
+                            quadratic_coefficient=quadratic_coefficient,
+                            field_bias=field_bias, lattice_order=lattice_order,
+                            lattice_angle=lattice_angle, noise_amp=noise_amp).items():
+        if not np.isscalar(value) or not np.isfinite(value):
+            raise ValueError(f"{name} must be a finite scalar")
+    if period <= 0 or k0 <= 0 or not 0 <= lattice_order <= 1 or noise_amp < 0:
+        raise ValueError("period and k0 must be positive; lattice_order in [0,1]; noise_amp nonnegative")
+    if int(n_steps) != n_steps or n_steps < 0:
+        raise ValueError("n_steps must be a nonnegative integer")
+    if target_mean is not None and not np.isfinite(target_mean):
+        raise ValueError("target_mean must be finite or None")
+    options.pop("coordinate_offset", None)
+    if rescale_mode == "native":
+        # Tutorial 03 explores solver-grid wavelengths directly, without
+        # normalizing every sample to the same requested output period.
+        options.update(H=int(sz_array[0]), W=int(sz_array[1]), auto_size=False, crop_margin=0)
+    pattern, meta = create_binary_labyrinth_pattern(
+        sz_array, stripe_width=period / 2, region="custom", k0=k0, eps=eps,
+        quadratic_coefficient=quadratic_coefficient, field_bias=field_bias,
+        target_mean=target_mean, up_fraction=up_fraction, rescale_mode=rescale_mode, threshold_mode=threshold_mode, lattice_order=lattice_order,
+        lattice_angle=lattice_angle, stable_evolution=stable_evolution, n_steps=n_steps, noise_amp=noise_amp,
+        sigma=sigma, domain_conversion=domain_conversion, softness=softness,
+        seed=seed, real_space_pixel_size=real_space_pixel_size, **options)
+    meta.update(generator="spectral_domains", period_requested_px=float(period),
+                rescale_mode=rescale_mode, stable_evolution=bool(stable_evolution), threshold_mode=threshold_mode,
+                lattice_order=float(lattice_order), lattice_angle=float(lattice_angle),
+                quadratic_coefficient=float(quadratic_coefficient), field_bias=float(field_bias),
+                up_fraction_requested=up_fraction,
+                up_fraction_measured=float(np.mean(pattern > 0)), mean_mz=float(pattern.mean()))
+    return pattern, meta

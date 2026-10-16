@@ -103,6 +103,9 @@ class GrayScottConfig:
     quadratic_coefficient: float = 0.0
     field_bias: object = 0.0
     target_mean: Optional[float] = None
+    lattice_order: float = 0.0
+    lattice_angle: float = 0.0
+    stable_evolution: bool = False
 
     batch: int = 16
 
@@ -177,6 +180,7 @@ class GrayScottBatch:
         self.xp = _xp(cfg.use_gpu)
 
         xp = self.xp
+        self.noise_rng = xp.random.RandomState(cfg.seed)
 
         rng = _np.random.default_rng(cfg.seed)
 
@@ -234,6 +238,21 @@ class GrayScottBatch:
         # Fourier operators
         # ====================================================
 
+        if not 0 <= cfg.lattice_order <= 1:
+            raise ValueError("lattice_order must be between 0 and 1")
+        if cfg.lattice_order:
+            # Three equal-length waves at 120 degrees seed a hexagonal phase.
+            yy, xx = _np.indices((cfg.H, cfg.W), dtype=float)
+            phases = rng.uniform(0, 2 * _np.pi, size=(cfg.batch, 2))
+            crystal = _np.zeros_like(u0)
+            for i in range(3):
+                angle = cfg.lattice_angle + 2 * _np.pi * i / 3
+                phase = phases[:, i] if i < 2 else -phases.sum(axis=1)
+                crystal += _np.cos(self.k0 * (xx * _np.cos(angle) + yy * _np.sin(angle))
+                                   + phase[:, None, None])
+            crystal /= crystal.std(axis=(-2, -1), keepdims=True)
+            self.u = xp.asarray((1 - cfg.lattice_order) * u0 + cfg.lattice_order * crystal)
+
         ky = 2.0 * xp.pi * xp.fft.fftfreq(cfg.H)
         kx = 2.0 * xp.pi * xp.fft.fftfreq(cfg.W)
 
@@ -283,13 +302,13 @@ class GrayScottBatch:
             ).real
 
             # nonlinear saturation
-            u = (
-                u
-                + 0.5 * u
-                + self.quadratic_coefficient * u**2
-                - 0.25 * u**3
-                + self.field_bias
-            )
+            if self.cfg.stable_evolution:
+                # Semi-implicit cubic damping avoids explicit-step sign flips
+                # and runaway isolated peaks for strongly ordered seeds.
+                u = (1.5 * u + self.quadratic_coefficient * u**2 + self.field_bias) / (1 + .25 * u**2)
+            else:
+                u = (u + .5 * u + self.quadratic_coefficient * u**2
+                     - .25 * u**3 + self.field_bias)
 
             # normalize
             std = xp.std(u, axis=(-2, -1), keepdims=True) + 1e-6
@@ -301,7 +320,7 @@ class GrayScottBatch:
 
             # weak noise
             noise = self.noise_amp * (
-                xp.random.standard_normal(u.shape)
+                self.noise_rng.standard_normal(u.shape)
             ).astype(xp.float32)
 
             u += noise
@@ -358,6 +377,9 @@ def generate(
     quadratic_coefficient: float = 0.0,
     field_bias=0.0,
     target_mean: Optional[float] = None,
+    lattice_order: float = 0.0,
+    lattice_angle: float = 0.0,
+    stable_evolution: bool = False,
     **overrides,
 ):
     """API-compatible binary magnetic-domain generator.
@@ -430,6 +452,9 @@ def generate(
         quadratic_coefficient=quadratic_coefficient,
         field_bias=field_bias,
         target_mean=target_mean,
+        lattice_order=lattice_order,
+        lattice_angle=lattice_angle,
+        stable_evolution=stable_evolution,
         **overrides,
     )
 

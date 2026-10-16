@@ -126,3 +126,10 @@ at the bundled Co L3 absorption peak: two saturated states for each polarity,
 ten skyrmion textures, and ten labyrinth textures. Each state has its own HDF5
 file with magnetic ground truth, CR/CL images and frames, and explicitly labeled
 sample and reconstruction support masks.
+
+## General magnetic-domain morphology
+
+[Tutorial 22](22_general_magnetic_domains.ipynb) uses one shared generator for
+labyrinths, unequal up/down fractions, bubbles and ordered scalar lattices.
+The [measured catalogue](../docs/magnetic_domain_catalogue.md) records parameter
+sweeps, seed variation, occupancy, shapes and sixfold center order.

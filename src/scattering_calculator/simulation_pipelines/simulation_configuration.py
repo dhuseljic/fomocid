@@ -1008,7 +1008,7 @@ class MagneticPatternConfig(_ConfigMixin):
 
     Parameters
     ----------
-    pattern_type_method : {"skyrmion_pattern", "disordered_skyrmion_lattice_pattern", "wavy_stripe_pattern", "binary_labyrinth_pattern", "saturated_pattern", "image_pattern"}
+    pattern_type_method : {"skyrmion_pattern", "disordered_skyrmion_lattice_pattern", "wavy_stripe_pattern", "binary_labyrinth_pattern", "domain_pattern", "saturated_pattern", "image_pattern"}
         Which pattern generator function to use.
     shape : tuple of int or None
         2-D array shape ``(Ny, Nx)`` in pixels.
@@ -1042,6 +1042,8 @@ class MagneticPatternConfig(_ConfigMixin):
         "disordered_skyrmion_lattice_pattern",
         "wavy_stripe_pattern",
         "binary_labyrinth_pattern",
+        "domain_pattern",
+        "constrained_domain_pattern",
         "saturated_pattern",
         "image_pattern",
         "magnon_wave",
@@ -1072,6 +1074,8 @@ class MagneticPatternConfig(_ConfigMixin):
             "disordered_skyrmion_lattice_pattern": pattern_generator.create_disordered_skyrmion_lattice_pattern,
             "wavy_stripe_pattern": pattern_generator.create_wavy_stripe_pattern,
             "binary_labyrinth_pattern": pattern_generator.create_binary_labyrinth_pattern,
+            "domain_pattern": pattern_generator.create_domain_pattern,
+            "constrained_domain_pattern": pattern_generator.create_constrained_domain_pattern,
             "saturated_pattern": pattern_generator.create_saturated_pattern,
             "image_pattern": pattern_generator.create_image_pattern,
         }
@@ -1130,6 +1134,8 @@ class MagneticPatternConfig(_ConfigMixin):
                 parameters, aperture_config, self.shape, self.real_space_pixel_size)
         config = generator_parameters(self.pattern_type_method, parameters)
         length_keys_by_method = {
+            "domain_pattern": {"period", "sigma"},
+            "constrained_domain_pattern": {"characteristic_length", "disorder_length"},
             "wavy_stripe_pattern": {
                 "stripe_width",
                 "sigma",
