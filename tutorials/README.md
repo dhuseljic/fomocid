@@ -92,3 +92,11 @@ of the detector-model selector described for tutorials 1–16 above.
 The [paper workspace](../paper/scattering_calculator/README.md) includes a
 manuscript draft and figure notebooks for FTH, spectroscopy, polarization
 formalisms, and detector artifacts.
+
+## Magnetic states at a fixed energy
+
+[Tutorial 18](18_magnetic_states_absorption_peak.ipynb) generates 24 measurements
+at the bundled Co L3 absorption peak: two saturated states for each polarity,
+ten skyrmion textures, and ten labyrinth textures. Each state has its own HDF5
+file with magnetic ground truth, CR/CL images and frames, and explicitly labeled
+sample and reconstruction support masks.
