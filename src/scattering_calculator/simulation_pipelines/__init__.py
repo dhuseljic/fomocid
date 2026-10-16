@@ -6,14 +6,18 @@ from .pipelines.hologram_pipeline import (
     HologramPipelineRanges,
 )
 from .simulate_experiment import SetupSimulationExperiment
+from .experiment import ExperimentConfig, OutputConfig, ScatteringExperiment
+from .experiment_results import ExperimentResults, simulate_experiment, load_results, plot_results, run_experiment
 from .simulation_configuration import (
     BeamstopConfig,
     DetectorConfig,
     FrontApertureConfig,
     HologramConfig,
     IlluminationConfig,
+    SpectralComponentConfig,
     MagneticPatternConfig,
     SampleConfig,
+    OpticalResponseConfig,
     SamplePropagatorConfig,
     SimulationConfig,
     XRayConfig,
@@ -32,6 +36,14 @@ from .simulation_configuration_range import (
 )
 
 __all__ = [
+    "ExperimentConfig",
+    "OutputConfig",
+    "ExperimentResults",
+    "simulate_experiment",
+    "load_results",
+    "plot_results",
+    "run_experiment",
+    "ScatteringExperiment",
     "BeamstopConfig",
     "HologramPipeline",
     "HologramPipelineConfig",
@@ -45,10 +57,12 @@ __all__ = [
     "FrontApertureConfigRange",
     "HologramConfig",
     "IlluminationConfig",
+    "SpectralComponentConfig",
     "IlluminationConfigRange",
     "MagneticPatternConfig",
     "MagneticPatternConfigRange",
     "SampleConfig",
+    "OpticalResponseConfig",
     "SampleConfigRange",
     "SamplePropagatorConfig",
     "SimulationConfig",

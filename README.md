@@ -1,5 +1,7 @@
 # fo-mo-cid
 
+Start with [Tutorial 00: configure, simulate, save and reload](tutorials/00_experiment_workflow.ipynb) for the shared HDF5 workflow.
+
 `fo-mo-cid` is a tutorial-first repository for self-supervised learning and coherent-scattering simulation workflows. The current shipped scope includes:
 
 - `CIFAR-10` with `MAE`
@@ -78,6 +80,8 @@ Run a coherent FTH hologram sweep:
 python tutorials/simulate_hologram_sweep.py
 ```
 
+All scattering notebooks use the [standard experiment setup](docs/experiment_setup.md), with shared component sections and units.
+
 For the notebook-first path, start with [the coherent-scattering tutorial map](docs/coherent_scattering_tutorials.md), then open the focused notebooks under `tutorials/`.
 For micromagnetic inputs, use `tutorials/13_mumax_ovf_workflow.ipynb`;
 it reads Mumax/OOMMF OVF files from `DATA_ROOT/Data/mumax_files/`, checks the
@@ -131,7 +135,8 @@ This is a source-only repository. Built docs, checkpoints, cached artifacts, `eg
 ## Scattering-calculator paper examples
 
 The [paper workspace](paper/scattering_calculator/README.md) contains a manuscript
-draft and reproducible figure notebooks for Pt/Co holography, skyrmion tilt
-series, reciprocal-space assembly, energy scans, and detector artifacts.
-Start with [Tutorial 17](tutorials/17_skyrmion_lattice_ewald_rods.ipynb) for the
-skyrmion-lattice Ewald geometry.
+draft and an API walkthrough for normal-incidence Pt/Co FTH: sample design,
+multislice, physical detector propagation, artifacts, hyperspectral series and
+validation. Start with the [basic FTH notebook](paper/scattering_calculator/notebooks/01_fth_basics.ipynb).
+The earlier paper is preserved in a dated backup; [Tutorial 17](tutorials/17_skyrmion_lattice_ewald_rods.ipynb)
+remains available for skyrmion-lattice Ewald geometry.

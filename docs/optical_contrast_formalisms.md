@@ -296,3 +296,103 @@ The tilted multilayer demonstration notebook,
 [`11_tilted_magnetic_layer_multislice.ipynb`](../tutorials/11_tilted_magnetic_layer_multislice.ipynb),
 is the focused runnable example for fixed beam-direction and local-k vector
 contrast.
+
+## Optional natural dichroism and ferroelectric optical anisotropy
+
+The magnetic linear channel (XMLD) already exists. Nonmagnetic linear anisotropy
+and natural circular dichroism are separate, opt-in contributions under
+`SampleConfig.optical_responses`. The default is `()`: no new response is applied,
+and the original scalar/compact Jones paths are retained.
+
+```python
+from scattering_calculator import simulation_pipelines as sim
+
+# These select dataset channels and spatial fields, not optical coefficients.
+responses = (
+    sim.OpticalResponseConfig(material="Co", kind="natural_linear", axis=(1., 0., 0.)),
+    sim.OpticalResponseConfig(material="Co", kind="ferroelectric", axis=polar_axis),
+    sim.OpticalResponseConfig(material="Co", kind="natural_circular", axis=None,
+                              strength=handedness),
+)
+modified = experiment.with_changes(sample={
+    "optical_responses": responses,
+    "refractive_index_database": "/path/to/material_datasets",
+})
+original = modified.with_changes(sample={"optical_responses": ()})
+```
+
+The material selector is illustrative; no natural/ferroelectric Co spectra are
+bundled. Each enabled channel must exist in the chosen material refractive-index
+datasets. Its coefficient is loaded by `material_params` at the source energy,
+through the same material lifecycle as XMCD/XMLD. See the
+[dataset format and lookup rules](material_datasets.md). Constant corrections and
+inline spectra are not accepted in `OpticalResponseConfig`.
+
+`material` matches a layer name in the recipe, including all subdivisions of that
+layer. A composite effective layer must be targeted by its complete layer label;
+this option does not silently insert a response into one constituent. Multiple
+contributions are added before computing the Jones transmission matrix.
+
+For `natural_linear` and `ferroelectric`, the increment is
+
+```text
+Delta eps = 2 n0 delta_n strength u u^T
+```
+
+Here `u` is the normalized supplied axis in lab `(x,y,z)` components. Projection
+onto the transverse Jones basis retains both diagonal and off-diagonal entries.
+This is a uniaxial weak-anisotropy model: delta_n shifts the axial index relative
+to the transverse background to first order. It includes phase anisotropy and
+absorption anisotropy. The existing XMLD channel uses its original traceless
+transverse parametrization and remains unchanged.
+
+The ferroelectric option represents linear optical anisotropy associated with a
+prescribed polar axis. It is even under `u -> -u`; this term alone cannot
+distinguish otherwise identical 180-degree polar domains. It does distinguish
+axes with different orientations. The model does not calculate spontaneous
+polarization, domain switching, electro-optic coefficients or second-harmonic
+generation. A real ferroelectric needs its own background optical constants and
+measured or calculated anisotropic spectra.
+
+For `natural_circular`, the model uses a reciprocal effective gyration tensor:
+
+```text
+G = 2 n0 delta_n strength I          # axis=None
+G = 2 n0 delta_n strength u u^T      # axis supplied
+c_natural = khat^T G khat
+Delta eps_perp = [[0, i c_natural], [-i c_natural, 0]]
+```
+
+The implied lab-frame gyrotropic vector is `G khat`, so the response has the
+appropriate reversal of the antisymmetric lab tensor when propagation reverses.
+It must not be treated as a fixed magnetization-like vector. The dataset-derived `delta_n` is half
+the circular index splitting to first order; the energy dependence of the
+physical gyration coefficient, including its wavevector-magnitude dependence,
+is included in the supplied spectrum. Isotropic and uniaxial forms are effective
+models, not a calculation of the general crystal XNCD tensor or its microscopic
+multipole transitions. See the [XNCD theory and experiment](https://doi.org/10.1107/S1600577517015387).
+
+`axis` accepts `(3,)`, `(Ny,Nx,3)` or `(Nz,Ny,Nx,3)`; `strength` accepts a scalar,
+`(Ny,Nx)` or `(Nz,Ny,Nx)`. Volume axes refer to the subdivided material stack.
+Axes must be finite and nonzero; use zero strength where an order parameter is
+absent. Axis magnitude is normalized and is not a polarization in C/m². Supply
+the desired magnitude dependence through strength, for example `(P/P0)**2`.
+Directions use lab components; they are not automatically rotated with the
+sample. For tilted samples the existing material-layer fractions supply occupancy,
+while direction maps follow the existing material-layer transverse-grid convention.
+The material mask removes the response from vacuum, and the new terms are not
+truncated to the magnetic aperture-support optimization.
+
+Energy dependence always comes from named material tables alongside the
+isotropic and magnetic data. A fresh scan exposure or spectral component reloads
+the response at its physical energy. Missing enabled channels and energies
+outside their tabulated ranges fail explicitly. No natural/ferroelectric spectra
+are invented or added to the bundled database. The standard HDF5 record includes
+the evaluated coefficients and the source dataset hashes.
+
+Jones and Stokes support the full response, including fixed-direction and local-k
+projection. Opting in currently uses dense response channels rather than compact
+magnetic aperture patches, so memory use can increase. Scalar mode accepts an
+actual eigenpolarization of the total tensor; polarization mixing fails with a
+request to use Jones/Stokes. For these responses tilted illumination or an explicit
+`linear_polarization_angle` also requires Jones/Stokes for linear illumination.

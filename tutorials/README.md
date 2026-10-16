@@ -1,5 +1,9 @@
 # Tutorials
 
+Start with [Tutorial 00: configure, simulate, save and reload](00_experiment_workflow.ipynb) for the shared HDF5 workflow.
+
+All maintained scattering examples share the [standard experiment setup](../docs/experiment_setup.md). Use its component sections, units and execution stages for new notebooks.
+
 The numbered notebooks are the maintained coherent-scattering learning path.
 Run them from the repository root after installing the project with
 `python -m pip install -e .`. Each notebook also locates `src/` when opened
@@ -52,6 +56,23 @@ from the `tutorials/` directory.
     — propagate one shared FTH exit wave with Fraunhofer and Rayleigh–Sommerfeld;
     compare full holograms, half-image composites, signed differences, ratios,
     and radial averages versus scattering angle.
+17. [`17_skyrmion_lattice_ewald_rods.ipynb`](17_skyrmion_lattice_ewald_rods.ipynb)
+    — study skyrmion-tube diffraction, sample tilts and Ewald-sphere assembly.
+18. [`18_co_magnon_linear_analyzer.ipynb`](18_co_magnon_linear_analyzer.ipynb)
+    — illuminate a 30 nm Co film with linear light at the Co edge; inspect a
+    40 nm, 10% out-of-plane modulation, complex exit fields, FFT and physical
+    detector patterns with parallel, selectable and crossed linear analyzers.
+
+20. [`20_magnetic_state_dataset.ipynb`](20_magnetic_state_dataset.ipynb)
+    — generate 24 magnetic states at the Co L3 absorption maximum with Tutorial
+    12 geometry and illumination; save per-state CR/CL HDF5 observations and
+    masks for the physical hysteresis reconstruction notebook.
+
+21. [`21_square_window_saxs.ipynb`](21_square_window_saxs.ipynb) — simulate
+    200 nm magnetic stripes in a uniformly illuminated 50 µm square SiN window rotated 45°
+    with vertical linear polarization, projected multilayer Jones transmission,
+    finite-distance Fresnel diffraction and pixel-integrated SAXS on a
+    1300 × 1300 detector at 40 cm.
 
 Scattering notebooks 1–16 expose `detector_propagation_method="fraunhofer"`
 near the top. Choose `"rayleigh_sommerfeld"` for finite-distance propagation
@@ -90,8 +111,13 @@ assembles Born and multislice signals in 3D reciprocal space. This focused
 benchmark uses explicit Ewald sampling and angular-spectrum far fields instead
 of the detector-model selector described for tutorials 1–16 above.
 The [paper workspace](../paper/scattering_calculator/README.md) includes a
-manuscript draft and figure notebooks for FTH, spectroscopy, polarization
-formalisms, and detector artifacts.
+manuscript draft, an API guide and a basic normal-incidence FTH walkthrough,
+followed by hyperspectral imaging, interaction/propagation options and validation.
+The earlier paper material is preserved in a dated backup.
+
+- [19 — Multichromatic illumination](19_multichromatic_illumination.ipynb):
+  simulate a 780 eV fundamental plus 1560 eV harmonic independently, then combine
+  their ideal detector intensities in one exposure.
 
 ## Magnetic states at a fixed energy
 

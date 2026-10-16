@@ -253,7 +253,6 @@ class wavefronts:
         intermediate_wavefields = [] if store_intermediate_wavefields else None
 
         for iz in range(Nz):
-            #print(iz)
             dz = thicknesses[iz]
             # Local Jones interaction
             if dynamic_eps_stack:
@@ -286,38 +285,41 @@ class wavefronts:
                 intermediate_wavefields.append(E_in.copy())
 
             # Free-space propagation between slices
-            if iz < Nz - 1:
-                if propagate:
-                    if multislice_propagation_roi and self.aperture_support_regions:
-                        E_in = self.propagate_free_space_jones_roi(
-                            E_in,
-                            wavelength,
-                            dz,
-                            pixel_size,
-                            self.aperture_support_regions,
-                            roi_padding_px=multislice_propagation_roi_padding_px,
-                            merge_overlaps=multislice_propagation_roi_merge_overlaps,
-                            padding_px=propagation_padding_px,
-                            padding_mode=propagation_padding_mode,
-                            absorber_width_px=propagation_absorber_width_px,
-                            absorber_strength=propagation_absorber_strength,
-                            absorber_profile=propagation_absorber_profile,
-                        )
-                    else:
-                        E_in = self.propagate_free_space_jones(
-                            E_in,
-                            wavelength,
-                            dz,
-                            pixel_size,
-                            padding_px=propagation_padding_px,
-                            padding_mode=propagation_padding_mode,
-                            absorber_width_px=propagation_absorber_width_px,
-                            absorber_strength=propagation_absorber_strength,
-                            absorber_profile=propagation_absorber_profile,
-                        )
-                elif jones_apply_zero_order_phase:
-                    k0 = 2 * np.pi / wavelength
-                    E_in = E_in * np.exp(-1j * k0 * float(dz))
+            # The exit plane is immediately after the final material slice.
+            if iz == Nz - 1:
+                continue
+
+            if propagate:
+                if multislice_propagation_roi and self.aperture_support_regions:
+                    E_in = self.propagate_free_space_jones_roi(
+                        E_in,
+                        wavelength,
+                        dz,
+                        pixel_size,
+                        self.aperture_support_regions,
+                        roi_padding_px=multislice_propagation_roi_padding_px,
+                        merge_overlaps=multislice_propagation_roi_merge_overlaps,
+                        padding_px=propagation_padding_px,
+                        padding_mode=propagation_padding_mode,
+                        absorber_width_px=propagation_absorber_width_px,
+                        absorber_strength=propagation_absorber_strength,
+                        absorber_profile=propagation_absorber_profile,
+                    )
+                else:
+                    E_in = self.propagate_free_space_jones(
+                        E_in,
+                        wavelength,
+                        dz,
+                        pixel_size,
+                        padding_px=propagation_padding_px,
+                        padding_mode=propagation_padding_mode,
+                        absorber_width_px=propagation_absorber_width_px,
+                        absorber_strength=propagation_absorber_strength,
+                        absorber_profile=propagation_absorber_profile,
+                    )
+            elif jones_apply_zero_order_phase:
+                k0 = 2 * np.pi / wavelength
+                E_in = E_in * np.exp(-1j * k0 * float(dz))
 
         self.intermediate_wavefields = (
             np.stack(intermediate_wavefields, axis=0)

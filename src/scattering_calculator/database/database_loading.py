@@ -38,6 +38,7 @@ class material_params:
         refractive_indices: dict[str, complex] = None,
         materials: list[str] = None,
         x_ray_energy: float = None,
+        db_path: str | Path | None = None,
     ) -> None:
 
         # If both refractive_indices and materials are provided, use refractive_indices (backward compatible)
@@ -51,12 +52,16 @@ class material_params:
             Input value for ``materials``.
         x_ray_energy : float
             Input value for ``x_ray_energy``.
+        db_path : str or Path or None
+            Refractive-index dataset root; None uses bundled material files.
 
         Returns
         -------
         None
             The function completes in place.
         """
+        self.db_path = Path(db_path) if db_path is not None else None
+        self.optical_response_database = {}
         if refractive_indices is not None:
             self.database = refractive_indices
             self.x_ray_energy = None
@@ -64,7 +69,7 @@ class material_params:
             # Load from database using material names and energy
             self.x_ray_energy = x_ray_energy
             self.database = self._load_refractive_indices_from_db(
-                materials, x_ray_energy
+                materials, x_ray_energy, db_path=self.db_path
             )
         else:
             raise ValueError(
@@ -103,7 +108,9 @@ class material_params:
         ndarray of shape (3,) and dtype complex128
             ``[n_total, n_circ, n_lin]`` where
             ``n_total = 1 - delta - i*beta`` (X-ray optics convention),
-            ``n_circ = -delta_c - i*beta_c``, and ``n_lin = 0`` (reserved).
+            ``n_circ = -delta_c - i*beta_c``. Named magnetic circular/linear
+            channel tables override historical values when present; otherwise
+            the original Co circular response and zero linear channel remain.
         """
         if db_path is None:
             db_path = (
@@ -137,35 +144,186 @@ class material_params:
         folder_name = material_mapping.get(material_name, material_name)
         material_dir = db_path / folder_name
 
-        if material_name == "Co" and 770 < energy < 805:
+        legacy_co_files = ("delta_c", "beta_c", "delta", "beta")
+        if (
+            material_name == "Co"
+            and 770 < energy < 805
+            and all(
+                (material_dir / f"{folder_name}_{suffix}.txt").is_file()
+                for suffix in legacy_co_files
+            )
+        ):
             data = np.loadtxt(material_dir / f"{folder_name}_delta_c.txt", skiprows=2)
-            interp_delta_c = interp1d(data[:, 0], data[:, 1] * 1e-3, kind="linear", fill_value="extrapolate")
+            interp_delta_c = interp1d(
+                data[:, 0], data[:, 1] * 1e-3, kind="linear", fill_value="extrapolate"
+            )
 
             data = np.loadtxt(material_dir / f"{folder_name}_beta_c.txt", skiprows=2)
-            interp_beta_c = interp1d(data[:, 0], data[:, 1] * 1e-3, kind="linear", fill_value="extrapolate")
+            interp_beta_c = interp1d(
+                data[:, 0], data[:, 1] * 1e-3, kind="linear", fill_value="extrapolate"
+            )
 
             data = np.loadtxt(material_dir / f"{folder_name}_delta.txt", skiprows=2)
-            interp_delta = interp1d(data[:, 0], data[:, 1] * 1e-3, kind="linear", fill_value="extrapolate")
+            interp_delta = interp1d(
+                data[:, 0], data[:, 1] * 1e-3, kind="linear", fill_value="extrapolate"
+            )
 
             data = np.loadtxt(material_dir / f"{folder_name}_beta.txt", skiprows=2)
-            interp_beta = interp1d(data[:, 0], data[:, 1] * 1e-3, kind="linear", fill_value="extrapolate")
+            interp_beta = interp1d(
+                data[:, 0], data[:, 1] * 1e-3, kind="linear", fill_value="extrapolate"
+            )
         else:
             data = np.loadtxt(material_dir / f"{folder_name}.txt", skiprows=2)
-            interp_delta = interp1d(data[:, 0], data[:, 1], kind="linear", fill_value="extrapolate")
-            interp_beta = interp1d(data[:, 0], data[:, 2], kind="linear", fill_value="extrapolate")
-            interp_delta_c = interp1d(data[:, 0], data[:, 1] * 0, kind="linear", fill_value="extrapolate")
-            interp_beta_c = interp1d(data[:, 0], data[:, 2] * 0, kind="linear", fill_value="extrapolate")
+            interp_delta = interp1d(
+                data[:, 0], data[:, 1], kind="linear", fill_value="extrapolate"
+            )
+            interp_beta = interp1d(
+                data[:, 0], data[:, 2], kind="linear", fill_value="extrapolate"
+            )
+            interp_delta_c = interp1d(
+                data[:, 0], data[:, 1] * 0, kind="linear", fill_value="extrapolate"
+            )
+            interp_beta_c = interp1d(
+                data[:, 0], data[:, 2] * 0, kind="linear", fill_value="extrapolate"
+            )
 
+        # Named material channels use the same energy lookup as the historical
+        # magnetic files. Missing optional magnetic channels retain legacy values.
+        circular = material_params.load_optical_response(
+            material_name, "magnetic_circular", energy, db_path, required=False
+        )
+        linear = material_params.load_optical_response(
+            material_name, "magnetic_linear", energy, db_path, required=False
+        )
         return np.array(
             [
                 1.0 - float(interp_delta(energy)) - 1j * float(interp_beta(energy)),
-                -float(interp_delta_c(energy)) - 1j * float(interp_beta_c(energy)),
-                0j,
+                (-float(interp_delta_c(energy)) - 1j * float(interp_beta_c(energy)))
+                if circular is None
+                else circular,
+                0j if linear is None else linear,
             ]
         )
 
+    @staticmethod
+    def optical_response_path(material, channel, db_path=None):
+        """Locate a named channel beside the material's refractive-index files.
+
+        Parameters
+        ----------
+        material : str
+            Material dataset name; SiN aliases Si3N4 as in the base loader.
+        channel : str
+            Magnetic, natural or ferroelectric response channel.
+        db_path : str or Path or None
+            Dataset root, or None for the bundled refractive-index datasets.
+
+        Returns
+        -------
+        Path
+            Three-column energy/delta/beta response table.
+        """
+        channels = (
+            "magnetic_circular",
+            "magnetic_linear",
+            "natural_linear",
+            "natural_circular",
+            "ferroelectric",
+        )
+        if channel not in channels:
+            raise ValueError(f"Unknown material response channel: {channel!r}")
+        root = (
+            Path(db_path)
+            if db_path is not None
+            else (
+                Path(__file__).resolve().parent
+                / "material_parameter"
+                / "refractive_indexes"
+            )
+        )
+        name = "Si3N4" if material == "SiN" else material
+        if Path(name).name != name or name in (".", ".."):
+            raise ValueError("Material must be a dataset name, not a path")
+        return root / name / f"{name}_{channel}.txt"
+
+    @staticmethod
+    def load_optical_response(
+        material, channel, energy, db_path=None, *, required=True
+    ):
+        """Interpolate one dataset channel as -delta(E)-i beta(E).
+
+        Parameters
+        ----------
+        material, channel : str
+            Material name and response channel.
+        energy : float
+            Physical photon energy in eV.
+        db_path : str or Path or None
+            Same dataset root used for isotropic and magnetic optical constants.
+        required : bool
+            Raise on missing data; False is for legacy optional magnetic channels.
+
+        Returns
+        -------
+        complex or None
+            Dimensionless index increment. No channel extrapolation is allowed.
+        """
+        path = material_params.optical_response_path(material, channel, db_path)
+        if not path.is_file():
+            if not required:
+                return None
+            raise FileNotFoundError(
+                f"Missing {channel} refractive-index dataset for {material}: {path}"
+            )
+        table = np.loadtxt(path, skiprows=2, ndmin=2)
+        if (
+            table.ndim != 2
+            or table.shape[0] < 2
+            or table.shape[1] != 3
+            or not np.isfinite(table).all()
+            or np.any(table[:, 0] <= 0)
+            or np.any(np.diff(table[:, 0]) <= 0)
+        ):
+            raise ValueError(
+                f"Expected increasing positive energy_eV, delta, beta columns in {path}"
+            )
+        if (
+            energy is None
+            or not np.isfinite(energy)
+            or not table[0, 0] <= energy <= table[-1, 0]
+        ):
+            raise ValueError(
+                f"Photon energy {energy} eV is outside material response dataset {path}"
+            )
+        delta = np.interp(energy, table[:, 0], table[:, 1])
+        beta = np.interp(energy, table[:, 0], table[:, 2])
+        return complex(-delta, -beta)
+
+    def get_optical_response(self, material, channel):
+        """Look up a response from this run's energy-dependent material database.
+
+        Parameters
+        ----------
+        material, channel : str
+            Material and named optical channel; spatial order is supplied separately.
+
+        Returns
+        -------
+        complex
+            Cached dataset value at the material database's current energy.
+        """
+        key = (material, channel)
+        if key not in self.optical_response_database:
+            self.optical_response_database[key] = self.load_optical_response(
+                material, channel, self.x_ray_energy, self.db_path
+            )
+        return self.optical_response_database[key]
+
     def _load_refractive_indices_from_db(
-        self, materials: list[str], x_ray_energy: float, db_path: str | Path | None = None
+        self,
+        materials: list[str],
+        x_ray_energy: float,
+        db_path: str | Path | None = None,
     ) -> dict:
         """Load refractive indices for multiple materials from the database.
 

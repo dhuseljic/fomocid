@@ -116,12 +116,14 @@ class CompactDielectricTensorStack:
 
 @dataclass(frozen=True)
 class DynamicProjectedDielectricTensorStack:
-    """Magnetic response stack projected onto a local beam direction at runtime."""
+    """Magnetic and optional nonmagnetic channels projected onto a beam direction."""
 
     eps_iso: NDArray[np.complex128]
     gyrotropic_vector: NDArray[np.complex128]
     linear_tensor: NDArray[np.complex128]
     beam_direction: NDArray[np.float64]
+    structural_tensor: NDArray[np.complex128] | None = None
+    natural_gyration: NDArray[np.complex128] | None = None
     aperture_support_regions: tuple[tuple[slice, slice], ...] | None = None
 
     @property
@@ -183,8 +185,24 @@ class DynamicProjectedDielectricTensorStack:
         self,
         layer_idx: int,
         k_map: NDArray[np.float64] | None = None,
+        polarization_basis: tuple[ArrayLike, ArrayLike] | None = None,
     ) -> NDArray[np.complex128]:
-        """Project one layer onto the local transverse Jones basis."""
+        """Project magnetic, structural and natural-optical channels together.
+
+        Parameters
+        ----------
+        layer_idx : int
+            Propagation slice to evaluate.
+        k_map : ndarray or None
+            Local unit propagation directions, or None for nominal direction.
+        polarization_basis : tuple or None
+            Validated fixed transverse axes, or None to construct the local basis.
+
+        Returns
+        -------
+        ndarray
+            Total transverse dielectric tensor for the slice.
+        """
         if k_map is None:
             k_map = self._constant_direction_map()
         k_map = np.asarray(k_map, dtype=float)
@@ -194,6 +212,8 @@ class DynamicProjectedDielectricTensorStack:
                 f"{k_map.shape} for layer shape {self.eps_iso.shape[1:3]}."
             )
         e1, e2, k = self._transverse_basis(k_map)
+        if polarization_basis is not None:
+            e1, e2 = (np.broadcast_to(axis, k.shape) for axis in polarization_basis)
         eps_iso = self.eps_iso[layer_idx]
         g = self.gyrotropic_vector[layer_idx]
         q = self.linear_tensor[layer_idx]
@@ -208,6 +228,21 @@ class DynamicProjectedDielectricTensorStack:
         eps[..., 1, 1] = eps_iso - q11 + q22
         eps[..., 0, 1] = 1.0j * gk + 2.0 * q12
         eps[..., 1, 0] = -1.0j * gk + 2.0 * q12
+
+        # Nonmagnetic linear anisotropy is a full dyadic, independent of m.
+        if self.structural_tensor is not None:
+            tensor = self.structural_tensor[layer_idx]
+            eps[..., 0, 0] += np.einsum('...i,...ij,...j->...', e1, tensor, e1)
+            eps[..., 1, 1] += np.einsum('...i,...ij,...j->...', e2, tensor, e2)
+            offdiagonal = np.einsum('...i,...ij,...j->...', e1, tensor, e2)
+            eps[..., 0, 1] += offdiagonal
+            eps[..., 1, 0] += offdiagonal
+        if self.natural_gyration is not None:
+            # Reciprocal optical activity: g_natural(k) = G k, not a fixed
+            # magnetization-like axial vector. G includes the energy dependence.
+            circular = np.einsum('...i,...ij,...j->...', k, self.natural_gyration[layer_idx], k)
+            eps[..., 0, 1] += 1j * circular
+            eps[..., 1, 0] -= 1j * circular
         return eps
 
     def materialize_layer(self, layer_idx: int) -> NDArray[np.complex128]:
@@ -808,6 +843,7 @@ class Structure:
             The function completes in place.
         """
         self.name = name
+        self.optical_responses = ()
         self.material_params = material_params
         self.sample_shape = sample_shape
         self.real_space_pixel_size = real_space_pixel_size
@@ -1292,28 +1328,67 @@ class Structure:
     def _dynamic_projected_dielectric_tensor_stack(
         self,
         beam_direction: ArrayLike | None = None,
+        magnetic_support: NDArray[np.bool_] | None = None,
     ) -> DynamicProjectedDielectricTensorStack:
-        """Build direction-independent channels for local-k Jones projection."""
+        """Assemble magnetic and opt-in nonmagnetic channels before projection.
+
+        Parameters
+        ----------
+        beam_direction : array-like or None
+            Nominal lab-frame propagation direction; None selects +z.
+        magnetic_support : ndarray or None
+            Optional normal-incidence magnetic support mask. Structural and
+            natural contributions remain active throughout their material.
+
+        Returns
+        -------
+        DynamicProjectedDielectricTensorStack
+            Response channels for nominal or evolving local-direction projection.
+        """
         if self.mask is None or self.magnetization is None:
             raise ValueError("mask and magnetization must be assigned before tensor projection.")
 
         if beam_direction is None:
             beam_direction = (0.0, 0.0, 1.0)
         k = self._normalize_beam_direction(beam_direction)
-        fractions, thicknesses = self._tilted_layer_fractions()
+        responses = getattr(self, "optical_responses", ())
         mask = np.asarray(self.mask, dtype=float)
+        aligned_response = (
+            bool(responses) and np.isclose(float(getattr(self, 'sample_tilt_theta', 0.)), 0.)
+            and getattr(self, 'sample_tilt_simulation_z_extent', None) is None
+            and np.allclose(getattr(self, 'sample_tilt_center_offset', (0., 0., 0.)), 0.)
+        )
+        # An aligned stack has one material slice per propagation slice. Avoid
+        # allocating a quadratic (propagation slice × material slice) volume.
+        if aligned_response:
+            fractions = None
+            thicknesses = list(self.layer_thicknesses)
+        else:
+            fractions, thicknesses = self._tilted_layer_fractions()
         magnetization = np.asarray(self.magnetization, dtype=float)
         tilted_magnetization = getattr(self, "tilted_magnetization", None)
         indices = np.asarray(self.layer_refractive_indices, dtype=complex)
-        nz, ny, nx, n_layers = fractions.shape
+        if fractions is None:
+            nz, ny, nx = mask.shape
+            n_layers = nz
+        else:
+            nz, ny, nx, n_layers = fractions.shape
         eps_iso = np.zeros((nz, ny, nx), dtype=complex)
         gyrotropic_vector = np.zeros((nz, ny, nx, 3), dtype=complex)
         linear_tensor = np.zeros((nz, ny, nx, 3, 3), dtype=complex)
         material_fraction = np.zeros((nz, ny, nx), dtype=float)
         tol = 1e-14
+        structural_tensor = (np.zeros_like(linear_tensor)
+                             if any(r.kind != 'natural_circular' for r in responses) else None)
+        natural_gyration = (np.zeros_like(linear_tensor)
+                            if any(r.kind == 'natural_circular' for r in responses) else None)
 
         for layer_idx in range(n_layers):
-            layer_fraction = fractions[..., layer_idx] * mask[layer_idx]
+            if fractions is None:
+                layer_fraction = np.zeros_like(mask)
+                layer_fraction[layer_idx] = mask[layer_idx]
+            else:
+                layer_fraction = fractions[..., layer_idx] * mask[layer_idx]
             material_fraction += layer_fraction
             if not np.any(layer_fraction > tol):
                 continue
@@ -1329,6 +1404,9 @@ class Structure:
                 (nz, ny, nx),
             )
 
+            if magnetic_support is not None:
+                layer_m = layer_m * magnetic_support[None, ..., None]
+
             eps_iso += layer_fraction * eps0
             if abs(eps_c) > tol:
                 gyrotropic_vector += (
@@ -1342,6 +1420,18 @@ class Structure:
                     * layer_m[..., None, :]
                 )
 
+            for response in responses:
+                if response.material != self.layer_names[layer_idx]:
+                    continue
+                increment = self.material_params.get_optical_response(response.material, response.kind)
+                axis_tensor = response.spatial_tensor(mask.shape, layer_idx)
+                # Axis maps are defined on the material's transverse grid in lab
+                # components, following the existing magnetization-map convention.
+                target = natural_gyration if response.kind == 'natural_circular' else structural_tensor
+                for iz in np.flatnonzero(np.any(layer_fraction > tol, axis=(1, 2))):
+                    target[iz] += (layer_fraction[iz, ..., None, None]
+                                   * 2 * n0 * increment * axis_tensor)
+
         vacuum_fraction = np.clip(1.0 - material_fraction, 0.0, 1.0)
         eps_iso += vacuum_fraction
         self._propagation_layer_thicknesses = thicknesses
@@ -1352,6 +1442,8 @@ class Structure:
             gyrotropic_vector=gyrotropic_vector,
             linear_tensor=linear_tensor,
             beam_direction=k,
+            structural_tensor=structural_tensor,
+            natural_gyration=natural_gyration,
         )
 
     def dielectric_tensor_mixed(self, n, theta=0.0):
@@ -1711,7 +1803,10 @@ class Structure:
 
         The 3-D ``mask`` still controls whether material or vacuum is present at
         each layer/pixel. Vacuum pixels are set to an identity dielectric tensor
-        after the magnetic terms have been applied.
+        after the magnetic terms have been applied. Optional nonmagnetic
+        contributions in optical_responses are added before transmission using
+        the same directional projection. They use dense response channels and
+        are not restricted to the magnetic aperture support.
 
         Parameters
         ----------
@@ -1748,6 +1843,33 @@ class Structure:
         ndarray of shape (Nz,Ny,Nx, 2, 2)
             Final dielectric tensor stored in ``self.final_dielectric_tensor``.
         """
+
+        if getattr(self, "optical_responses", ()):
+            # Preserve the existing normal-incidence magnetic support model;
+            # additional structural response is applied over its full material.
+            magnetic_support = None
+            if (not local_k_projection and beam_direction is None
+                    and np.isclose(float(getattr(self, 'sample_tilt_theta', 0.)), 0.)
+                    and getattr(self, 'sample_tilt_simulation_z_extent', None) is None
+                    and getattr(self, 'tilted_magnetization', None) is None):
+                magnetic_support = np.any(np.abs(1. - self.mask) > 1e-14, axis=0)
+                if not np.any(magnetic_support):
+                    magnetic_support = np.ones(self.mask.shape[1:], dtype=bool)
+            stack = self._dynamic_projected_dielectric_tensor_stack(
+                beam_direction, magnetic_support=magnetic_support)
+            if local_k_projection:
+                if beam_polarization_basis is not None:
+                    raise ValueError('A fixed polarization basis cannot be combined with local-k projection')
+                self.final_dielectric_tensor = stack
+            elif beam_polarization_basis is not None:
+                e1, e2, _ = self._beam_transverse_basis(
+                    stack.beam_direction, beam_polarization_basis=beam_polarization_basis)
+                self.final_dielectric_tensor = np.stack([
+                    stack.project_layer(i, polarization_basis=(e1, e2)) for i in range(len(stack))
+                ])
+            else:
+                self.final_dielectric_tensor = stack.materialize()
+            return
 
         if local_k_projection:
             self.final_dielectric_tensor = self._dynamic_projected_dielectric_tensor_stack(
@@ -1811,6 +1933,19 @@ class Structure:
             all layer patches up front.
         """
         from scattering_calculator.beam_propagator import simple_propagation
+
+        if getattr(self, "optical_responses", ()):
+            from scattering_calculator.experimental_conditions.light_beam import polarization_vector
+            self.calculate_final_dielectric_tensor(compact=False)
+            tensor = self.final_dielectric_tensor
+            polarization = polarization_vector(pol)
+            transmitted = np.einsum('...ij,j->...i', tensor, polarization)
+            eigenvalue = np.einsum('i,...i->...', polarization.conj(), transmitted)
+            residual = transmitted - eigenvalue[..., None] * polarization
+            if not np.allclose(residual, 0, rtol=0, atol=1e-12):
+                raise ValueError('Optical response mixes this scalar polarization; use Jones or Stokes')
+            self.final_scalar_refractive_index = np.sqrt(eigenvalue)
+            return
 
         use_tilted_voxelization = (
             not np.isclose(float(getattr(self, "sample_tilt_theta", 0.0)), 0.0)

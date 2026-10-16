@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from scattering_calculator.experimental_conditions import detector, light_beam
 from scattering_calculator.sample_generator import pattern_generator
 from scattering_calculator.sample_generator import structures
+from scattering_calculator.sample_generator.optical_response import OpticalResponseConfig
 from scattering_calculator.beam_propagator import (
     Jones_propagator,
     Stokes_propagator,
@@ -103,7 +104,7 @@ class XRayConfig(_ConfigMixin):
     energy : float
         Photon energy in eV.
     photon_flux : float
-        Photon flux in photons per pulse.
+        Photon flux in photons per second.
     polarization : {"CR", "CL", "LH", "LV"}
         Polarization state of the beam. Legacy aliases ``"x"`` and ``"y"``
         are accepted for horizontal and vertical linear polarization.
@@ -122,6 +123,7 @@ class XRayConfig(_ConfigMixin):
     photon_flux: float  # photons/s
     pol: Literal["CR", "CL", "LH", "LV", "x", "y"] = "CR"
     coherence_length: tuple[float, float] = (10e-6, 10e-6)  # m, (y, x)
+    linear_polarization_angle: float | None = None  # rad, +x towards +y
 
     def __post_init__(self) -> None:
         """Handle the internal post init operation.
@@ -136,9 +138,11 @@ class XRayConfig(_ConfigMixin):
         None
             The function completes in place.
         """
-        if self.energy <= 0:
+        if self.linear_polarization_angle is not None and not np.isfinite(self.linear_polarization_angle).all():
+            raise ValueError("linear_polarization_angle must be finite")
+        if np.any(np.asarray(self.energy) <= 0):
             raise ValueError(f"energy must be positive, got {self.energy}")
-        if self.photon_flux <= 0:
+        if np.any(np.asarray(self.photon_flux) <= 0):
             raise ValueError(f"photon_flux must be positive, got {self.photon_flux}")
         if np.isscalar(self.coherence_length):
             self.coherence_length = (
@@ -154,7 +158,8 @@ class XRayConfig(_ConfigMixin):
             raise ValueError(
                 f"coherence_length must be positive, got {self.coherence_length}"
             )
-        if self.pol not in ["CR", "CL", "LH", "LV", "x", "y"]:
+        if any(state not in ["CR", "CL", "LH", "LV", "x", "y"]
+               for state in (self.pol if isinstance(self.pol, list) else [self.pol])):
             raise ValueError(
                 f"Polarisation must be one of CR, CL, LH, LV, x, or y; got {self.pol}"
             )
@@ -361,11 +366,20 @@ class DetectorConfig(_ConfigMixin):
         ``qx = k * x / z`` and ``qy = k * y / z``. If ``False``, include the
         flat-detector angular q distortion. Default ``False`` preserves the
         original behavior.
+    projection_energy : float or None
+        Detector q-coordinate energy in eV; None follows the physical source.
+        Finite-distance diffraction always uses the physical source wavelength.
     detector_propagation_method : {"fraunhofer", "rayleigh_sommerfeld"}
         Default far-field FFT with detector projection, or direct finite-distance
         scalar diffraction. Rayleigh--Sommerfeld uses coherent fields or the
         retained Stokes mode carriers and physical pixel areas; its pairwise
         integration can be slow.
+
+    detector_params : dict
+        counts_per_photon accepts a positive scalar ADU/photon or a callable of
+        physical energy in eV. nonlinear_response optionally maps the summed
+        linear ADU in one frame to nonlinear ADU, before readout/ADC clipping.
+        None keeps linear response. Mixed-energy photons retain their own gains.
 
     Attributes
     ----------
@@ -426,6 +440,9 @@ class DetectorConfig(_ConfigMixin):
     detector_pixel_footprint_samples: int = 3
     ignore_flat_detector_curvature: bool = False
     detector_propagation_method: Literal["fraunhofer", "rayleigh_sommerfeld"] = "fraunhofer"
+    projection_energy: float | None = None  # eV; coordinate convention only, None follows source
+    analyzer_angle: float | None = None  # rad, +x towards +y; None disables it
+    save_detected_hologram_without_beamstop: bool = False
 
     def __post_init__(self) -> None:
         """Handle the internal post init operation.
@@ -440,7 +457,11 @@ class DetectorConfig(_ConfigMixin):
         None
             The function completes in place.
         """
-        if self.detector_propagation_method not in ("fraunhofer", "rayleigh_sommerfeld"):
+        if self.analyzer_angle is not None and not np.isfinite(self.analyzer_angle).all():
+            raise ValueError("analyzer_angle must be finite")
+        if any(method not in ("fraunhofer", "rayleigh_sommerfeld") for method in
+               (self.detector_propagation_method if isinstance(self.detector_propagation_method, list)
+                else [self.detector_propagation_method])):
             raise ValueError("Unknown detector_propagation_method")
         if (self.detector_propagation_method == "rayleigh_sommerfeld"
                 and self.ignore_flat_detector_curvature):
@@ -448,9 +469,9 @@ class DetectorConfig(_ConfigMixin):
                              "ignore_flat_detector_curvature must be False")
         if any(s <= 0 for s in self.shape):
             raise ValueError(f"shape dimensions must be positive, got {self.shape}")
-        if self.pixel_size <= 0:
+        if np.any(np.asarray(self.pixel_size) <= 0):
             raise ValueError(f"pixel_size must be positive, got {self.pixel_size}")
-        if self.sample_to_detector_distance <= 0:
+        if np.any(np.asarray(self.sample_to_detector_distance) <= 0):
             raise ValueError(
                 f"sample_to_detector_distance must be positive, got {self.sample_to_detector_distance}"
             )
@@ -533,7 +554,9 @@ class DetectorConfig(_ConfigMixin):
                 self.wavefront.exit_stokes_for_farfield[..., 0]
             )
         elif farfield_exit_wave is self.wavefront.exit_wave:
-            exit_intensity = np.sum(np.abs(exit_wavefield) ** 2)
+            # Normalize physical coherent channels, never the legacy scalar
+            # visualization proxy, whose amplitude is derived from intensity.
+            exit_intensity = np.sum(np.abs(farfield_exit_wave) ** 2)
         else:
             exit_intensity = np.sum(np.abs(farfield_exit_wave) ** 2)
         hologram_intensity = np.sum(self.wavefront.hologram)
@@ -547,7 +570,7 @@ class DetectorConfig(_ConfigMixin):
         self,
         projection_beam_params: light_beam.beam_parameters | None = None,
     ) -> np.ndarray:
-        """Simulate the detection of the hologram on the detector, including noise and artifacts.
+        """Propagate to ideal detector pixels without applying acquisition effects.
 
         Parameters
         ----------
@@ -566,9 +589,12 @@ class DetectorConfig(_ConfigMixin):
             projection_beam_params
             or self.propagator.IlluminationConfig.beam_params
         )
+        hologram = self.wavefront.hologram
+        if self.analyzer_angle is not None and self.detector_propagation_method == "fraunhofer":
+            hologram = self._analyzed_farfield_intensity()
         self.hologram_exp = detector.detector_hologram(
             self.detector_layout,
-            self.wavefront.hologram,
+            hologram,
             beam_params,
             self.propagator.SampleConfig.real_space_pixel_size,
             getattr(self, "beamstop", None),
@@ -577,14 +603,53 @@ class DetectorConfig(_ConfigMixin):
             detector_params=self.detector_params,
             coherence_length=beam_params.coherence_length,
         )
+        # Gain uses physical energy, independently of a detector-coordinate override.
+        self.hologram_exp.photon_energy_eV = getattr(
+            self.propagator.IlluminationConfig.beam_params, "energy", None)
         if self.detector_propagation_method == "rayleigh_sommerfeld":
-            self._detect_rayleigh_sommerfeld(beam_params)
+            self._detect_rayleigh_sommerfeld(self.propagator.IlluminationConfig.beam_params)
         else:
             self.hologram_exp.gnomonic_projection(
                 use_pixel_footprint=self.use_detector_pixel_footprint,
                 pixel_footprint_samples=self.detector_pixel_footprint_samples,
                 ignore_flat_detector_curvature=self.ignore_flat_detector_curvature,
             )
+
+    def _analyzed_farfield_intensity(self):
+        """Project coherent far-field amplitudes onto the linear analyzer.
+
+        Incoherent Stokes carriers contribute intensities separately. Dividing
+        by the FFT pixel count preserves the unfiltered Parseval normalization;
+        the analyzer removes power rather than rescaling the transmitted image.
+
+        Parameters
+        ----------
+        None
+            Uses the configured wavefront and analyzer angle.
+
+        Returns
+        -------
+        ndarray
+            Analyzer-filtered intensity on the far-field FFT grid.
+        """
+        from scattering_calculator.utils.image_transformator import Fraunhofer_propagation_jones
+        from .experiment import analyze_jones
+
+        if self.propagator.propagator_method == "Stokes":
+            fields = [mode.exit_wave_for_farfield for mode in self.wavefront._coherent_modes]
+        else:
+            field = getattr(self.wavefront, "exit_wave_for_farfield", None)
+            if field is None:
+                field = self._detector_exit_field()
+            fields = [field]
+
+        intensity = None
+        for field in fields:
+            amplitude = Fraunhofer_propagation_jones(field)
+            transmitted = analyze_jones(amplitude, self.analyzer_angle)
+            power = np.abs(transmitted) ** 2
+            intensity = power if intensity is None else intensity + power
+        return intensity / intensity.size
 
     def _detector_exit_field(self):
         """Return coherent channels, including incoherent Stokes mode carriers."""
@@ -617,6 +682,9 @@ class DetectorConfig(_ConfigMixin):
                     self.detector_layout.detx + ox, self.detector_layout.dety + oy,
                 )
                 detector_field = operator.forward(field)
+                if self.analyzer_angle is not None:
+                    from .experiment import analyze_jones
+                    detector_field = analyze_jones(detector_field, self.analyzer_angle)
                 power = np.abs(detector_field) ** 2
                 if power.ndim > 2:
                     power = power.sum(axis=tuple(range(2, power.ndim)))
@@ -737,6 +805,7 @@ class SimulationConfig(_ConfigMixin):
     real_space_pixel_size: float = 10e-9  # m/px
     other_config: dict = field(default_factory=dict)
 
+
     def __post_init__(self) -> None:
         """Handle the internal post init operation.
 
@@ -752,7 +821,7 @@ class SimulationConfig(_ConfigMixin):
         """
         if any(s <= 0 for s in self.shape):
             raise ValueError(f"shape dimensions must be positive, got {self.shape}")
-        if self.real_space_pixel_size <= 0:
+        if np.any(np.asarray(self.real_space_pixel_size) <= 0):
             raise ValueError(
                 f"real_space_pixel_size must be positive, got {self.real_space_pixel_size}"
             )
@@ -798,6 +867,11 @@ class SampleConfig(_ConfigMixin):
         Human-readable label for the sample.
     comments : str or None
         Free-text annotation stored in the multilayer recipe.
+    refractive_index_database : str or None
+        Common dataset root for all optical channels; None uses bundled files.
+    optical_responses : tuple of OpticalResponseConfig
+        Optional natural linear/circular or ferroelectric-axis anisotropy.
+        Empty by default; contributions add to the existing magnetic tensor.
 
     Attributes
     ----------
@@ -809,17 +883,20 @@ class SampleConfig(_ConfigMixin):
         The assembled layered structure object, populated by ``setup()``.
     """
 
-    recipe: str = ("Recipe",)
-    sample_shape: tuple[int, int, int] | None = (None,)
-    real_space_pixel_size: float | None = (None,)
-    xray_config: XRayConfig | None = (None,)
-    sample_name: str | None = (None,)
-    comments: str | None = (None,)
+    recipe: str = "Recipe"
+    sample_shape: tuple[int, int, int] | None = None
+    real_space_pixel_size: float | None = None
+    xray_config: XRayConfig | None = None
+    sample_name: str | None = None
+    comments: str | None = None
     sample_tilt_theta: float = 0.0
     sample_tilt_axis: Literal["x", "y"] = "x"
     sample_tilt_voxel_size: float | None = None
     sample_tilt_antialias_samples: int = 3
     other_config: dict = field(default_factory=dict)
+    max_slice_thickness: float | None = None  # m; subdivide each recipe layer
+    refractive_index_database: str | None = None  # same material dataset root for all optical channels
+    optical_responses: tuple[OpticalResponseConfig, ...] = ()  # opt-in nonmagnetic anisotropy
 
     def setup(self) -> None:
         """Parse the recipe, load refractive indices, and build the layer stack.
@@ -849,27 +926,47 @@ class SampleConfig(_ConfigMixin):
                 )
             ),
             x_ray_energy=self.xray_config.energy,
+            db_path=self.refractive_index_database,
         )
 
         self.sample_structure = structures.Structure(
             name=self.sample_name,
             material_params=self.material_params,
-            sample_shape=self.sample_shape,
+            # Mutable component grids historically receive the discovered layer
+            # count in place; declarative tuple grids need a mutable copy.
+            sample_shape=list(self.sample_shape) if isinstance(self.sample_shape, tuple) else self.sample_shape,
             real_space_pixel_size=self.real_space_pixel_size,
         )
+        max_slice = getattr(self, "max_slice_thickness", None)
+        if max_slice is not None and (not np.isfinite(max_slice) or max_slice <= 0):
+            raise ValueError("max_slice_thickness must be finite and positive")
         for layer in self.multilayer_recipe.layers:
-            if layer.is_composite:
-                self.sample_structure.add_effective_layer(
-                    layer.material,
-                    layer.components,
-                )
-            else:
-                self.sample_structure.add_layer(layer.material, thickness=layer.thickness)
+            count = 1 if max_slice is None else max(1, int(np.ceil(layer.thickness / max_slice - 1e-12)))
+            for _ in range(count):
+                if layer.is_composite:
+                    self.sample_structure.add_effective_layer(
+                        layer.material, tuple((m, t / count) for m, t in layer.components),
+                    )
+                else:
+                    self.sample_structure.add_layer(layer.material, thickness=layer.thickness / count)
+        responses = tuple(
+            OpticalResponseConfig(**response) if isinstance(response, dict) else response
+            for response in self.optical_responses
+        )
+        for response in responses:
+            if not isinstance(response, OpticalResponseConfig):
+                raise TypeError('optical_responses must contain OpticalResponseConfig or dictionaries')
+            response.validate()
+            if response.material not in self.sample_structure.layer_names:
+                raise ValueError(f'Optical response material {response.material!r} is absent from the sample')
+            self.material_params.get_optical_response(response.material, response.kind)
+        self.sample_structure.optical_responses = responses
         self.sample_structure.set_sample_tilt(
             theta=self.sample_tilt_theta,
             axis=self.sample_tilt_axis,
             voxel_size=self.sample_tilt_voxel_size,
             antialias_samples=self.sample_tilt_antialias_samples,
+            **self.other_config.get("tilt_geometry", {}),
         )
 
     def assign_magnetic_pattern(self, magnetic_vector_field: np.ndarray) -> None:
@@ -918,7 +1015,9 @@ class MagneticPatternConfig(_ConfigMixin):
         Physical pixel size in metres. Used to convert physical-length entries
         in ``pattern_config`` to pixel units before calling the generator.
     pattern_config : dict
-        Pattern parameters forwarded to the generator. Physical-length entries
+        Shared controls include period, radius, angle, amplitude and sigma.
+        Period is a full repeat (twice a single stripe width). Compatibility
+        aliases are resolved before the generator boundary. Physical-length entries
         are specified in metres and converted to pixels automatically for the
         selected pattern type. ``sigma`` is converted for every generator that
         supports Gaussian domain-wall smoothing, including both skyrmion
@@ -944,11 +1043,15 @@ class MagneticPatternConfig(_ConfigMixin):
         "binary_labyrinth_pattern",
         "saturated_pattern",
         "image_pattern",
+        "magnon_wave",
+        "smooth_domains",
+        "neel_lattice",
     ] = "skyrmion_pattern"
     shape: tuple[int, int] | None = None
     real_space_pixel_size: float | None = None
     pattern_config: dict = field(default_factory=dict)
     pattern_config_length: dict = field(default_factory=dict)
+    magnetic_materials: tuple[str, ...] = ("Co",)
 
     def setup(self):
         """Return the generator function selected by ``pattern_type_method``.
@@ -978,6 +1081,22 @@ class MagneticPatternConfig(_ConfigMixin):
             )
         return method
 
+    def resolved_pattern_config(self):
+        """Return shared physical parameter names, resolving compatibility aliases.
+
+        Parameters
+        ----------
+        None
+            Uses this component's pattern controls.
+
+        Returns
+        -------
+        dict
+            Canonical controls in metres and radians; conflicting aliases fail.
+        """
+        from .magnetic_parameters import canonical_parameters
+        return canonical_parameters(self.pattern_type_method, self.pattern_config, self.pattern_config_length)
+
     def create_pattern(self) -> tuple[np.ndarray, np.ndarray]:
         """Generate the magnetic pattern and store it on the instance.
 
@@ -996,15 +1115,13 @@ class MagneticPatternConfig(_ConfigMixin):
         None
             This function takes no explicit input parameters.
         """
+        if self.pattern_type_method in ("magnon_wave", "smooth_domains", "neel_lattice"):
+            from .experiment import vector_pattern
+            self.magnetic_pattern, self.pattern_coordinates = vector_pattern(self)
+            return self.magnetic_pattern, self.pattern_coordinates
         pattern_function = self.setup()
-        config = dict(self.pattern_config)
-        for key, value in self.pattern_config_length.items():
-            if key in config and not np.array_equal(config[key], value):
-                raise ValueError(
-                    f"Conflicting magnetic-pattern value for {key!r}: use only "
-                    "pattern_config. pattern_config_length is a legacy alias."
-                )
-            config[key] = value
+        from .magnetic_parameters import generator_parameters
+        config = generator_parameters(self.pattern_type_method, self.resolved_pattern_config())
         length_keys_by_method = {
             "wavy_stripe_pattern": {
                 "stripe_width",
@@ -1197,7 +1314,7 @@ class FrontApertureConfig(_ConfigMixin):
         types = self.aperture_config.get("apertures_type", None)
         radi = self.aperture_config.get("apertures_radius", None)
         centers = self.aperture_config.get("apertures_center", None)
-        sigmas = self.aperture_config.get("apertures_sigma", None)
+        sigmas = self._aperture_values("apertures_sigma", len(types), 0.0)
         angles = self._aperture_values("apertures_angle", len(types), 0.0)
         ellipticities = self._aperture_values("apertures_ellipticity", len(types), 1.0)
         roughnesses = self._aperture_values("apertures_roughness", len(types), 0.0)
@@ -1589,6 +1706,19 @@ class FrontApertureConfig(_ConfigMixin):
 
 
 @dataclass
+class SpectralComponentConfig:
+    """One mutually incoherent color; weights divide the total source photon flux.
+
+    Specify an absolute energy in eV, or an energy_factor relative to each scan
+    energy. Optional pol overrides the exposure polarization for this component.
+    """
+    energy: float | None = None
+    energy_factor: float = 1.
+    weight: float = 1.
+    pol: str | None = None
+
+
+@dataclass
 class IlluminationConfig(_ConfigMixin):
     """Configuration for the incident beam wavefield on the sample plane.
 
@@ -1596,19 +1726,38 @@ class IlluminationConfig(_ConfigMixin):
     ----------
     illumination_function : {"gaussian"} or None
         Spatial profile of the illumination. ``None`` produces a plane wave.
-    illumination_center : tuple of int
-        Centre of the illumination in pixels (row, col).
+    illumination_center : tuple of float
+        Centre of the illumination in metres (y, x) relative to the sample centre.
     illumination_config : dict
         Additional keyword arguments forwarded to the beam profile constructor
         (e.g. ``distance``, ``fwhm``, and ``alpha_beam=(alpha_y, alpha_x)`` for
         a Gaussian beam).
+    energies_eV : tuple of float or None
+        Energy scan for simulate_experiment. None uses the source's single energy.
+    spectral_components : sequence of SpectralComponentConfig or None
+        Simultaneous mutually incoherent colors, propagated individually and
+        summed as detector intensities. Weights divide the total source flux.
+        This collection is not a scan axis.
+    polarizations : tuple of str or None
+        Polarization scan for simulate_experiment. None uses the source state.
+        Explicit lists run all energy/state combinations. Component setup itself
+        builds one incident field; the common runner owns scan iteration.
     """
 
-    XRayConfig: XRayConfig
-    shape: tuple[int, int]
-    real_space_pixel_size: float
+    XRayConfig: XRayConfig | None = None
+    shape: tuple[int, int] | None = None
+    real_space_pixel_size: float | None = None
     illumination_function: Literal["gaussian"] | None = "gaussian"
     illumination_config: dict = field(default_factory=dict)
+    energies_eV: tuple[float, ...] | None = None
+    polarizations: tuple[str, ...] | None = None
+    spectral_components: tuple[SpectralComponentConfig, ...] | None = None
+
+    def _apply_linear_polarization_angle(self) -> None:
+        angle = self.XRayConfig.linear_polarization_angle
+        if angle is not None and self.XRayConfig.pol in ("LH", "LV", "x", "y"):
+            vector = np.array([np.cos(angle), np.sin(angle)], dtype=complex)
+            self.illumination.illumination_jones = self.illumination.illumination[..., None] * vector
 
     def _apply_illumination_function(self) -> None:
         """Apply the current illumination function to the existing illumination object.
@@ -1624,7 +1773,10 @@ class IlluminationConfig(_ConfigMixin):
             The function completes in place.
         """
         if self.illumination_function == "gaussian":
-            self.illumination.gauss_beam(**self.illumination_config)
+            profile = dict(self.illumination_config)
+            if profile.get("center") is None:
+                profile["center"] = (0., 0.)
+            self.illumination.gauss_beam(**profile)
         elif self.illumination_function in ("plane_wave", None):
             self.illumination.plane_wave(self.shape)
 
@@ -1686,6 +1838,7 @@ class IlluminationConfig(_ConfigMixin):
         self._apply_illumination_function()
         self._scale_illumination_to_photon_flux()
         self.illumination.get_illumination_jones()
+        self._apply_linear_polarization_angle()
 
     def update_polarization(self, pol: str) -> None:
         """Switch polarisation and recompute Jones vectors without rebuilding the wavefield.
@@ -1704,6 +1857,7 @@ class IlluminationConfig(_ConfigMixin):
         self.XRayConfig.pol = pol
         self.illumination.beam_parameters.pol = pol
         self.illumination.get_illumination_jones()
+        self._apply_linear_polarization_angle()
 
     def update_illumination_config(self, illumination_config: dict) -> None:
         """Update beam profile parameters and recompute the envelope and Jones vectors.
@@ -1725,6 +1879,7 @@ class IlluminationConfig(_ConfigMixin):
         self._apply_illumination_function()
         self._scale_illumination_to_photon_flux()
         self.illumination.get_illumination_jones()
+        self._apply_linear_polarization_angle()
 
     def update_energy(self, energy: float) -> None:
         """Update photon energy, recompute beam envelope and Jones vectors.
@@ -1750,6 +1905,7 @@ class IlluminationConfig(_ConfigMixin):
         self._apply_illumination_function()
         self._scale_illumination_to_photon_flux()
         self.illumination.get_illumination_jones()
+        self._apply_linear_polarization_angle()
 
     def update(self, new_xray_config: XRayConfig) -> None:
         """Update illumination from a new XRayConfig, calling only what changed.
@@ -1872,8 +2028,8 @@ class SamplePropagatorConfig(_ConfigMixin):
         a stack in RAM. The callback must not mutate the borrowed field.
     """
 
-    SampleConfig: SampleConfig
-    IlluminationConfig: IlluminationConfig
+    SampleConfig: SampleConfig | None = None
+    IlluminationConfig: IlluminationConfig | None = None
     propagator_method: Literal["Jones", "Scalar", "Stokes"] | None = "Jones"
     propagator_config: dict = field(default_factory=dict)
 
@@ -1893,7 +2049,10 @@ class SamplePropagatorConfig(_ConfigMixin):
                     "Far-field background padding only supports gaussian, "
                     "plane_wave, or None illumination functions."
                 )
-            return light_beam.scalar_to_jones(illum.illumination, beam_params.pol)
+            angle = self.IlluminationConfig.XRayConfig.linear_polarization_angle
+            if angle is not None and beam_params.pol in ("LH", "LV", "x", "y"):
+                return illum.illumination[..., None] * np.array([np.cos(angle), np.sin(angle)], dtype=complex)
+            return light_beam.scalar_to_jones(illum.illumination, beam_params.pol).astype(complex)
 
         original_shape = self.IlluminationConfig.shape
         original_unscaled = build_unscaled(original_shape)
@@ -1905,9 +2064,24 @@ class SamplePropagatorConfig(_ConfigMixin):
         scale = np.sqrt(scaled_power / unscaled_power)
         return build_unscaled(shape) * scale
 
-    def _background_exit_jones(self, shape: tuple[int, int]) -> np.ndarray:
-        """Build the ROI-consistent background exit wave on an extended grid."""
+    def _background_exit_jones(self, shape: tuple[int, int], polarization=None) -> np.ndarray:
+        """Build the transmitted background, including polarization conversion.
+
+        Parameters
+        ----------
+        shape : tuple
+            Extended transverse grid shape.
+        polarization : ndarray or None
+            Optional unit Jones vector for one incoherent polarization carrier.
+
+        Returns
+        -------
+        ndarray
+            Complex transmitted background on the extended grid.
+        """
         background = self._illumination_jones_for_shape(shape)
+        if polarization is not None:
+            background = Stokes_propagator._field_for_mode(background, 1., polarization)
         eps_stack = self.SampleConfig.sample_structure.final_dielectric_tensor
         thicknesses = self.SampleConfig.sample_structure.propagation_layer_thicknesses
         wavelength = self.IlluminationConfig.beam_params.wavelength
@@ -1916,6 +2090,19 @@ class SamplePropagatorConfig(_ConfigMixin):
         jones_apply_zero_order_phase = bool(
             self.propagator_config.get("jones_apply_zero_order_phase", True)
         )
+
+        if getattr(self.SampleConfig.sample_structure, "optical_responses", ()):
+            from scipy.linalg import expm, sqrtm
+            for iz, dz in enumerate(thicknesses):
+                tensor = (eps_stack.materialize_layer(iz) if hasattr(eps_stack, 'materialize_layer')
+                          else eps_stack[iz])
+                edge_tensor = np.asarray(tensor[0, 0], dtype=complex)
+                index_tensor = np.asarray(sqrtm(edge_tensor), dtype=complex)
+                transmission = expm(-1j * k0 * float(dz) * index_tensor)
+                background = np.einsum('ij,...j->...i', transmission, background)
+                if iz < len(thicknesses) - 1 and (propagate or jones_apply_zero_order_phase):
+                    background *= np.exp(-1j * k0 * float(dz))
+            return background
 
         if hasattr(eps_stack, "base_diagonal"):
             base_diagonal = eps_stack.base_diagonal
@@ -2109,6 +2296,15 @@ class SamplePropagatorConfig(_ConfigMixin):
                 (ny * farfield_oversampling, nx * farfield_oversampling)
             )
 
+        input_stokes = self.propagator_config.get('input_stokes')
+        background_modes = None
+        if farfield_oversampling > 1 and input_stokes is not None:
+            shape = tuple(n * farfield_oversampling for n in self.IlluminationConfig.shape)
+            background_modes = [
+                np.sqrt(weight) * self._background_exit_jones(shape, polarization=vector)
+                for weight, vector in Stokes_propagator._coherency_to_modes(input_stokes)
+            ]
+
         return Stokes_propagator.stokes_wavefronts(
             beam_parameters=self.IlluminationConfig.beam_params,
             eps_stack=self.SampleConfig.sample_structure.final_dielectric_tensor,
@@ -2154,11 +2350,19 @@ class SamplePropagatorConfig(_ConfigMixin):
             ),
             farfield_oversampling=farfield_oversampling,
             farfield_background_jones=farfield_background_jones,
-            input_stokes=self.propagator_config.get("input_stokes"),
+            input_stokes=input_stokes,
+            farfield_background_modes=background_modes,
         )
 
     def _scalar_propagation(self):
         """Propagate the configured beam using the scalar eigenmode approximation."""
+        if (self.SampleConfig.optical_responses
+                and self.IlluminationConfig.beam_params.pol in ('LH', 'LV', 'x', 'y')
+                and self.IlluminationConfig.XRayConfig.linear_polarization_angle is not None):
+            raise ValueError('Use Jones or Stokes for optical_responses with linear_polarization_angle')
+        if (self.SampleConfig.optical_responses and not np.allclose(
+                self.IlluminationConfig.illumination_config.get('alpha_beam', (0., 0.)), 0.)):
+            raise ValueError('Use Jones or Stokes for optical_responses with tilted illumination')
         farfield_oversampling = int(
             self.propagator_config.get("farfield_oversampling", 1)
         )
