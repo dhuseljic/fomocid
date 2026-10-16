@@ -93,12 +93,20 @@ different energies need not contribute equal charge. The simulator therefore
 forms S = sum g(E_a)N_a and applies **one** F to S. Applying F separately to each
 color or to expected photon means generally gives the wrong result.
 
-If F is nonlinear, each frame is independently sampled, converted, read out and
-thresholded before averaging. F(sum S_frame), F(mean S_frame) and
-mean F(S_frame) differ. Both linear and nonlinear acquisitions use the same single-frame detector code.
-Multiple frames are acquired independently, including their readout noise,
-artifacts and ADC clipping, before averaging. This also corrects the earlier
-aggregate-clipping approximation for a stack of linear frames.
+The default `measurement_config["acquisition_mode"] = "accumulated"` samples
+photons for all `number_frames` together and applies charge spreading once.
+For N frames, the nonlinear response is evaluated on the estimated average
+linear signal, F(S_total/N). Readout and sensor artifacts retain accumulated
+frame scaling; ADC clipping is applied to the estimated average output.
+This restores the fast accumulated acquisition approach. For nonlinear response
+and saturation, it approximates the average rather than reproducing per-frame
+statistics: F(mean S_frame) generally differs from mean F(S_frame).
+
+Set `measurement_config["acquisition_mode"] = "per_frame"` to independently
+sample, convert, read out and clip each physical frame before averaging. Use
+this slower mode when low-count nonlinear bias or saturation statistics matter.
+Gain and response callbacks describe one frame in either mode; they do not need
+to handle the frame count. With one frame, both modes use the same calculation.
 
 This is a calibrated characteristic-curve model. It can represent compression
 or a measured nonlinear transfer, including a piecewise gain regime supplied in

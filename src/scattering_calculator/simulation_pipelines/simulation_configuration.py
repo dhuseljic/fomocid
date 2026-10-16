@@ -432,6 +432,7 @@ class DetectorConfig(_ConfigMixin):
         default_factory=lambda: {
             "exposure_time": 1.0,
             "number_frames": 1,
+            "acquisition_mode": "accumulated",
             "max_counts_per_image": None,
         }
     )

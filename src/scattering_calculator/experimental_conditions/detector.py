@@ -390,6 +390,7 @@ class detector_hologram:
     DEFAULT_MEASUREMENT_CONFIG = {
         "exposure_time": 1.0,
         "number_frames": 1,
+        "acquisition_mode": "accumulated",
         "max_counts_per_image": None,
     }
     DEFAULT_DETECTOR_PARAMS = {
@@ -481,6 +482,7 @@ class detector_hologram:
             allowed_keys={
                 "exposure_time",
                 "number_frames",
+                "acquisition_mode",
                 "max_counts_per_image",
             },
         )
@@ -1029,8 +1031,11 @@ class detector_hologram:
 
         Physical ideal images are photon rates, not ADU. Colors are sampled
         independently, weighted by their energy-specific gains and then summed.
-        An optional nonlinear curve acts on the summed per-frame linear ADU;
-        it is never applied to an exposure mean or separately to each color.
+        By default, photons are accumulated over all frames and charge spreading
+        runs once. A nonlinear curve acts on the estimated average-frame linear
+        ADU, an approximation to the mean nonlinear response. Set measurement
+        acquisition_mode="per_frame" for explicit per-frame response and clipping.
+        Colors are summed before applying the response in either mode.
 
         Parameters
         ----------
@@ -1054,7 +1059,10 @@ class detector_hologram:
         response = getattr(self, "nonlinear_response", None)
         if response is not None and not callable(response):
             raise TypeError("nonlinear_response must be a callable of linear ADU, or None")
-        if self.number_frames > 1:
+        mode = getattr(self, "acquisition_mode", "accumulated")
+        if mode not in ("accumulated", "per_frame"):
+            raise ValueError("acquisition_mode must be 'accumulated' or 'per_frame'")
+        if self.number_frames > 1 and mode == "per_frame":
             self._acquire_frames(
                 rng, apply_beamstop_mask, apply_detector_threshold, store_no_beamstop
             )
@@ -1064,10 +1072,10 @@ class detector_hologram:
         # its own Poisson realization and ADU/photon before signals are summed.
         signal_adu = np.zeros_like(self.hologram_detector, dtype=float)
         for gain, expected_photons in self._expected_photon_components():
-            photons = rng.poisson(expected_photons).astype(np.int64)
+            photons = rng.poisson(expected_photons * self.number_frames).astype(np.int64)
             signal_adu += gain * self._spread_photons(photons, rng)
         if response is not None:
-            converted = np.asarray(response(signal_adu.copy()))
+            converted = np.asarray(response(signal_adu.copy() / self.number_frames))
             if np.iscomplexobj(converted):
                 raise ValueError("nonlinear_response must return real ADU")
             converted = converted.astype(float)
@@ -1079,20 +1087,20 @@ class detector_hologram:
                 ) from error
             if not np.isfinite(converted).all() or np.any(converted < 0):
                 raise ValueError("nonlinear_response must return finite nonnegative ADU")
-            signal_adu = converted.copy()
+            signal_adu = converted.copy() * self.number_frames
         artifact_seed = int(rng.integers(0, np.iinfo(np.uint32).max))
 
         # Draw one readout image and reuse it for the optional unmasked variant.
         readout_noise = 0.0
         if self.readout_noise_average > 0 or self.readout_noise_sigma > 0:
             readout_noise = np.random.normal(
-                self.readout_noise_average,
-                self.readout_noise_sigma,
+                self.readout_noise_average * self.number_frames,
+                self.readout_noise_sigma * np.sqrt(self.number_frames),
                 signal_adu.shape,
             )
 
         def finalize_detection(image, apply_mask=True, apply_threshold=True):
-            """Finish one physical frame using the same readout/artifact draws.
+            """Finish the accumulated exposure using shared readout/artifact draws.
 
             Parameters
             ----------
@@ -1104,7 +1112,7 @@ class detector_hologram:
             Returns
             -------
             ndarray
-                One acquired frame, before multi-frame averaging.
+                Acquired signal averaged over the requested frames.
             """
             detected = np.array(image, dtype=float, copy=True)
             if apply_mask:
@@ -1120,7 +1128,8 @@ class detector_hologram:
             # Round to integer counts and optionally cap at the camera threshold.
             detected = np.round(detected, 0)
             if apply_threshold:
-                detected = np.minimum(detected, self.detector_threshold)
+                detected = np.minimum(detected, self.detector_threshold * self.number_frames)
+            detected /= self.number_frames
 
             # Just making sure the final product is positive.
             detected[detected < 0] = 0

@@ -181,6 +181,7 @@ def test_nonlinearity_and_saturation_are_applied_before_frame_averaging():
         Checks per-frame Poisson sampling, conversion, clipping and averaging.
     """
     model = detector_model(2.0, lambda counts: counts**2, frames=3, rate=4.0)
+    model.acquisition_mode = "per_frame"
     model.detector_threshold = 70.0
     rng = np.random.default_rng(123)
     expected = []
@@ -370,3 +371,31 @@ def test_identity_response_and_default_linear_model_agree_for_multiple_frames():
     identity.add_noise()
     np.testing.assert_array_equal(linear.hologram_exp, identity.hologram_exp)
     assert linear.cosmic_ray_count == 0
+
+
+def test_accumulated_response_uses_average_frame_and_spreads_once():
+    from unittest import mock
+    model = detector_model(2., lambda signal: signal**2, frames=50, rate=4.)
+    photons = np.random.default_rng(123).poisson(np.full((12, 14), 200.))
+    expected = np.round((2 * photons / 50)**2 * 50) / 50
+    with mock.patch.object(model, "_spread_photons", wraps=model._spread_photons) as spread:
+        model.add_noise(store_no_beamstop=True)
+    assert spread.call_count == 1
+    np.testing.assert_array_equal(model.hologram_exp, expected)
+    np.testing.assert_array_equal(model.hologram_exp_no_beamstop, expected)
+
+
+def test_accumulated_linear_noise_has_frame_average_variance():
+    model = detector_model(2., frames=25, rate=40., shape=(400, 400))
+    model.add_noise()
+    assert abs(model.hologram_exp.mean() - 80.) < .05
+    assert abs(model.hologram_exp.var() - 4 * 40 / 25) < .1
+
+
+def test_acquisition_mode_is_validated_and_configurable():
+    model = detector_model(frames=2)
+    model._apply_measurement_config({"acquisition_mode": "per_frame", "number_frames": 2})
+    assert model.acquisition_mode == "per_frame"
+    model.acquisition_mode = "unknown"
+    with pytest.raises(ValueError, match="acquisition_mode"):
+        model.add_noise()

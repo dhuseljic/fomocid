@@ -1355,12 +1355,14 @@ def create_binary_labyrinth_pattern(
 
     The fast binary generator first creates a continuous labyrinth field. Its
     stripe width is estimated as half of the dominant FFT period, then the
-    continuous field is linearly rescaled so that measured width matches
+    continuous field is rescaled with cubic splines so that measured width matches
     ``stripe_width`` in pixels. If needed, the base labyrinth image is
     regenerated at a larger size so that the rescaled field can be cropped
     without tiling artifacts. With ``auto_size=True``, the generated base image
     can also be smaller than the requested ``H``/``W`` when large target stripes
-    imply strong upscaling. The rescaled field is then converted to the final
+    imply strong upscaling. Cubic reconstruction avoids square source-grid
+    imprints; downsampling first applies a Gaussian anti-alias filter.
+    The rescaled field is then converted to the final
     domain contrast. By default this conversion is soft, using a tanh mapping
     after the optional Gaussian blur, which avoids interpolation and
     thresholding artifacts for small stripes. Set ``domain_conversion="hard"``
@@ -1647,7 +1649,16 @@ def create_binary_labyrinth_pattern(
     if base is None:
         raise RuntimeError("Labyrinth generator did not return a pattern.")
 
-    scaled = zoom(base, scale, order=1)
+    # Linear upsampling leaves derivative jumps on the coarse source grid;
+    # tanh contrast makes those cell boundaries visible as a square pattern.
+    # Reconstruct the continuous field before converting it to magnetization.
+    # When shrinking, suppress frequencies above the output Nyquist limit
+    # before sampling, rather than blurring the final magnetic domains.
+    resample_base = base
+    if scale < 1.0:
+        antialias_sigma = 0.5 * np.sqrt(scale ** -2 - 1.0)
+        resample_base = gaussian_filter(base, antialias_sigma, mode="reflect")
+    scaled = zoom(resample_base, scale, order=3, mode="reflect", prefilter=True)
     if scaled.size == 0:
         scaled = base
     pattern = _center_crop(scaled, (rows, cols))
@@ -1690,6 +1701,7 @@ def create_binary_labyrinth_pattern(
             "measured_period_px": measured_period,
             "target_stripe_width_px": stripe_width,
             "rescale_factor": scale,
+            "resample_method": "cubic_antialias",
             "requested_H": requested_H,
             "requested_W": requested_W,
             "generated_H": current_H,

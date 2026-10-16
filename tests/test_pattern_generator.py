@@ -155,6 +155,69 @@ class MagneticDomainClassificationTests(unittest.TestCase):
         self.assertTrue(np.all(cleaned[19:21, 19:21] > 0))
 
 
+class LabyrinthResamplingTests(unittest.TestCase):
+    def test_upscaled_oblique_domains_follow_smooth_reference(self) -> None:
+        """Coarse-grid interpolation must not imprint square cells on walls."""
+        from scipy.ndimage import zoom
+
+        yy, xx = np.indices((64, 64), dtype=float)
+        base = np.sin(2 * np.pi * (0.6 * xx + 0.8 * yy) / 8)
+        with (
+            mock.patch.object(pattern_generator, "generate_binary",
+                              return_value=(None, None, base[None], {})),
+            mock.patch.object(pattern_generator, "_estimate_labyrinth_stripe_width_fft",
+                              return_value=(4., 8.)),
+        ):
+            actual, meta = pattern_generator.create_binary_labyrinth_pattern(
+                (128, 128), stripe_width=16, H=64, W=64,
+                auto_size=False, crop_margin=0, softness=0.8,
+            )
+        # scipy zoom uses endpoint-aligned coordinates by default.
+        coordinates = np.arange(64, 192) * 63 / 255
+        y, x = np.meshgrid(coordinates, coordinates, indexing="ij")
+        reference = np.sin(2 * np.pi * (0.6 * x + 0.8 * y) / 8)
+
+        def convert(field):
+            field = field - np.median(field)
+            field = np.tanh(field / (0.8 * np.std(field)))
+            return field / np.max(np.abs(field))
+
+        reference = convert(reference)
+        linear = convert(zoom(base, 4, order=1)[64:192, 64:192])
+        error = np.sqrt(np.mean((actual - reference)**2))
+        old_error = np.sqrt(np.mean((linear - reference)**2))
+        self.assertLess(error, old_error * 0.1)
+        self.assertEqual(meta["resample_method"], "cubic_antialias")
+        self.assertTrue(np.isfinite(actual).all())
+        self.assertLessEqual(np.max(np.abs(actual)), 1.)
+
+    def test_downsampling_rejects_unresolved_source_oscillations(self) -> None:
+        """Fine source fluctuations must not alias into larger domains."""
+        from scipy.ndimage import zoom
+
+        yy, xx = np.indices((128, 128), dtype=float)
+        smooth = np.sin(2 * np.pi * xx / 32)
+        fine = 0.25 * np.cos(2 * np.pi * yy * 0.4)
+        base = smooth + fine
+        with (
+            mock.patch.object(pattern_generator, "generate_binary",
+                              return_value=(None, None, base[None], {})),
+            mock.patch.object(pattern_generator, "_estimate_labyrinth_stripe_width_fft",
+                              return_value=(16., 32.)),
+        ):
+            actual, _ = pattern_generator.create_binary_labyrinth_pattern(
+                (32, 32), stripe_width=8, H=128, W=128,
+                auto_size=False, crop_margin=0,
+            )
+        # The resolved stripe field is independent of y; any y variation is aliasing.
+        linear = zoom(base, .5, order=1)[16:48, 16:48]
+        linear -= np.median(linear)
+        linear = np.tanh(linear / np.std(linear))
+        linear /= np.max(np.abs(linear))
+        self.assertLess(np.std(actual, axis=0).mean(),
+                        0.4 * np.std(linear, axis=0).mean())
+
+
 class BinaryLabyrinthAutoSizeTests(unittest.TestCase):
     def test_soft_conversion_preserves_saturated_target_mean_sign(self) -> None:
         with mock.patch.object(
@@ -408,6 +471,46 @@ class ImagePatternTests(unittest.TestCase):
 
 
 class DisorderedSkyrmionTests(unittest.TestCase):
+    def test_dataset_skyrmions_can_cross_object_hole_boundary(self) -> None:
+        """Dataset settings must allow partial cores on both sides of the OH."""
+        import contextlib
+        import io
+        import json
+
+        notebook = json.loads(
+            (ROOT / "tutorials/18_magnetic_states_absorption_peak.ipynb").read_text()
+        )
+        source = next("".join(c["source"]) for c in notebook["cells"]
+                      if '"placement_radius"' in "".join(c["source"])
+                      or "state_specs = []" in "".join(c["source"]))
+        namespace = {"sample_shape": np.array([0, 320, 320]),
+                     "aperture_types": ["OH", "RH"],
+                     "aperture_radii": [500e-9, 30e-9],
+                     "aperture_top_radius_factors": [1.1, 5.]}
+        with contextlib.redirect_stdout(io.StringIO()):
+            exec(source[source.index("state_specs = []"):], namespace)
+        spec = next(s for s in namespace["state_specs"] if s["family"] == "skyrmion")
+        pixel_size = 5e-9
+        oh_radius = 500e-9
+        config = dict(spec["config"])
+        # Mirror the pipeline default: extend beyond the widest OH surface.
+        placement_radius = config.pop("placement_radius", oh_radius * 1.1 + config["stripe_width"])
+        self.assertGreater(placement_radius, oh_radius)
+        for key in ("stripe_width", "sigma", "diameter_spread", "positional_disorder"):
+            config[key] /= pixel_size
+        config["placement_radius"] = placement_radius / pixel_size
+        config["placement_center"] = (160., 160.)
+        pattern, centers = pattern_generator.create_disordered_skyrmion_lattice_pattern(
+            (320, 320), **config,
+        )
+        distances = np.linalg.norm(centers - (160., 160.), axis=1)
+        core_radius = config["stripe_width"] / 2
+        self.assertTrue(np.any(np.abs(distances - oh_radius / pixel_size) < core_radius))
+        yy, xx = np.indices(pattern.shape)
+        boundary = np.abs(np.hypot(yy - 160, xx - 160) - oh_radius / pixel_size) < 1
+        self.assertTrue(np.any(pattern[boundary] < 0))
+        self.assertTrue(np.any(distances > oh_radius / pixel_size))
+
     def test_small_skyrmions_are_sampled_as_continuous_profiles(self) -> None:
         """Test that subpixel skyrmions do not collapse to binary crosses."""
         pattern, coords = pattern_generator.create_disordered_skyrmion_lattice_pattern(
