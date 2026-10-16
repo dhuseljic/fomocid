@@ -502,7 +502,8 @@ class ScatteringExperiment:
         config.magnetic_pattern.shape = shape
         config.magnetic_pattern.real_space_pixel_size = pitch
         if magnetization is None:
-            generated, _ = config.magnetic_pattern.create_pattern()
+            generated, _ = config.magnetic_pattern.create_pattern(
+                aperture_config=config.aperture.aperture_config)
             if generated.shape == shape:
                 generated = np.stack(
                     (np.zeros_like(generated), np.zeros_like(generated), generated),

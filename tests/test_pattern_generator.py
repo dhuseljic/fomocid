@@ -471,6 +471,27 @@ class ImagePatternTests(unittest.TestCase):
 
 
 class DisorderedSkyrmionTests(unittest.TestCase):
+    def test_shared_aperture_placement_defaults_and_explicit_override(self):
+        from scattering_calculator.simulation_pipelines.magnetic_parameters import aperture_placement_defaults
+        aperture = {"apertures_type": ["OH"], "apertures_radius": [500e-9],
+                    "apertures_center": [(20e-9, -30e-9)],
+                    "apertures_top_radius_factor": [1.1]}
+        params = {"radius": 40e-9}
+        defaults = aperture_placement_defaults(params, aperture, (320, 320), 5e-9)
+        np.testing.assert_allclose(defaults["placement_center"], (164, 154))
+        self.assertAlmostEqual(defaults["placement_radius"], 630e-9)
+        self.assertNotIn("placement_radius", params)
+        explicit = dict(params, placement_radius=900e-9, placement_center=(8, 9))
+        self.assertEqual(aperture_placement_defaults(explicit, aperture, (320, 320), 5e-9), explicit)
+        config = simulation_configuration.MagneticPatternConfig(
+            pattern_type_method="disordered_skyrmion_lattice_pattern", shape=(320, 320),
+            real_space_pixel_size=5e-9, pattern_config=params)
+        with mock.patch.object(pattern_generator, "create_disordered_skyrmion_lattice_pattern",
+                               return_value=(np.ones((320,320)), np.empty((0,2)))) as generate:
+            config.create_pattern(aperture_config=aperture)
+        self.assertAlmostEqual(generate.call_args.kwargs["placement_radius"], 126.)
+        np.testing.assert_allclose(generate.call_args.kwargs["placement_center"], (164, 154))
+
     def test_dataset_skyrmions_can_cross_object_hole_boundary(self) -> None:
         """Dataset settings must allow partial cores on both sides of the OH."""
         import contextlib

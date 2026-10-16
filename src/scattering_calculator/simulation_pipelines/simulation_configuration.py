@@ -1098,13 +1098,15 @@ class MagneticPatternConfig(_ConfigMixin):
         from .magnetic_parameters import canonical_parameters
         return canonical_parameters(self.pattern_type_method, self.pattern_config, self.pattern_config_length)
 
-    def create_pattern(self) -> tuple[np.ndarray, np.ndarray]:
+    def create_pattern(self, *, aperture_config=None) -> tuple[np.ndarray, np.ndarray]:
         """Generate the magnetic pattern and store it on the instance.
 
         Physical-length values in ``pattern_config`` are converted to pixel
         units by dividing by ``real_space_pixel_size`` before the generator is
         called. ``pattern_config_length`` is still accepted as a legacy source,
-        but conflicting keys are rejected.
+        but conflicting keys are rejected. Optional ``aperture_config`` supplies
+        OH geometry for skyrmion placement beyond the opening, allowing partial
+        textures at the boundary without generating an entire full-grid lattice.
 
         Returns
         -------
@@ -1121,8 +1123,12 @@ class MagneticPatternConfig(_ConfigMixin):
             self.magnetic_pattern, self.pattern_coordinates = vector_pattern(self)
             return self.magnetic_pattern, self.pattern_coordinates
         pattern_function = self.setup()
-        from .magnetic_parameters import generator_parameters
-        config = generator_parameters(self.pattern_type_method, self.resolved_pattern_config())
+        from .magnetic_parameters import generator_parameters, aperture_placement_defaults
+        parameters = self.resolved_pattern_config()
+        if self.pattern_type_method == "disordered_skyrmion_lattice_pattern" and aperture_config is not None:
+            parameters = aperture_placement_defaults(
+                parameters, aperture_config, self.shape, self.real_space_pixel_size)
+        config = generator_parameters(self.pattern_type_method, parameters)
         length_keys_by_method = {
             "wavy_stripe_pattern": {
                 "stripe_width",

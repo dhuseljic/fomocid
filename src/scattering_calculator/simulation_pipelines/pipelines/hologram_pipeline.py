@@ -1479,32 +1479,16 @@ class HologramPipeline:
         if coordinate_offset is not None:
             pattern_config["coordinate_offset"] = coordinate_offset
         if p["pattern_type"] == "disordered_skyrmion_lattice_pattern":
-            aperture_types = p["aperture_config"].get("aperture_types", [])
-            if "OH" in aperture_types:
-                oh_index = aperture_types.index("OH")
-                oh_center = p["aperture_config"]["aperture_centers"][oh_index]
-                oh_radius = p["aperture_config"]["aperture_radii"][oh_index]
-                top_radius_factors = p["aperture_config"].get(
-                    "aperture_top_radius_factors",
-                    [2.0] * len(p["aperture_config"]["aperture_radii"]),
-                )
-                oh_top_radius = float(oh_radius) * max(
-                    1.0, float(top_radius_factors[oh_index])
-                )
-                full_center_y = sample_shape[1] / 2 + float(oh_center[0]) / real_space_pixel_size
-                full_center_x = sample_shape[2] / 2 + float(oh_center[1]) / real_space_pixel_size
-                if pattern_slices is None:
-                    placement_center = (full_center_y, full_center_x)
-                else:
-                    placement_center = (
-                        full_center_y - pattern_slices[0].start,
-                        full_center_x - pattern_slices[1].start,
+            from ..magnetic_parameters import aperture_placement_defaults
+            pattern_config = aperture_placement_defaults(
+                pattern_config, p["aperture_config"], sample_shape[1:], real_space_pixel_size)
+            if pattern_slices is not None and "placement_center" not in p["pattern_config"]:
+                center = pattern_config.get("placement_center")
+                if center is not None:
+                    pattern_config["placement_center"] = (
+                        center[0] - pattern_slices[0].start,
+                        center[1] - pattern_slices[1].start,
                     )
-                pattern_config.setdefault("placement_center", placement_center)
-                pattern_config.setdefault(
-                    "placement_radius",
-                    oh_top_radius + float(2 * pattern_config.get("radius", pattern_config.get("stripe_width", 0.0) / 2)),
-                )
         magnetic_pattern_config = MagneticPatternConfig(
             pattern_type_method=p["pattern_type"],
             shape=pattern_shape,

@@ -411,3 +411,16 @@ ADU before electronic readout and clipping. See the
 [detector response guide](detector_response.md) for calibration and frame
 averaging, and the [material dataset guide](material_datasets.md) for future
 natural/ferroelectric optical tables.
+
+### Magnetic texture sampling at the object hole
+
+Labyrinth fields use cubic reconstruction and anti-alias filtering when
+resized in the shared pattern generator. All workflows use this behavior.
+
+For disordered skyrmions, the experiment runner and hologram pipeline place
+centers out to the widest OH radius plus one skyrmion diameter. The aperture
+clips the texture, allowing partial skyrmions at its boundary. Explicit
+`placement_radius` and `placement_center` settings override these defaults.
+For direct component use, pass the aperture dictionary to
+`magnetic_pattern.create_pattern(aperture_config=aperture.aperture_config)`.
+Without aperture geometry the generator covers the supplied grid.

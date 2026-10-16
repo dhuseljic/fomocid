@@ -70,3 +70,28 @@ def generator_parameters(method, parameters):
         if name in result:
             result[alias] = result.pop(name) / factor
     return result
+
+
+def aperture_placement_defaults(parameters, aperture, shape, pixel_size):
+    """Place skyrmion centers beyond the OH; let the aperture clip the texture.
+
+    Parameters use physical lengths, except placement_center in row/column pixels.
+    Accept both public aperture dictionaries and legacy pipeline dictionaries.
+    Explicit placement settings are preserved. Without OH geometry, leave the
+    generator's full-field behavior intact.
+    """
+    result = dict(parameters)
+    types = aperture.get("apertures_type", aperture.get("aperture_types", []))
+    if "OH" not in types:
+        return result
+    index = types.index("OH")
+    radii = aperture.get("apertures_radius", aperture.get("aperture_radii"))
+    centers = aperture.get("apertures_center", aperture.get("aperture_centers"))
+    factors = aperture.get("apertures_top_radius_factor",
+                           aperture.get("aperture_top_radius_factors", [2.] * len(radii)))
+    center = centers[index]
+    result.setdefault("placement_center", (shape[0] / 2 + center[0] / pixel_size,
+                                          shape[1] / 2 + center[1] / pixel_size))
+    diameter = 2 * result["radius"] if "radius" in result else result.get("stripe_width", 0.)
+    result.setdefault("placement_radius", radii[index] * max(1., factors[index]) + diameter)
+    return result
