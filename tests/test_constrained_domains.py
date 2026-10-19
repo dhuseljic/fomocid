@@ -95,3 +95,33 @@ def test_unresolved_length_target_is_reported_without_false_success():
     if meta['converged']:
         assert meta['residual'] < meta['convergence_tolerance']
     assert meta['length_relative_error'] > .15
+
+
+@pytest.mark.parametrize('magnetization',[-.9,-.8,.8,.9])
+@pytest.mark.parametrize('count',[1,2])
+def test_finite_minority_worms_at_strong_net_magnetization(magnetization,count):
+    from scipy.ndimage import label
+    preferred_length = 32 if count == 1 else (16 if abs(magnetization) > .85 else 24)
+    pattern,meta=generate((128,128),preferred_length,
+        target_magnetization=magnetization,initial_state='worms',initial_order=1.,
+        initial_domain_count=count,alignment=0.,n_steps=400,max_length_iterations=1,seed=7)
+    minority=pattern<0 if magnetization>0 else pattern>0
+    _,components=label(minority,structure=np.ones((3,3)))
+    assert components==count
+    assert not any(np.any(edge) for edge in (minority[0],minority[-1],minority[:,0],minority[:,-1]))
+    assert meta['measurements']['mean_eccentricity']>.9
+    assert abs(pattern.mean()-magnetization)<=1/pattern.size
+    assert all(item['up_pixels']==meta['target_up_pixels'] for item in meta['trace'])
+
+
+def test_worm_preparation_lengths_are_shared_physical_config_controls():
+    config=sim.MagneticPatternConfig(pattern_type_method='constrained_domain_pattern',
+        shape=(128,128),real_space_pixel_size=2e-9,pattern_config=dict(
+            characteristic_length=48e-9,target_magnetization=.8,
+            initial_state='worms',initial_order=1.,initial_domain_count=2,
+            worm_length=150e-9,worm_waviness=16e-9,
+            seed=7,n_steps=20,max_length_iterations=1))
+    _,metadata=config.create_pattern()
+    assert metadata['initial_worm_length_px']==pytest.approx(75.)
+    assert metadata['initial_worm_waviness_px']==pytest.approx(8.)
+    assert metadata['initial_domain_count']==2

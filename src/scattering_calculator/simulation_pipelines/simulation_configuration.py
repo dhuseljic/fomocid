@@ -1135,7 +1135,7 @@ class MagneticPatternConfig(_ConfigMixin):
         config = generator_parameters(self.pattern_type_method, parameters)
         length_keys_by_method = {
             "domain_pattern": {"period", "sigma"},
-            "constrained_domain_pattern": {"characteristic_length", "disorder_length"},
+            "constrained_domain_pattern": {"characteristic_length", "disorder_length", "worm_length", "worm_waviness"},
             "wavy_stripe_pattern": {
                 "stripe_width",
                 "sigma",
@@ -1164,7 +1164,7 @@ class MagneticPatternConfig(_ConfigMixin):
         }
         length_keys = length_keys_by_method.get(self.pattern_type_method, set())
         generator_config = {
-            k: (v / self.real_space_pixel_size if k in length_keys else v)
+            k: (v / self.real_space_pixel_size if k in length_keys and v is not None else v)
             for k, v in config.items()
         }
         self.magnetic_pattern, self.pattern_coordinates = pattern_function(

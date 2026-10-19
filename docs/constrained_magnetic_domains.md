@@ -112,3 +112,25 @@ convergence, a finite-thickness kernel and reference micromagnetic comparisons
 remain necessary before treating this as a validated surrogate. Vector domain
 walls, DMI, chirality, skyrmion topology and physical-time switching dynamics
 are outside this first backend.
+
+## Isolated minority worms at large net magnetization
+
+Use `initial_state="worms"`, `initial_order=1`, and `initial_domain_count=1` or
+`2` to prepare finite curved minority domains. Their polarity is automatically
+chosen opposite to the sign of `target_magnetization`. `worm_length` and
+`worm_waviness` set the initial centerline length and bending amplitude; direct
+units are pixels and pipeline configuration units are metres. Omitted values
+use 0.6 and 0.06 times the shorter grid dimension. The required minority area
+sets the initial width. Subsequent relaxation may change length, width and
+component count; the count is not an enforced topological constraint.
+
+Tutorial 22 compares M=-0.9, -0.8, +0.8, +0.9 and one/two-worm preparations.
+The two-worm |M|=0.9 recipe reduces the preferred interaction scale from 24 to
+16 pixels to accommodate thinner minority domains. At the larger scale these
+can fragment into four bubbles instead; this is not a fixed-topology solver.
+The zero-alignment examples preserve isolated, elongated domains at the tested
+finite relaxation budget. Large alignment may extend worms across periodic
+boundaries. Disable global length calibration (`max_length_iterations=1`)
+when exploring these few-domain states: a global spectral repeat and isolated
+worm length are different observables. Check actual components and boundary
+contacts, not just the initial count.

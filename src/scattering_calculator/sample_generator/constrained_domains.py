@@ -7,13 +7,15 @@ extensions; this is not an implementation of vector LLG dynamics.
 from time import perf_counter
 import numpy as np
 from scipy.ndimage import gaussian_filter
+from scipy.spatial import cKDTree
 from .domain_catalogue import measure_domain_pattern
 
 
 def _relax_constrained_domains(
     sz_array, characteristic_length, *, target_magnetization=0., alignment=0.,
     direction=0., disorder=0., disorder_length=1., initial_state='random',
-    initial_order=0., wall_stiffness=2., n_steps=300, time_step=.2,
+    initial_order=0., initial_domain_count=1, worm_length=None, worm_waviness=None,
+    wall_stiffness=2., n_steps=300, time_step=.2,
     convergence_tolerance=1e-5, seed=None, real_space_pixel_size=1., **options,
 ):
     """Relax a scalar field with dipolar competition and fixed binary occupancy.
@@ -55,8 +57,14 @@ def _relax_constrained_domains(
         raise ValueError('wall_stiffness must be >=1; time_step and convergence_tolerance positive')
     if int(n_steps) != n_steps or n_steps < 1:
         raise ValueError('n_steps must be a positive integer')
-    if initial_state not in ('random', 'stripes', 'hexagonal'):
-        raise ValueError('initial_state must be random, stripes or hexagonal')
+    if initial_state not in ('random', 'stripes', 'hexagonal', 'worms'):
+        raise ValueError('initial_state must be random, stripes, hexagonal or worms')
+    if int(initial_domain_count) != initial_domain_count or initial_domain_count < 1:
+        raise ValueError('initial_domain_count must be a positive integer')
+    if worm_length is not None and (not np.isfinite(worm_length) or worm_length <= 0):
+        raise ValueError('worm_length must be positive or None')
+    if worm_waviness is not None and (not np.isfinite(worm_waviness) or worm_waviness < 0):
+        raise ValueError('worm_waviness must be nonnegative or None')
     start = perf_counter()
     rng = np.random.default_rng(seed)
     q0 = 2*np.pi/characteristic_length
@@ -95,6 +103,31 @@ def _relax_constrained_domains(
             angle=direction+2*np.pi*i/3
             phase=phases[i] if i<2 else -phases.sum()
             ordered += np.cos(q0*(xx*np.cos(angle)+yy*np.sin(angle))+phase)
+    elif initial_state == 'worms':
+        # Finite, curved minority-domain seeds, not stripes wrapping the box.
+        # Curve distance sets the initial geometry; area projection sets width.
+        length = .6*min(shape) if worm_length is None else float(worm_length)
+        waviness = .06*min(shape) if worm_waviness is None else float(worm_waviness)
+        curves = []
+        along = np.linspace(-length/2, length/2, max(64, int(2*length)))
+        axis = np.array([np.sin(direction), np.cos(direction)])
+        normal = np.array([np.cos(direction), -np.sin(direction)])
+        spacing = .6*min(shape)/max(1,initial_domain_count)
+        for index in range(int(initial_domain_count)):
+            offset = (index-(initial_domain_count-1)/2)*spacing
+            center = .5*np.array(shape)+offset*normal
+            phase = rng.uniform(0,2*np.pi)
+            bend = waviness*np.sin(2*np.pi*along/length+phase)
+            curves.append((center[None,:]+along[:,None]*axis+bend[:,None]*normal)%np.array(shape))
+        tree=cKDTree(np.concatenate(curves),boxsize=shape)
+        distance=np.empty(np.prod(shape))
+        for start_pixel in range(0,distance.size,65536):
+            stop_pixel=min(distance.size,start_pixel+65536)
+            rows,cols=np.divmod(np.arange(start_pixel,stop_pixel),shape[1])
+            distance[start_pixel:stop_pixel]=tree.query(np.column_stack((rows,cols)))[0]
+        # Minority polarity reverses with target M; amplitudes remain +/-1.
+        ordered = -distance.reshape(shape)
+        if target_magnetization >= 0: ordered = -ordered
     if initial_state != 'random':
         ordered /= max(float(ordered.std()),1e-12)
     blend = initial_order if initial_state != "random" else 0.
@@ -160,7 +193,11 @@ def _relax_constrained_domains(
                   target_up_pixels=count, up_fraction_measured=float(np.mean(pattern>0)),
                   mean_mz=float(pattern.mean()),nematic_order=nematic,
                   measurements=metrics,seed=seed,elapsed_seconds=perf_counter()-start,
-                  initial_state=initial_state,boundary_conditions='periodic')
+                  initial_state=initial_state,initial_domain_count=int(initial_domain_count),
+                  worm_length=worm_length,worm_waviness=worm_waviness,
+                  initial_worm_length_px=length if initial_state == "worms" else None,
+                  initial_worm_waviness_px=waviness if initial_state == "worms" else None,
+                  boundary_conditions='periodic')
     return pattern,metadata
 
 
@@ -172,7 +209,8 @@ def create_constrained_domain_pattern(
 
     Main controls: target_magnetization [-1,1], alignment >=0, direction in
     radians, disorder >=0, disorder_length in pixels, initial_state ('random',
-    'stripes', 'hexagonal'), initial_order [0,1], wall_stiffness >=1, n_steps,
+    'stripes', 'hexagonal', 'worms'), initial_order [0,1], initial_domain_count,
+    worm_length/worm_waviness (preparation lengths), wall_stiffness >=1, n_steps,
     time_step, convergence_tolerance, and seed. Pipeline lengths are metres.
 
     characteristic_length is the target dominant spectral repeat, not bubble
