@@ -102,7 +102,8 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
 
     Lengths are metres. Preparation and relaxation controls are independent of
     the measured state. By default target_magnetization=None leaves sign area
-    unconstrained. constrain_magnetization=True samples numeric targets; an
+    unconstrained. constrain_magnetization=True samples Gaussian numeric targets (mean 0,
+    FWHM 0.5, conditioned on [-0.9,0.9]); an
     explicit numeric target_magnetization fixes the target across samples.
     Otherwise saturation_probability (default 0.1) selects exact +/-1 states
     with equal polarity probabilities, including in free-magnetization mode.
@@ -118,7 +119,10 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
     preparation = str(rng.choice(('random', 'stripes', 'hexagonal', 'worms')))
     magnetization = target_magnetization
     if magnetization is None and constrain_magnetization:
-        magnetization = float(rng.uniform(-.85, .85))
+        sigma_m = .5 / (2 * np.sqrt(2 * np.log(2)))
+        magnetization = float(rng.normal(0., sigma_m))
+        while not -.9 <= magnetization <= .9:
+            magnetization = float(rng.normal(0., sigma_m))
     if target_magnetization is None and rng.random() < saturation_probability:
         magnetization = float(rng.choice((-1., 1.)))
     if magnetization is not None:
@@ -180,33 +184,31 @@ def constrained_sampling_pitch(parameters):
     return pitch
 
 
-def sample_sweep_domain_parameters(rng, experiment_index, *, constrain_magnetization=True,
-                                   target_magnetization=None, saturation_interval=20):
-    """Sample targets uniformly in [-0.85,0.85], saturating every twentieth parent.
+def sample_sweep_domain_parameters(rng, experiment_index=None, *, free_probability=.48,
+                                   gaussian_probability=.48, saturation_probability=.04):
+    """Sample a mixture of free, Gaussian-target and saturated magnetic parents.
 
     Parameters
     ----------
     rng : numpy.random.Generator
         Reproducible parent parameter generator.
-    experiment_index : int
-        Zero-based requested experiment/parent index, unchanged on grid retries.
-    constrain_magnetization : bool
-        Sample a numeric target unless a fixed target is provided. Default True.
-    target_magnetization : float or None
-        Optional fixed nonsaturated-run target; None uses the selected mode.
-    saturation_interval : int
-        Every Nth requested parent is uniform +/-1, with equal polarity chances.
+    experiment_index : int or None
+        Parent index accepted for pipeline callers; no periodic schedule is used.
+    free_probability, gaussian_probability, saturation_probability : float
+        Nonnegative probabilities summing to one. Defaults are 0.48, 0.48, 0.04.
+        Gaussian targets have mean zero, FWHM 0.5, and bounds [-0.9,0.9].
 
     Returns
     -------
     dict
-        Physical generation parameters. Saturation overrides the normal target
-        on scheduled parents. Branches do not increment the schedule.
+        Physical controls with None, a Gaussian target, or exactly +/-1.
+        Saturated polarity is chosen with equal probability.
     """
-    if saturation_interval < 1 or int(saturation_interval) != saturation_interval:
-        raise ValueError('saturation_interval must be a positive integer')
-    if (experiment_index + 1) % saturation_interval == 0:
-        target_magnetization = float(rng.choice((-1., 1.)))
+    probabilities = np.asarray([free_probability, gaussian_probability, saturation_probability], dtype=float)
+    if not np.isfinite(probabilities).all() or np.any(probabilities < 0) or not np.isclose(probabilities.sum(), 1.):
+        raise ValueError('Magnetization probabilities must be nonnegative and sum to one')
+    mode = rng.choice(('free', 'gaussian', 'saturated'), p=probabilities)
+    target = float(rng.choice((-1., 1.))) if mode == 'saturated' else None
     return sample_constrained_domain_parameters(rng,
-        constrain_magnetization=constrain_magnetization,
-        target_magnetization=target_magnetization, saturation_probability=0.)
+        constrain_magnetization=mode == 'gaussian', target_magnetization=target,
+        saturation_probability=0.)

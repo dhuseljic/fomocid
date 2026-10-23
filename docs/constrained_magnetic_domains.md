@@ -189,7 +189,7 @@ balanced measured states.
 | Control | Sweep distribution | Meaning / constraint |
 |---|---|---|
 | `characteristic_length` | uniform 120–1000 nm | Full repeat/spacing; not a domain diameter. |
-| `target_magnetization` | Sweep: uniform −0.85–0.85, every 20th requested parent ±1; low-level generator accepts `None` | Free evolution when null. Numeric targets fix rounded sign area; ±1 generates saturation. |
+| `target_magnetization` | Sweep: 48% None, 48% truncated Gaussian (mean 0, FWHM 0.5, bounds ±0.9), 4% ±1 | Free evolution when null. Numeric targets fix rounded sign area; ±1 generates saturation. |
 | `alignment` | 50% zero; otherwise truncated exponential on [0,24], scale 0.5 | Nonnegative directional penalty; larger values favor stripe alignment. |
 | `direction` | uniform 0–π radians | Stripe axis from +x toward +y. |
 | `disorder` | uniform 0.3–1.2 | Quenched random-field strength, not detector noise. |
@@ -478,22 +478,22 @@ but are not saved in HDF5. Saved state diagnostics and the wall-smoothed optical
 
 ### Occasional saturated parents
 
-Both sweep scripts use the shared scheduled sampler: ordinary requested parents
-receive `target_magnetization` uniformly from **−0.85 to +0.85**. Every **20th**
-parent (20, 40, 60, …) instead receives exactly −1 or +1 with equal polarity
-probability, producing a simple uniform saturated state (`B=0`, `S=1`).
-`saturation_interval=20` controls the schedule. Grid retries retain the same
-parent index and do not consume schedule slots. Tree branches inherit the
-parent's target and do not increment the schedule. The schedule counts requested
-parents, not successful saved groups; a skipped/timed-out parent can therefore
-remove its scheduled saturated state from the output.
+Both sweep scripts draw one magnetization mode per independent parent:
 
-The independent sweep uses `constrain_magnetization=True` and
-`target_magnetization=None` to select uniform ordinary targets. Set the former
-to False for free ordinary runs or supply a numeric target for fixed ordinary
-runs; scheduled saturation still takes precedence. The lower-level generator
-and single-experiment GUI continue to support `None` for free evolution.
-Realized targets and measured magnetization remain in the usual HDF5 metadata.
+- **48% free:** `target_magnetization=None`.
+- **48% constrained:** a Gaussian target with mean 0 and FWHM 0.5
+  (standard deviation about 0.2123), conditioned on [−0.9,+0.9].
+- **4% saturated:** exactly −1 or +1, with equal polarity probability.
+
+These are random sampling probabilities, not exact quotas for a short run.
+They replace the earlier every-20th-parent saturation schedule. Tree branches
+inherit the parent's target, so the mixture applies to holograms as well when
+branch counts are equal. Rejection and timeouts can bias the saved proportions.
+The script probability settings must sum to one. Set one probability to one
+and the others to zero to select a single mode. Realized targets and measured
+magnetization remain in the usual HDF5 metadata. The single-experiment GUI
+continues to use its explicitly selected target.
+
 
 
 

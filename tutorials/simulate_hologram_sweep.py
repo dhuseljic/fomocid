@@ -172,11 +172,11 @@ beamstop_config = {
 # 03: MAGNETIC PHASE-SPACE PREPARATION
 ######################################
 # --- Magnetic domain pattern ---
-# True + None samples targets uniformly in [-0.85, 0.85].
-# False + None allows free evolution; a numeric target fixes ordinary runs.
-saturation_interval = 20  # every twentieth requested experiment is saturated
-constrain_magnetization = True
-target_magnetization = None
+# Per-parent mixture: free evolution, Gaussian target, or uniform saturation.
+free_magnetization_probability = .48
+gaussian_magnetization_probability = .48
+saturation_probability = .04
+target_magnetization = None  # fixed fallback when disabling the range sampler
 pattern_type = "constrained_domain_pattern"
 pattern_config = dict(
     characteristic_length=600e-9, target_magnetization=target_magnetization,
@@ -346,8 +346,9 @@ config = ExperimentConfig(
 def random_pattern_config(params):
     """Explore constrained-domain controls; measured morphology is an output."""
     return sample_sweep_domain_parameters(domain_rng, params["experiment_index"],
-        constrain_magnetization=constrain_magnetization, target_magnetization=target_magnetization,
-        saturation_interval=saturation_interval)
+        free_probability=free_magnetization_probability,
+        gaussian_probability=gaussian_magnetization_probability,
+        saturation_probability=saturation_probability)
 
 
 def random_aperture_config(params):

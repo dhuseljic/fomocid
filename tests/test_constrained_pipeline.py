@@ -321,20 +321,22 @@ def test_sweep_sampler_favors_isotropic_disordered_preparations():
     assert all(0 <= sample['initial_order'] <= .35 for sample in samples)
 
 
-def test_sweep_targets_are_uniform_with_every_twentieth_parent_saturated():
+def test_sweep_magnetization_mixture_has_free_gaussian_and_saturated_draws():
     from scattering_calculator.simulation_pipelines.magnetic_parameters import sample_sweep_domain_parameters
     rng = np.random.default_rng(31)
-    targets = np.array([sample_sweep_domain_parameters(rng, i)['target_magnetization']
-                        for i in range(2000)])
-    saturated = np.arange(1, 2001) % 20 == 0
-    assert np.all(np.abs(targets[saturated]) == 1)
-    assert set(targets[saturated]) == {-1., 1.}
-    ordinary = targets[~saturated]
-    assert np.all((ordinary >= -.85) & (ordinary <= .85))
-    assert abs(ordinary.mean()) < .04
-    assert .46 < np.mean(ordinary < 0) < .54
-    # A retry keeps the scheduled parent saturated rather than consuming a slot.
-    assert abs(sample_sweep_domain_parameters(rng, 19)['target_magnetization']) == 1
+    targets = [sample_sweep_domain_parameters(rng, i)['target_magnetization'] for i in range(6000)]
+    free = sum(target is None for target in targets)
+    saturated = [target for target in targets if target is not None and abs(target) == 1]
+    gaussian = np.array([target for target in targets if target is not None and abs(target) != 1])
+    assert .45 < free/len(targets) < .51
+    assert .45 < len(gaussian)/len(targets) < .51
+    assert .03 < len(saturated)/len(targets) < .05
+    assert set(saturated) == {-1., 1.}
+    assert np.all(np.abs(gaussian) <= .9)
+    assert abs(gaussian.mean()) < .02
+    assert .19 < gaussian.std() < .23
+    with pytest.raises(ValueError, match='sum to one'):
+        sample_sweep_domain_parameters(rng, free_probability=.6)
 
 
 def test_default_progress_omits_stage_details_but_saves_timings(tmp_path, capsys):

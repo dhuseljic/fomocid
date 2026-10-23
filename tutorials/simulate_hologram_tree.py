@@ -29,7 +29,7 @@ def main():
     if args.patterns < 1:
         parser.error('--patterns must be positive')
     randomize_recipe = not args.fixed_recipe  # False keeps config.recipe unchanged
-    saturation_interval = 20  # every twentieth parent; inherited by all its leaves
+    free_probability, gaussian_probability, saturation_probability = .48, .48, .04
     rng = np.random.default_rng(args.seed)
     config = HologramPipelineConfig(
         # Fixed recipe used with --fixed-recipe (or randomize_recipe=False).
@@ -59,7 +59,8 @@ def main():
         ranges=HologramPipelineRanges(
             recipe=(lambda _: sample_multilayer_recipe(rng)) if randomize_recipe else None,
             detector_distance=Uniform(.05, .40), pattern_config=lambda params: sample_sweep_domain_parameters(
-            rng, params["experiment_index"], saturation_interval=saturation_interval)),
+            rng, params["experiment_index"], free_probability=free_probability,
+            gaussian_probability=gaussian_probability, saturation_probability=saturation_probability)),
         output_path=args.output, n_samples=args.patterns, exit_variants=exits,
         geometry_variants=geometries, acquisition_variants=acquisitions).run()
 
