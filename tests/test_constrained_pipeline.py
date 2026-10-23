@@ -309,7 +309,7 @@ def test_saturated_sampler_generates_uniform_states_with_both_polarities():
     assert sample_constrained_domain_parameters(rng, saturation_probability=1., target_magnetization=.4)['target_magnetization'] == .4
 
 
-def test_sweep_sampler_favors_isotropic_disordered_preparations():
+def test_sweep_sampler_keeps_weak_alignment_and_a_broad_order_range():
     rng = np.random.default_rng(123)
     samples = [sample_constrained_domain_parameters(rng) for _ in range(3000)]
     alignment = np.array([sample['alignment'] for sample in samples])
@@ -317,8 +317,11 @@ def test_sweep_sampler_favors_isotropic_disordered_preparations():
     assert .46 < np.mean(alignment == 0) < .54
     assert .20 < alignment.mean() < .30
     assert .90 < np.mean(alignment < 1) < .96
-    assert all(.3 <= sample['disorder'] <= 1.2 for sample in samples)
-    assert all(0 <= sample['initial_order'] <= .35 for sample in samples)
+    assert all(0 <= sample['disorder'] <= .8 for sample in samples)
+    assert .09 < np.mean([sample['disorder'] < .1 for sample in samples]) < .16
+    assert all(0 <= sample['initial_order'] <= 1 for sample in samples)
+    assert .21 < np.mean([sample['initial_order'] > .75 for sample in samples]) < .29
+    assert .21 < np.mean([sample['initial_order'] < .25 for sample in samples]) < .29
 
 
 def test_sweep_magnetization_mixture_has_free_gaussian_and_saturated_draws():

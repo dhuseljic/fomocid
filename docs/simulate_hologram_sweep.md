@@ -1270,13 +1270,16 @@ pass `--fixed-recipe` to use `config.recipe` for every parent (or set
 `randomize_recipe=False` in the script). Random recipes remain enabled by default.
 The sampler uses the example's seeded NumPy generator for reproducibility.
 
-The shared sweep sampler favors disordered magnetic patterns:
+The shared sweep sampler keeps weak directional alignment while covering both
+ordered and disordered preparations:
 
 - Half of alignment draws are exactly **zero**, removing the preferred-axis penalty.
 - The other half use an exponential of scale **0.5**, truncated to [0,24].
   Overall mean alignment is about 0.25; approximately 93% of draws are below 1.
-- Quenched spatial `disorder` is uniform from **0.3 to 1.2**.
-- `initial_order` is uniform from **0 to 0.35**, weakening ordered starting patterns.
+- Quenched spatial `disorder` is uniform from **0 to 0.8**, restoring low-pinning patterns
+  that can form smooth labyrinths as well as more disordered patterns.
+- `initial_order` is uniform from **0 to 1**, retaining the full range of
+  random-to-ordered starting preparations.
 
 Directions remain uniform in [0,π). Saturation scheduling, target magnetization,
 wall widths and other physical controls are unchanged. These are input statistics,

@@ -192,10 +192,10 @@ balanced measured states.
 | `target_magnetization` | Sweep: 48% None, 48% truncated Gaussian (mean 0, FWHM 0.5, bounds ±0.9), 4% ±1 | Free evolution when null. Numeric targets fix rounded sign area; ±1 generates saturation. |
 | `alignment` | 50% zero; otherwise truncated exponential on [0,24], scale 0.5 | Nonnegative directional penalty; larger values favor stripe alignment. |
 | `direction` | uniform 0–π radians | Stripe axis from +x toward +y. |
-| `disorder` | uniform 0.3–1.2 | Quenched random-field strength, not detector noise. |
+| `disorder` | uniform 0–0.8 | Quenched random-field strength, not detector noise. |
 | `disorder_length` | 0–0.15 × characteristic length | Gaussian disorder correlation sigma; zero permits uncorrelated disorder. |
 | `initial_state` | random, stripes, hexagonal, worms | Initial preparation; does not fix final topology. |
-| `initial_order` | uniform 0–0.35 | Blend of ordered preparation with random initialization. |
+| `initial_order` | uniform 0–1 | Blend of ordered preparation with random initialization. |
 | `initial_domain_count` | integers 1–3 | Worm seed count; only used for worm preparation. |
 | `worm_length` | 1–4 × characteristic length | Initial worm centerline length, not relaxed length. |
 | `worm_waviness` | 0–0.3 × characteristic length | Initial worm bending amplitude. |
@@ -497,13 +497,16 @@ continues to use its explicitly selected target.
 
 
 
-The shared sweep sampler favors disordered magnetic patterns:
+The shared sweep sampler keeps weak directional alignment while covering both
+ordered and disordered preparations:
 
 - Half of alignment draws are exactly **zero**, removing the preferred-axis penalty.
 - The other half use an exponential of scale **0.5**, truncated to [0,24].
   Overall mean alignment is about 0.25; approximately 93% of draws are below 1.
-- Quenched spatial `disorder` is uniform from **0.3 to 1.2**.
-- `initial_order` is uniform from **0 to 0.35**, weakening ordered starting patterns.
+- Quenched spatial `disorder` is uniform from **0 to 0.8**, restoring low-pinning patterns
+  that can form smooth labyrinths as well as more disordered patterns.
+- `initial_order` is uniform from **0 to 1**, retaining the full range of
+  random-to-ordered starting preparations.
 
 Directions remain uniform in [0,π). Saturation scheduling, target magnetization,
 wall widths and other physical controls are unchanged. These are input statistics,

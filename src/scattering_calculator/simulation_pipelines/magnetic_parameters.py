@@ -108,8 +108,8 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
     Otherwise saturation_probability (default 0.1) selects exact +/-1 states
     with equal polarity probabilities, including in free-magnetization mode.
     Alignment is exactly zero for half the draws; other draws use an exponential
-    with scale 0.5 conditioned on [0,24]. Spatial disorder is uniform [0.3,1.2],
-    and initial order uniform [0,0.35], favoring less ordered preparations.
+    with scale 0.5 conditioned on [0,24]. Spatial disorder is uniform [0,0.8],
+    and initial order uniform [0,1], covering ordered and disordered preparations.
     Generate one relaxed realization, then measure it; spacing calibration is
     disabled. Pass a NumPy Generator to make the sweep reproducible.
     """
@@ -136,9 +136,9 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
         characteristic_length=length, target_magnetization=magnetization,
         alignment=alignment,
         direction=float(rng.uniform(0., np.pi)),
-        disorder=float(rng.uniform(.3, 1.2)),
+        disorder=float(rng.uniform(0., .8)),
         disorder_length=float(rng.uniform(0., .15) * length),
-        initial_state=preparation, initial_order=float(rng.uniform(0., .35)),
+        initial_state=preparation, initial_order=float(rng.uniform(0., 1.)),
         initial_domain_count=int(rng.integers(1, 4)),
         worm_length=float(rng.uniform(1., 4.) * length),
         worm_waviness=float(rng.uniform(0., .3) * length),
