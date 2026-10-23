@@ -84,6 +84,10 @@ def _beam_direction_for_projected_jones(
     return direction
 
 
+class MagneticGridLimitError(ValueError):
+    """A sampled configuration needs a magnetic grid above the allocation limit."""
+
+
 @dataclass
 class HologramPipelineConfig:
     """Fixed physical parameters shared across all simulation runs.
@@ -627,6 +631,7 @@ class HologramPipeline:
         output_path: Path | str,
         n_samples: int,
         verbose: bool = True,
+        max_sampling_attempts: int = 20,
     ) -> None:
         """Store pipeline configuration and output settings.
 
@@ -642,6 +647,9 @@ class HologramPipeline:
             Number of simulated configurations to generate.
         verbose : bool
             If ``True``, print progress and timing information.
+        max_sampling_attempts : int
+            Maximum draws per parent when magnetic grids exceed the allocation
+            limit. Exhausted parents are skipped; other errors still propagate.
 
         Returns
         -------
@@ -654,6 +662,9 @@ class HologramPipeline:
         self.output_path = Path(output_path)
         self.n_samples = n_samples
         self.verbose = verbose
+        if not isinstance(max_sampling_attempts, int) or max_sampling_attempts < 1:
+            raise ValueError("max_sampling_attempts must be a positive integer")
+        self.max_sampling_attempts = max_sampling_attempts
 
     # ------------------------------------------------------------------
     # Public API
@@ -675,6 +686,7 @@ class HologramPipeline:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         width = len(str(self.n_samples))
         t_start = time.time()
+        completed = rejected = skipped = 0
         previous_random_state = None
         if self.config.random_seed is not None:
             previous_random_state = np.random.get_state()
@@ -690,16 +702,42 @@ class HologramPipeline:
                             flush=True,
                         )
                     t0 = time.time()
-                    self._simulate_one(h5, i)
-                    if self.verbose:
-                        print(f"done ({time.time() - t0:.1f} s)")
+                    existing = set(h5)
+                    for attempt in range(1, self.max_sampling_attempts + 1):
+                        try:
+                            self._simulate_one(h5, i)
+                        except MagneticGridLimitError as error:
+                            # This guard runs before sample allocation or output.
+                            # Do not retry if a custom subclass already wrote data.
+                            if set(h5) != existing:
+                                raise
+                            rejected += 1
+                            if self.verbose:
+                                print(f"\n    rejected draw {attempt}/{self.max_sampling_attempts}: {error}", flush=True)
+                        else:
+                            completed += 1
+                            for key in set(h5) - existing:
+                                if key.isdigit():
+                                    h5[f"{key}/metadata"].create_dataset('sampling_attempts', data=attempt)
+                            if self.verbose:
+                                print(f"done ({time.time() - t0:.1f} s)")
+                            break
+                    else:
+                        skipped += 1
+                        if self.verbose:
+                            print(f"    skipped parent {i}: no feasible draw after {self.max_sampling_attempts} attempts", flush=True)
+                h5.attrs['sampling_completed_parents'] = completed
+                h5.attrs['sampling_rejected_draws'] = rejected
+                h5.attrs['sampling_skipped_parents'] = skipped
+                h5.attrs['sampling_max_attempts'] = self.max_sampling_attempts
+                h5.attrs['acquisition_pair_count'] = sum(key.isdigit() for key in h5)
         finally:
             if previous_random_state is not None:
                 np.random.set_state(previous_random_state)
         if self.verbose:
             elapsed = time.time() - t_start
             print(
-                f"Pipeline complete: {self.n_samples} configurations in "
+                f"Pipeline complete: {completed}/{self.n_samples} configurations ({skipped} skipped) in "
                 f"{elapsed:.1f} s → {self.output_path}"
             )
 
@@ -1462,7 +1500,7 @@ class HologramPipeline:
             target_pitch = constrained_sampling_pitch(p["pattern_config"])
             effective_oversampling = max(effective_oversampling, int(np.ceil(detector_resolution / target_pitch)))
             if effective_oversampling * max(cfg.detector_shape) > cfg.magnetic_pattern_max_grid_axis:
-                raise ValueError(f"Resolved magnetic walls require oversampling={effective_oversampling}, exceeding magnetic_pattern_max_grid_axis={cfg.magnetic_pattern_max_grid_axis}; use a shorter detector distance, wider walls, or an explicitly larger allocation limit")
+                raise MagneticGridLimitError(f"Resolved magnetic walls require oversampling={effective_oversampling}, exceeding magnetic_pattern_max_grid_axis={cfg.magnetic_pattern_max_grid_axis}; use a shorter detector distance, wider walls, or an explicitly larger allocation limit")
         real_space_pixel_size = detector_resolution / effective_oversampling
         metadata["sample/effective_oversampling"] = effective_oversampling
         metadata.update(beamstop_config.get_metadata(prefix="beamstop/"))

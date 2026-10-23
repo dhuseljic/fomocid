@@ -253,7 +253,9 @@ actual_pixel_size = r / actual_oversampling
 
 The physical field of view remains fixed while the simulation grid gains
 pixels. `magnetic_pattern_max_grid_axis` (default 4096) limits each full-grid
-axis; exceeding it raises before sample/grid allocation. It does not silently
+axis; exceeding it rejects the draw before sample/grid allocation. Sweep
+runners retry the whole parent up to `max_sampling_attempts=20` times, then skip
+that parent and continue. It does not silently
 coarsen the wall. Reduce detector distance or change physical parameters, or
 explicitly raise the limit after considering memory. The sweep's detector
 distance sampler also accounts for wall and domain resolution to reduce the

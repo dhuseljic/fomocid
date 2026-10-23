@@ -107,8 +107,9 @@ def test_actual_hologram_saves_binary_state_walls_parameters_and_sampling(tmp_pa
 def test_sampling_allocation_guard_fails_before_large_grid(tmp_path):
     pipeline = HologramPipeline(config=small_hologram_config(magnetic_pattern_max_grid_axis=32),
         ranges=HologramPipelineRanges(), output_path=tmp_path/'too_large.h5', n_samples=1, verbose=False)
-    with pytest.raises(ValueError, match='magnetic_pattern_max_grid_axis'):
-        pipeline.run()
+    with h5py.File(pipeline.output_path, 'w') as h5:
+        with pytest.raises(ValueError, match='magnetic_pattern_max_grid_axis'):
+            pipeline._simulate_one(h5, 0)
 
 
 @pytest.mark.parametrize('use_oh', [False, True])

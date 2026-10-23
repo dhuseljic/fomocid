@@ -160,3 +160,24 @@ In the hierarchical sweep, the draw happens once per magnetic parent; its
 energy, mask, geometry and acquisition branches all inherit that same state.
 The saved generation parameters record the realized target; the measured
 classification is `saturated` with `bubble_count=0`, `stripe_count=1`.
+
+### Rejecting oversized parameter draws
+
+Both sweep runners check the required magnetic grid before sample allocation.
+A grid above `magnetic_pattern_max_grid_axis` rejects that parameter draw;
+the entire experiment (or tree parent) is sampled again. No coarse rescaling
+is used. The constructor option `max_sampling_attempts` defaults to 20. If all
+attempts fail, that requested parent is skipped and the run continues, keeping
+previously saved results. Other errors still stop the run rather than being
+silently ignored. A fixed impossible configuration therefore produces no data
+for that parent; adjust its physical settings or allocation limit if required.
+
+Root HDF5 attributes `sampling_completed_parents`, `sampling_rejected_draws`,
+`sampling_skipped_parents`, `sampling_max_attempts`, and `acquisition_pair_count`
+record the actual result. Each saved leaf has `metadata/sampling_attempts`.
+Skipped independent-sweep experiments leave gaps in numeric sample IDs; enumerate
+existing numeric groups when loading files. Tree parent IDs can likewise have
+gaps, while leaf IDs remain consecutive. Rejected proposals bias the accepted
+sample distribution: the proposed detector distance remains uniform from 5 to
+40 cm, but the saved distances are conditioned on grid feasibility. In a tree,
+no leaves are generated until their parent's grid passes this check.

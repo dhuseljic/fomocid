@@ -2,6 +2,7 @@
 import runpy
 from unittest.mock import patch
 
+import pytest
 import h5py
 import numpy as np
 
@@ -82,3 +83,38 @@ def test_distance_is_sampled_per_parent_and_shared_by_its_leaves(tmp_path):
         assert all(len(values) == 1 for values in distances.values())
         assert all(len(values) == 1 for values in pitches.values())
         assert distances[0] != distances[1]
+
+
+@pytest.mark.parametrize('hierarchical', [False, True])
+def test_oversized_draw_is_resampled_before_pattern_generation(tmp_path, hierarchical):
+    from scattering_calculator.simulation_pipelines.pipelines.hologram_pipeline import HologramPipeline
+    factory = runpy.run_path('tests/test_constrained_pipeline.py')['small_hologram_config']
+    distances = iter([.05, .005])
+    pipeline_type = HierarchicalHologramPipeline if hierarchical else HologramPipeline
+    path = tmp_path / 'resampled.h5'
+    with patch.object(MagneticPatternConfig, 'create_pattern', autospec=True,
+                      side_effect=MagneticPatternConfig.create_pattern) as generate:
+        pipeline_type(config=factory(magnetic_pattern_max_grid_axis=512),
+            ranges=HologramPipelineRanges(detector_distance=lambda _: next(distances)),
+            output_path=path, n_samples=1, verbose=False, max_sampling_attempts=2).run()
+        assert generate.call_count == 1
+    with h5py.File(path) as h5:
+        assert h5.attrs['sampling_rejected_draws'] == 1
+        assert h5.attrs['sampling_completed_parents'] == 1
+        assert h5['00000/metadata/sampling_attempts'][()] == 2
+        assert h5['00000/metadata/detector/sample_to_detector_distance'][()] == .005
+
+
+@pytest.mark.parametrize('hierarchical', [False, True])
+def test_impossible_grid_is_skipped_after_bounded_attempts(tmp_path, hierarchical):
+    from scattering_calculator.simulation_pipelines.pipelines.hologram_pipeline import HologramPipeline
+    factory = runpy.run_path('tests/test_constrained_pipeline.py')['small_hologram_config']
+    path = tmp_path / 'skipped.h5'
+    pipeline_type = HierarchicalHologramPipeline if hierarchical else HologramPipeline
+    pipeline_type(config=factory(magnetic_pattern_max_grid_axis=1),
+        ranges=HologramPipelineRanges(), output_path=path, n_samples=2,
+        verbose=False, max_sampling_attempts=2).run()
+    with h5py.File(path) as h5:
+        assert h5.attrs['sampling_skipped_parents'] == 2
+        assert h5.attrs['sampling_rejected_draws'] == 4
+        assert h5.attrs['acquisition_pair_count'] == 0
