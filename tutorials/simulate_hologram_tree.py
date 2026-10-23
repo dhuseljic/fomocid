@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from fomocid import DATA_ROOT
+from scattering_calculator.simulation_pipelines import Uniform
 
 from scattering_calculator.simulation_pipelines.magnetic_parameters import sample_constrained_domain_parameters
 from scattering_calculator.simulation_pipelines.pipelines.hologram_pipeline import HologramPipelineConfig, HologramPipelineRanges
@@ -39,8 +40,8 @@ def main():
     # L sample/energy branches. OH is unchanged; RH size may vary.
     exits = [{}, {'xray_energy': 780.,
                   'aperture_radii': [300e-9, 40e-9, 40e-9]}]
-    # Keep one fixed camera geometry for every branch. At 40 mm the sample
-    # field is ~3.19 um wide, containing the OH and reference-hole offsets.
+    # Distance is sampled once per independent parent (40–60 mm), not here.
+    # Every branch below that parent retains its camera geometry and grid.
     geometries = [{}]
     # N acquisitions per ideal pair. Defaults retain linear detector response
     # and 10 photon-response variants. All sensor artifacts remain available.
@@ -50,7 +51,7 @@ def main():
     total = args.patterns * len(exits) * len(geometries) * len(acquisitions)
     print(f'{args.patterns} patterns -> {total} CR/CL acquisition pairs')
     HierarchicalHologramPipeline(config=config,
-        ranges=HologramPipelineRanges(pattern_config=lambda _: sample_constrained_domain_parameters(
+        ranges=HologramPipelineRanges(detector_distance=Uniform(.04, .06), pattern_config=lambda _: sample_constrained_domain_parameters(
             rng, saturation_probability=saturation_probability)),
         output_path=args.output, n_samples=args.patterns, exit_variants=exits,
         geometry_variants=geometries, acquisition_variants=acquisitions).run()

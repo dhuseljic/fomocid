@@ -58,3 +58,27 @@ def test_first_branch_matches_independent_pipeline_and_rejects_oh_changes(tmp_pa
     with pytest.raises(ValueError, match='object-hole'):
         HierarchicalHologramPipeline(output_path=tmp_path/'bad.h5',
             exit_variants=[{'aperture_radii': [40e-9, 6e-9]}], **common).run()
+
+
+def test_distance_is_sampled_per_parent_and_shared_by_its_leaves(tmp_path):
+    from scattering_calculator.simulation_pipelines import Uniform
+    factory = runpy.run_path('tests/test_constrained_pipeline.py')['small_hologram_config']
+    path = tmp_path / 'parent_distances.h5'
+    HierarchicalHologramPipeline(config=factory(),
+        ranges=HologramPipelineRanges(detector_distance=Uniform(.005, .006)),
+        output_path=path, n_samples=2, verbose=False,
+        exit_variants=[{}, {'xray_energy': 780.}],
+        acquisition_variants=[{}, {'measurement_config': {'exposure_time': .2}}]).run()
+    with h5py.File(path) as h5:
+        distances, pitches = {}, {}
+        for key in h5:
+            if not key.isdigit():
+                continue
+            meta = h5[f'{key}/metadata']
+            parent = int(meta['hierarchy/pattern_id'][()])
+            distances.setdefault(parent, set()).add(float(meta['detector/sample_to_detector_distance'][()]))
+            pitches.setdefault(parent, set()).add(float(meta['sample/real_space_pixel_size'][()]))
+        assert len(distances) == 2
+        assert all(len(values) == 1 for values in distances.values())
+        assert all(len(values) == 1 for values in pitches.values())
+        assert distances[0] != distances[1]

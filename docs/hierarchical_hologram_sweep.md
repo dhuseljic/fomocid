@@ -11,15 +11,18 @@ By default results are saved to `DATA_ROOT / "Data" / "hologram_tree" /
 this with `--output /path/to/file.h5` if needed.
 
 The example creates **30 CR/CL acquisition pairs**: five magnetic patterns × two
-exit-wave variants × one fixed detector geometry × three acquisitions. Edit the
+exit-wave variants × one detector geometry per parent × three acquisitions. Edit the
 `exits`, `geometries` and `acquisitions` lists in that script to change branching.
 `--patterns` counts independent magnetic parents, not final output groups.
-The example keeps detector distance fixed at 40 mm for every branch. At the
-parent energy of 778 eV and 20 um detector pitch, the real-space field is about
-3.19 um wide, containing the 600 nm OH and reference holes at 1 um offsets.
-The earlier 5 mm setting gave only 0.40 um and clipped the mask; increasing
-oversampling alone cannot enlarge that field. Distance variation remains an
-optional API capability, but the example does not use it.
+The example samples detector distance uniformly between 40 and 60 mm once per
+independent magnetic parent through `ranges.detector_distance`. All exit-wave
+and acquisition branches under that parent retain its sampled distance and
+real-space grid; distance is not varied in a sub-loop. Each new parent gets a
+new draw. At 778 eV and 20 um detector pitch, this range gives at least about
+3.19 um of real-space field width, containing the 600 nm OH and reference holes
+at 1 um offsets. The earlier 5 mm setting clipped the mask; oversampling alone
+cannot enlarge the field. The independent sweep likewise samples its distance
+once per experiment, using its existing sampling and field-of-view bounds.
 
 The original `simulate_hologram_sweep.py` remains available for independent runs.
 The output path is overwritten when the pipeline runs, like the original sweep.
