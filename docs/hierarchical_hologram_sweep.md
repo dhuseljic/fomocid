@@ -3,13 +3,24 @@
 Run the new example from the repository root with the project environment active:
 
 ```bash
-PYTHONPATH=src python tutorials/simulate_hologram_tree.py --patterns 5 --output output/hologram_tree.h5
+PYTHONPATH=src python tutorials/simulate_hologram_tree.py --patterns 5
 ```
 
-The example creates **60 CR/CL acquisition pairs**: five magnetic patterns × two
-exit-wave variants × two detector geometries × three acquisitions. Edit the
+By default results are saved to `DATA_ROOT / "Data" / "hologram_tree" /
+"simulation_tree.h5"`, following the sweep data-folder convention. Override
+this with `--output /path/to/file.h5` if needed.
+
+The example creates **30 CR/CL acquisition pairs**: five magnetic patterns × two
+exit-wave variants × one fixed detector geometry × three acquisitions. Edit the
 `exits`, `geometries` and `acquisitions` lists in that script to change branching.
 `--patterns` counts independent magnetic parents, not final output groups.
+The example keeps detector distance fixed at 40 mm for every branch. At the
+parent energy of 778 eV and 20 um detector pitch, the real-space field is about
+3.19 um wide, containing the 600 nm OH and reference holes at 1 um offsets.
+The earlier 5 mm setting gave only 0.40 um and clipped the mask; increasing
+oversampling alone cannot enlarge that field. Distance variation remains an
+optional API capability, but the example does not use it.
+
 The original `simulate_hologram_sweep.py` remains available for independent runs.
 The output path is overwritten when the pipeline runs, like the original sweep.
 
@@ -101,7 +112,8 @@ appear only on the first leaf of each exit branch.
 
 ```python
 import h5py
-with h5py.File('output/hologram_tree.h5', 'r') as f:
+from fomocid import DATA_ROOT
+with h5py.File(DATA_ROOT / 'Data' / 'hologram_tree' / 'simulation_tree.h5', 'r') as f:
     group = f['00000']
     parent = group['metadata/hierarchy/pattern_id'][()]
     ideal_id = group['metadata/hierarchy/ideal_hologram_id'].asstr()[()]

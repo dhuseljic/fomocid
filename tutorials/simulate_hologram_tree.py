@@ -8,6 +8,8 @@ from pathlib import Path
 
 import numpy as np
 
+from fomocid import DATA_ROOT
+
 from scattering_calculator.simulation_pipelines.magnetic_parameters import sample_constrained_domain_parameters
 from scattering_calculator.simulation_pipelines.pipelines.hologram_pipeline import HologramPipelineConfig, HologramPipelineRanges
 from scattering_calculator.simulation_pipelines.pipelines.hierarchical_hologram_pipeline import HierarchicalHologramPipeline
@@ -17,7 +19,7 @@ def main():
     """Parse output settings and run the editable example branching tree."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--patterns', type=int, default=5)
-    parser.add_argument('--output', type=Path, default=Path('output/hologram_tree.h5'))
+    parser.add_argument('--output', type=Path, default=DATA_ROOT / 'Data' / 'hologram_tree' / 'simulation_tree.h5')
     parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()
     if args.patterns < 1:
@@ -26,7 +28,7 @@ def main():
     rng = np.random.default_rng(args.seed)
     config = HologramPipelineConfig(
         recipe='Au(100)/SiN(100)/Co(20)', detector_shape=(256, 256),
-        detector_distance=.005, xray_energy=778., xray_photon_flux=1e8,
+        detector_distance=.04, xray_energy=778., xray_photon_flux=1e8,
         propagator_method='Scalar', beamstop_method=None, random_seed=args.seed,
         aperture_radii=[300e-9, 30e-9, 30e-9],
         aperture_centers=[(0., 0.), (1e-6, 0.), (0., 1e-6)],
@@ -37,9 +39,9 @@ def main():
     # L sample/energy branches. OH is unchanged; RH size may vary.
     exits = [{}, {'xray_energy': 780.,
                   'aperture_radii': [300e-9, 40e-9, 40e-9]}]
-    # M geometries per exit-wave pair, using the same real-space grid.
-    geometries = [{'sample_to_detector_distance': distance}
-                  for distance in [.005, .007]]
+    # Keep one fixed camera geometry for every branch. At 40 mm the sample
+    # field is ~3.19 um wide, containing the OH and reference-hole offsets.
+    geometries = [{}]
     # N acquisitions per ideal pair. Defaults retain linear detector response
     # and 10 photon-response variants. All sensor artifacts remain available.
     acquisitions = [{'measurement_config': {'exposure_time': exposure,
