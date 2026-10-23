@@ -54,7 +54,8 @@ def test_pipeline_config_does_not_duplicate_per_sample_configs(tmp_path: Path) -
         assert "_pipeline_config/propagate" not in h5
         assert "_pipeline_config/propagator_method" not in h5
         assert "_pipeline_config/propagator_config/propagator_method" not in h5
-        assert sorted(h5["_pipeline_config"].keys()) == ["n_samples", "oversampling"]
+        assert sorted(h5["_pipeline_config"].keys()) == ["hdf5_compression", "n_samples", "oversampling"]
+        assert h5["_pipeline_config/hdf5_compression"].asstr()[()] == "lzf"
 
 
 def test_detector_center_can_be_sampled_from_ranges(tmp_path: Path) -> None:

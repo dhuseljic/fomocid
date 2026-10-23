@@ -265,3 +265,6 @@ Sweep output defaults to major-step timings and total elapsed time
 Set `detailed_logging=True` to restore generator, detector and stage breakdowns.
 All timing diagnostics are still saved in HDF5. The desktop GUI enables detailed
 logging in its dedicated progress pane.
+
+See [Choosing the HDF5 save mode](hdf5_save_modes.md) for script, command-line
+and GUI controls, storage precision, lossless roundtrip checks and readback.

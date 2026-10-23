@@ -1906,6 +1906,7 @@ class Structure:
         use_aperture_roi: bool = True,
         compact: bool = True,
         lazy: bool = True,
+        geometry_cache=None,
     ) -> None:
         """Build the spatially resolved scalar refractive-index stack.
 
@@ -1961,6 +1962,7 @@ class Structure:
             pol,
             use_aperture_roi=use_aperture_roi,
             lazy=lazy and compact,
+            geometry_cache=geometry_cache,
         )
         if compact:
             self.final_scalar_refractive_index = compact_stack

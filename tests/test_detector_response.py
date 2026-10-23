@@ -399,3 +399,55 @@ def test_acquisition_mode_is_validated_and_configurable():
     model.acquisition_mode = "unknown"
     with pytest.raises(ValueError, match="acquisition_mode"):
         model.add_noise()
+
+
+@pytest.mark.parametrize('mode', ['accumulated', 'per_frame'])
+def test_beamstop_attenuates_photon_statistics_before_detection(mode):
+    model = detector_model(shape=(200, 250), rate=10., frames=2, gain=1.)
+    model.acquisition_mode = mode
+    model.beamstop.beamstop[:] = .5
+    model.add_noise(store_no_beamstop=True)
+    assert abs(model.hologram_exp.mean()-5.) < .05
+    # Averaging two Poisson(5) frames has variance 2.5, not 1.25.
+    assert abs(model.hologram_exp.var()-2.5) < .1
+    assert abs(model.hologram_exp_no_beamstop.mean()-10.) < .07
+    assert abs(model.hologram_exp_no_beamstop.var()-5.) < .2
+
+
+def test_charge_can_spread_into_the_beamstop_shadow_without_post_masking():
+    model = detector_model(shape=(4, 4), rate=0., frames=1, gain=1.)
+    model.hologram_detector[:, 0] = 100.
+    model.beamstop.beamstop[:, 1:] = 1.
+    model._spread_photons = lambda photons, rng: np.roll(photons, 1, axis=1)
+    model.add_noise()
+    assert np.all(model.hologram_exp[:, 1] > 0)
+    assert np.all(model.hologram_exp[:, 2:] == 0)
+
+
+def test_optional_no_beamstop_output_does_not_change_masked_events():
+    first = detector_model(shape=(20, 30), rate=10., frames=1, gain=1.)
+    second = detector_model(shape=(20, 30), rate=10., frames=1, gain=1.)
+    first.beamstop.beamstop[:] = .4
+    second.beamstop.beamstop[:] = .4
+    first.add_noise(store_no_beamstop=False)
+    second.add_noise(store_no_beamstop=True)
+    np.testing.assert_array_equal(first.hologram_exp, second.hologram_exp)
+
+
+def test_beamstop_transmission_is_clipped_and_rejects_nonfinite_masks():
+    model = detector_model(shape=(8, 8), rate=10., frames=1, gain=1.)
+    model.beamstop.beamstop[:] = 1. + 4e-16
+    model.add_noise()
+    np.testing.assert_array_equal(model.hologram_exp, 0.)
+    model.beamstop.beamstop[:] = -4e-16
+    model.add_noise()
+    assert model.hologram_exp.sum() > 0
+    for clipped in [1.01, -.01]:
+        model.beamstop.beamstop[:] = clipped
+        model.add_noise()
+        assert np.isfinite(model.hologram_exp).all()
+        assert np.all((model.beamstop.beamstop >= 0) & (model.beamstop.beamstop <= 1))
+    for invalid in [np.nan, np.inf]:
+        model.beamstop.beamstop[:] = invalid
+        with pytest.raises(ValueError, match='Beamstop transmission'):
+            model.add_noise()

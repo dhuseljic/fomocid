@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 
 import numpy as np
 import scipy as scp
@@ -191,6 +192,7 @@ class scalar_wavefronts:
             layer_callback=layer_callback,
             prefix_cache=prefix_cache,
         )
+        farfield_start = perf_counter()
         self.exit_wave_for_farfield = self._build_farfield_exit_wave(
             self.exit_wave,
             farfield_background_scalar,
@@ -200,6 +202,7 @@ class scalar_wavefronts:
             self.exit_wave_for_farfield
         )
         self.hologram = np.abs(self.detector_wave) ** 2
+        self.scalar_timings_seconds["farfield"] = perf_counter() - farfield_start
 
     @staticmethod
     def _as_scalar_field(E_in, polarization):
@@ -334,12 +337,21 @@ class scalar_wavefronts:
                 start_layer = prefix_length
                 self.reused_prefix_layers = prefix_length
             elif prefix_length > 0:
-                prefix_cache.clear()
+                prefix_cache.pop("field", None)
                 prefix_cache.update(key=cache_key, incident=E_in.copy())
             else:
                 cache_key = None
 
+        loop_start = perf_counter()
+        shared_time = 0.
+        suffix_start = loop_start
+        has_shared_prefix = cache_key is not None and start_layer == 0
+        if has_shared_prefix:
+            suffix_start = None
         for iz in range(start_layer, len(thicknesses)):
+            if has_shared_prefix and iz == prefix_length:
+                shared_time = perf_counter() - loop_start
+                suffix_start = perf_counter()
             if cache_key is not None and iz == prefix_length and 'field' not in prefix_cache:
                 prefix_cache['field'] = E_in.copy()
             dz = thicknesses[iz]
@@ -403,6 +415,11 @@ class scalar_wavefronts:
                 k0 = 2 * np.pi / wavelength
                 E_in = E_in * np.exp(-1j * k0 * float(dz))
 
+        loop_end = perf_counter()
+        if has_shared_prefix and suffix_start is None:
+            shared_time = loop_end - loop_start
+        self.scalar_timings_seconds = dict(shared_prefix=shared_time,
+            polarization_suffix=loop_end-suffix_start if suffix_start is not None else 0.)
         if cache_key is not None and 'field' not in prefix_cache:
             prefix_cache['field'] = E_in.copy()
         return E_in
@@ -821,6 +838,7 @@ def calculate_scalar_refractive_index_stack(
     pol,
     use_aperture_roi=True,
     lazy=True,
+    geometry_cache=None,
 ):
     """Build a compact scalar refractive-index stack from sample data.
 
@@ -854,22 +872,30 @@ def calculate_scalar_refractive_index_stack(
     has_circular = np.abs(circular_coeff * n_circ) > tol
     has_linear = np.abs(linear_coeff * n_lin) > tol
 
-    aperture_support = np.zeros(mask.shape[1:], dtype=bool)
-    for layer_mask in mask:
-        aperture_support |= np.abs(1.0 - np.asarray(layer_mask, dtype=float)) > tol
-    has_aperture_support = np.any(aperture_support)
-    if not has_aperture_support:
-        aperture_support = np.ones(mask.shape[1:], dtype=bool)
-        support_objects = [(slice(0, mask.shape[1]), slice(0, mask.shape[2]))]
-    elif use_aperture_roi:
-        labels, _ = label(aperture_support)
-        support_objects = [obj for obj in find_objects(labels) if obj is not None]
+    geometry_key = (id(mask), mask.shape, bool(use_aperture_roi))
+    if geometry_cache is not None and geometry_cache.get('key') == geometry_key:
+        aperture_support, support_objects, aperture_support_regions = geometry_cache['value']
     else:
-        support_objects = [(slice(0, mask.shape[1]), slice(0, mask.shape[2]))]
+        aperture_support = np.zeros(mask.shape[1:], dtype=bool)
+        for layer_mask in mask:
+            aperture_support |= np.abs(1.0 - np.asarray(layer_mask, dtype=float)) > tol
+        has_aperture_support = np.any(aperture_support)
+        if not has_aperture_support:
+            aperture_support = np.ones(mask.shape[1:], dtype=bool)
+            support_objects = [(slice(0, mask.shape[1]), slice(0, mask.shape[2]))]
+        elif use_aperture_roi:
+            labels, _ = label(aperture_support)
+            support_objects = [obj for obj in find_objects(labels) if obj is not None]
+        else:
+            support_objects = [(slice(0, mask.shape[1]), slice(0, mask.shape[2]))]
 
-    aperture_support_regions = (
-        tuple(support_objects) if use_aperture_roi and has_aperture_support else None
-    )
+        aperture_support_regions = (
+            tuple(support_objects) if use_aperture_roi and has_aperture_support else None
+        )
+        if geometry_cache is not None:
+            geometry_cache.clear()
+            geometry_cache.update(key=geometry_key,
+                value=(aperture_support, support_objects, aperture_support_regions))
 
     if lazy:
         sample_structure.scalar_refractive_index_stack = LazyScalarRefractiveIndexStack(

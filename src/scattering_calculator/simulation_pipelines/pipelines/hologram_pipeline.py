@@ -346,6 +346,7 @@ class HologramPipelineConfig:
 
     recipe: str
     sample_name: str | None = None
+    hdf5_compression: Literal["lzf", "gzip"] | None = "lzf"
 
     # X-ray source
     xray_energy: float = 787.9  # eV
@@ -677,6 +678,8 @@ class HologramPipeline:
         """
         from ..experiment import ExperimentConfig
         self.config = config.to_pipeline_config() if isinstance(config, ExperimentConfig) else config
+        if self.config.hdf5_compression not in ("lzf", "gzip", None):
+            raise ValueError("hdf5_compression must be lzf, gzip, or None")
         self.ranges = ranges
         self.output_path = Path(output_path)
         self.n_samples = n_samples
@@ -1889,12 +1892,8 @@ class HologramPipeline:
         t_stage = mark_stage("magnetic diagnostics", t_stage)
 
         if cfg.propagator_method == "Scalar":
-            sample_config.sample_structure.calculate_final_scalar_refractive_index(
-                pol="CR",
-                use_aperture_roi=cfg.use_roi and cfg.dielectric_tensor_use_roi,
-                compact=True,
-                lazy=cfg.scalar_refractive_index_lazy,
-            )
+            # The helicity setup builds its actual scalar index lazily; an
+            # eager CR preparation here would immediately be rebuilt below.
             metadata["sample/dielectric_tensor/skipped_for_scalar"] = True
             metadata["sample/scalar_refractive_index/use_roi"] = bool(
                 cfg.use_roi and cfg.dielectric_tensor_use_roi
@@ -2037,6 +2036,7 @@ class HologramPipeline:
                     "farfield_oversampling": cfg.farfield_oversampling,
                 },
             )
+            cached_propagator = pol in getattr(self, "_propagators", {})
             propagator_config = self._setup_propagator(propagator_config, pol)
             t_stage = mark_stage(
                 f"{pol} {cfg.propagator_method} propagation", t_stage
@@ -2044,6 +2044,10 @@ class HologramPipeline:
 
             metadata[f"propagator/{pol}/reused_prefix_layers"] = int(getattr(
                 propagator_config.return_wavefront(), "reused_prefix_layers", 0))
+            scalar_times = ({} if cached_propagator else getattr(
+                propagator_config.return_wavefront(), 'scalar_timings_seconds', {}))
+            for name, seconds in scalar_times.items():
+                metadata[f"propagator/{pol}/timing_seconds/{name}"] = seconds
             self._detect_ideal(detector_config, propagator_config, pol)
             t_stage = mark_stage(f"{pol} detector ideal", t_stage)
 
@@ -2162,6 +2166,18 @@ class HologramPipeline:
             print()
             for label, elapsed in major.items():
                 print(f"    {label}: {elapsed:.2f} s", flush=True)
+                if label == 'Exit-wave propagation (CR + CL)':
+                    def measured(pol, name):
+                        return metadata.get(f"propagator/{pol}/timing_seconds/{name}", 0.)
+                    if any(f"propagator/{pol}/timing_seconds/polarization_suffix" in metadata
+                           for pol in self._POLARIZATIONS):
+                        shared = sum(measured(pol, 'shared_prefix') for pol in self._POLARIZATIONS)
+                        farfield = sum(measured(pol, 'farfield') for pol in self._POLARIZATIONS)
+                        print(f"      Shared prefix: {shared:.3f} s; "
+                              f"CR suffix: {measured('CR', 'polarization_suffix'):.3f} s; "
+                              f"CL suffix: {measured('CL', 'polarization_suffix'):.3f} s; "
+                              f"final FFTs: {farfield:.3f} s", flush=True)
+
 
         if self.verbose and self.detailed_logging:
             breakdown = ", ".join(
@@ -2275,7 +2291,7 @@ class HologramPipeline:
                     copy=False,
                 )
                 grp.create_dataset(
-                    f"{helicity}/{source}", data=arr, compression="gzip"
+                    f"{helicity}/{source}", data=arr, compression=self.config.hdf5_compression
                 )
 
         # Beamstop mask
@@ -2283,44 +2299,44 @@ class HologramPipeline:
             grp.create_dataset(
                 "beamstop_mask",
                 data=np.asarray(detector_config.detector_layout.beamstop),
-                compression="gzip",
+                compression=self.config.hdf5_compression,
             )
 
         grp.create_dataset(
             "supportmask",
             data=np.asarray(supportmask, dtype=np.uint8),
-            compression="gzip",
+            compression=self.config.hdf5_compression,
         )
         grp.create_dataset(
             "magnetic_pattern_oh",
             data=np.asarray(magnetic_pattern_oh, dtype=np.float32),
-            compression="gzip",
+            compression=self.config.hdf5_compression,
         )
         if False:
             grp.create_dataset(
                 "aperture_material_fraction",
                 data=np.asarray(aperture_material_fraction, dtype=np.float32),
-                compression="gzip",
+                compression=self.config.hdf5_compression,
             )
             grp.create_dataset(
                 "aperture_yz_cut",
                 data=np.asarray(aperture_yz_cut, dtype=np.float32),
-                compression="gzip",
+                compression=self.config.hdf5_compression,
             )
             grp.create_dataset(
                 "aperture_xz_cut",
                 data=np.asarray(aperture_xz_cut, dtype=np.float32),
-                compression="gzip",
+                compression=self.config.hdf5_compression,
             )
             grp.create_dataset(
                 "aperture_yz_cuts",
                 data=np.asarray(aperture_yz_cuts, dtype=np.float32),
-                compression="gzip",
+                compression=self.config.hdf5_compression,
             )
             grp.create_dataset(
                 "aperture_xz_cuts",
                 data=np.asarray(aperture_xz_cuts, dtype=np.float32),
-                compression="gzip",
+                compression=self.config.hdf5_compression,
             )
 
         self._write_metadata(grp, metadata, aperture_config)
@@ -2501,5 +2517,6 @@ class HologramPipeline:
         """
         cfg = self.config
         grp = h5.create_group("_pipeline_config")
+        grp.create_dataset("hdf5_compression", data=cfg.hdf5_compression or "none")
         grp.create_dataset("n_samples", data=self.n_samples)
         grp.create_dataset("oversampling", data=cfg.oversampling)

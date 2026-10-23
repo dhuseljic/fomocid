@@ -23,6 +23,8 @@ def main():
     parser.add_argument('--patterns', type=int, default=5)
     parser.add_argument('--output', type=Path, default=DATA_ROOT / 'Data' / 'hologram_tree' / 'simulation_tree.h5')
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--compression', choices=('lzf', 'gzip', 'none'), default='lzf',
+                        help='Lossless HDF5 save mode; none disables compression')
     parser.add_argument('--fixed-recipe', action='store_true',
                         help='Use config.recipe for every parent instead of random stacks')
     args = parser.parse_args()
@@ -33,9 +35,11 @@ def main():
     rng = np.random.default_rng(args.seed)
     config = HologramPipelineConfig(
         # Fixed recipe used with --fixed-recipe (or randomize_recipe=False).
-        recipe='Au(100)/SiN(100)/Co(20)', detector_shape=(256, 256),
+        recipe='Au(100)/SiN(100)/Co(20)',
+        hdf5_compression=None if args.compression == 'none' else args.compression, detector_shape=(256, 256),
         detector_distance=.04, xray_energy=778., xray_photon_flux=1e8,
         propagator_method='Scalar', beamstop_method=None, random_seed=args.seed,
+        save_detected_hologram_without_beamstop=False,  # optional extra acquisition disabled
         aperture_radii=[300e-9, 30e-9, 30e-9],
         aperture_centers=[(0., 0.), (1e-6, 0.), (0., 1e-6)],
         pattern_type='constrained_domain_pattern',

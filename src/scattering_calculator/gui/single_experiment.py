@@ -143,7 +143,7 @@ def polarization_view(cr, cl, mode):
 SECTIONS = (
     'Magnetic pattern', 'Sample structure and grid', 'Holography mask',
     'X-rays and illumination', 'Detector geometry', 'Acquisition and sensor response',
-    'Beamstop', 'Propagation',
+    'Beamstop', 'Propagation', 'Output',
 )
 
 
@@ -193,6 +193,8 @@ def aperture_preview(config, max_axis=256):
 
 def group_for(name):
     """Assign every backend configuration field to a thematic panel."""
+    if name == 'hdf5_compression':
+        return 'Output'
     if name in {'oversampling', 'random_seed', 'use_roi',
                 'magnetic_pattern_max_grid_axis', 'magnetic_pattern_use_roi'}:
         return 'Sample structure and grid'
@@ -238,6 +240,7 @@ def parameter_is_active(path, preparation='random', order=0., disorder=0., attem
 
 
 CHOICES = {
+    'hdf5_compression': ('lzf', 'gzip', 'None'),
     'propagator_method': ('Scalar', 'Jones', 'Stokes'),
     'pattern_type': ('constrained_domain_pattern',),
     'initial_state': ('random', 'stripes', 'hexagonal', 'worms'),

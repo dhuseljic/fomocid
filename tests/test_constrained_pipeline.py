@@ -349,9 +349,44 @@ def test_default_progress_omits_stage_details_but_saves_timings(tmp_path, capsys
     output = capsys.readouterr().out
     assert 'Simulating...' in output and 'Total:' in output and 'Pipeline complete' in output
     for label in ['Experiment setup:', 'Magnetic pattern:', 'Aperture construction:',
-                  'Exit-wave propagation (CR + CL):', 'Detector acquisition (CR + CL):', 'Save results:']:
+                  'Exit-wave propagation (CR + CL):', 'Shared prefix:', 'CR suffix:', 'CL suffix:',
+                  'final FFTs:', 'Detector acquisition (CR + CL):', 'Save results:']:
         assert label in output
     for text in ['relaxation breakdown', 'detector noise:', 'magnetic grid=', 'timing:', 'generator total']:
         assert text not in output
     with h5py.File(path) as h5:
         assert h5['00000/metadata/timing_seconds/domain_relaxation_and_walls'][()] >= 0
+
+
+@pytest.mark.parametrize('compression', ['lzf', 'gzip', None])
+def test_lossless_output_compression_is_configurable(tmp_path, compression):
+    path = tmp_path/'compression.h5'
+    HologramPipeline(config=small_hologram_config(hdf5_compression=compression),
+        ranges=HologramPipelineRanges(), output_path=path, n_samples=1, verbose=False).run()
+    with h5py.File(path) as h5:
+        for name in ['CR/exit_wave', 'CL/ideal', 'CR/detected', 'supportmask', 'magnetic_pattern_oh']:
+            assert h5[f'00000/{name}'].compression == compression
+            assert np.isfinite(h5[f'00000/{name}'][()]).all()
+
+
+def test_compression_modes_roundtrip_identical_arrays_and_dtypes(tmp_path):
+    arrays = None
+    for compression in ['lzf', 'gzip', None]:
+        path = tmp_path/f'{compression}.h5'
+        config = small_hologram_config(hdf5_compression=compression,
+            detector_params={'noise_seed': 7, 'counts_per_photon': 100.,
+                             'readout_noise_average': 0., 'readout_noise_sigma': 0.})
+        HologramPipeline(config=config, ranges=HologramPipelineRanges(),
+            output_path=path, n_samples=1, verbose=False).run()
+        with h5py.File(path) as h5:
+            names = ['CR/exit_wave', 'CL/exit_wave', 'CR/ideal', 'CL/ideal',
+                     'CR/detected', 'CL/detected', 'supportmask', 'magnetic_pattern_oh']
+            current = {name: h5[f'00000/{name}'][()] for name in names}
+            assert current['CR/exit_wave'].dtype == np.complex64
+            assert current['CR/ideal'].dtype == np.float32
+            if arrays is None:
+                arrays = current
+            else:
+                for name in names:
+                    assert current[name].dtype == arrays[name].dtype
+                    np.testing.assert_array_equal(current[name], arrays[name])

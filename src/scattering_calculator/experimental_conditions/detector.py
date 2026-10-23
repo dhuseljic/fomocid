@@ -370,7 +370,7 @@ class beamstop:
         if sigma_effective is not None and sigma_effective != 0:
             mask = gaussian_filter(mask, sigma_effective)
 
-        self.beamstop = mask
+        self.beamstop = np.clip(mask, 0., 1.)
 
     def create_empty_beamstop(self) -> None:
         """Create an empty beamstop mask (all zeros)."""
@@ -1083,15 +1083,40 @@ class detector_hologram:
         tick = perf_counter()
         components = self._expected_photon_components()
         timings['expected_photons'] = perf_counter() - tick
+        transmission = 1.0
+        if apply_beamstop_mask and self.beamstop is not None:
+            mask = np.asarray(self.beamstop.beamstop, dtype=float)
+            if not np.isfinite(mask).all():
+                raise ValueError('Beamstop transmission must be finite')
+            self.beamstop.beamstop = np.clip(mask, 0., 1.)
+            transmission = 1.0 - self.beamstop.beamstop
+        extra_signal = np.zeros_like(signal_adu) if store_no_beamstop else None
+        extra_seed = getattr(self, 'noise_seed', None)
+        extra_rng = np.random.default_rng(None if extra_seed is None else
+                                         np.random.SeedSequence([int(extra_seed), 0xBEA]))
         for gain, expected_photons in components:
             tick = perf_counter()
-            photons = rng.poisson(expected_photons * self.number_frames).astype(np.int64)
+            photons = rng.poisson(expected_photons * transmission * self.number_frames).astype(np.int64)
             timings['photon_sampling'] += perf_counter() - tick
             tick = perf_counter()
             signal_adu += gain * self._spread_photons(photons, rng)
             timings['charge_spreading'] += perf_counter() - tick
+            if store_no_beamstop and np.any(np.asarray(transmission) < 1):
+                # Independent complementary Poisson events give an unblocked
+                # realization while retaining exactly the transmitted events.
+                tick = perf_counter()
+                blocked = extra_rng.poisson(expected_photons * (1-transmission) * self.number_frames)
+                timings['photon_sampling'] += perf_counter() - tick
+                tick = perf_counter()
+                extra_model = copy(self)
+                extra_model.regenerate_photon_kernels = False
+                extra_signal += gain * extra_model._spread_photons(blocked, extra_rng)
+                timings['charge_spreading'] += perf_counter() - tick
         tick = perf_counter()
-        if response is not None:
+        def convert_response(signal_adu):
+            if response is None:
+                return signal_adu
+
             converted = np.asarray(response(signal_adu.copy() / self.number_frames))
             if np.iscomplexobj(converted):
                 raise ValueError("nonlinear_response must return real ADU")
@@ -1104,7 +1129,9 @@ class detector_hologram:
                 ) from error
             if not np.isfinite(converted).all() or np.any(converted < 0):
                 raise ValueError("nonlinear_response must return finite nonnegative ADU")
-            signal_adu = converted.copy() * self.number_frames
+            return converted.copy() * self.number_frames
+        unmasked_signal = convert_response(signal_adu + extra_signal) if store_no_beamstop else None
+        signal_adu = convert_response(signal_adu)
         timings['nonlinear_response'] = perf_counter() - tick
         artifact_seed = int(rng.integers(0, np.iinfo(np.uint32).max))
         tick = perf_counter()
@@ -1119,15 +1146,15 @@ class detector_hologram:
             )
 
         timings['readout_draw'] = perf_counter() - tick
-        def finalize_detection(image, apply_mask=True, apply_threshold=True):
+        def finalize_detection(image, apply_threshold=True):
             """Finish the accumulated exposure using shared readout/artifact draws.
 
             Parameters
             ----------
             image : ndarray
                 Converted ADU before readout.
-            apply_mask, apply_threshold : bool
-                Apply the beamstop shadow and ADC clipping.
+            apply_threshold : bool
+                Apply ADC clipping; optical attenuation was applied before events.
 
             Returns
             -------
@@ -1135,8 +1162,6 @@ class detector_hologram:
                 Acquired signal averaged over the requested frames.
             """
             detected = np.array(image, dtype=float, copy=True)
-            if apply_mask:
-                detected *= 1.0 - self.beamstop.beamstop
             # These effects originate in the sensor/readout and therefore are
             # not shadowed by an upstream optical beamstop.
             detected = self._add_sensor_artifacts(
@@ -1158,14 +1183,12 @@ class detector_hologram:
         tick = perf_counter()
         if store_no_beamstop:
             self.hologram_exp_no_beamstop = finalize_detection(
-                signal_adu,
-                apply_mask=False,
+                unmasked_signal,
                 apply_threshold=False,
             )
 
         self.hologram_exp = finalize_detection(
             signal_adu,
-            apply_mask=apply_beamstop_mask,
             apply_threshold=apply_detector_threshold,
         )
         timings['finalization'] = perf_counter() - tick

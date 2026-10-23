@@ -206,7 +206,28 @@ are also saved under
 `00000/metadata/detector_response/{CR,CL}/timing_seconds/`, with keys
 `expected_photons`, `photon_sampling`, `charge_spreading`, `nonlinear_response`,
 `readout_draw`, `finalization`, and `total`. Replace `00000` with the simulation
-index. Finalization includes beamstop masking, sensor artifacts, rounding, ADC
+index. Finalization includes sensor artifacts, rounding, ADC
 clipping, and the optional unmasked output. In `per_frame` mode, component times
 are summed over frames; `total` measures the complete acquisition, including
 frame assembly. The total includes the component times; do not add it to them.
+
+
+Optical beamstop attenuation is applied to the expected photon counts **before
+Poisson sampling**, charge spreading and nonlinear detector response. Fractional
+transmission therefore thins the incident photon process rather than scaling
+already-detected ADU. Charge deposited by a transmitted photon may spread into
+neighboring shadowed pixels; those pixels are not masked again afterward.
+Readout noise, defects and cosmic rays originate in the sensor and remain after
+the optical attenuation.
+
+When the optional no-beamstop output is requested, it shares the transmitted
+photon events and adds independent Poisson events for the blocked contribution.
+Each version receives its own charge/response calculation before shared readout
+and artifact realizations. Requesting this extra output does not change the
+masked photon draws. The no-beamstop image remains unclipped by the ADC threshold.
+
+The beamstop array is an **opacity mask in [0,1]**: zero is open and one is
+fully blocked. Generated masks and finite masks supplied to acquisition are
+clipped to these bounds; optical photon transmission is `1 - beamstop`. NaN
+and infinite mask values are rejected. This also removes Gaussian-filter
+roundoff above one before Poisson sampling.

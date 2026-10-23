@@ -2441,6 +2441,8 @@ class SamplePropagatorConfig(_ConfigMixin):
                 self.propagator_config.get("dielectric_tensor_use_roi", True)
             ),
             compact=True,
+            geometry_cache=(self.propagator_config["scalar_prefix_cache"].setdefault("geometry", {})
+                if "scalar_prefix_cache" in self.propagator_config else None),
             lazy=bool(
                 self.propagator_config.get("scalar_refractive_index_lazy", True)
             ),

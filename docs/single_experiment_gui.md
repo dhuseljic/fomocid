@@ -152,3 +152,11 @@ The default lazy Scalar backend reuses the nonmagnetic propagation prefix across
 CR and CL, then propagates the magnetic suffix separately. This optimization
 also applies to the independent and hierarchical sweep backends; see
 [shared propagation](simulate_hologram_sweep.md#shared-nonmagnetic-scalar-propagation).
+
+The **Output** panel selects lossless HDF5 array compression: fast `lzf`
+(default), smaller/slower `gzip`, or `None` for uncompressed output. Export copies
+that already-generated HDF5 result; changing this setting affects the next
+simulation rather than rewriting the previous result.
+
+See [Choosing the HDF5 save mode](hdf5_save_modes.md) for script, command-line
+and GUI controls, storage precision, lossless roundtrip checks and readback.

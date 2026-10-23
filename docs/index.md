@@ -67,3 +67,5 @@ api
 - [Hierarchical hologram sweeps with stage reuse](hierarchical_hologram_sweep.md)
 
 - [Single-experiment Python desktop GUI](single_experiment_gui.md)
+
+- [HDF5 save modes: LZF, gzip, or uncompressed](hdf5_save_modes.md)

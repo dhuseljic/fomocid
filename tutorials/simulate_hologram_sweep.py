@@ -50,7 +50,8 @@ detector_pixel_footprint_samples = 2  # sub-samples per detector-pixel axis when
 detector_propagation_method = "fraunhofer"  # Opt in with "rayleigh_sommerfeld" (use small grids).
 ignore_flat_detector_curvature = False  # False = include flat-detector q distortion; True = use linear qx=k*x/z, qy=k*y/z mapping
 
-# Output path.
+# Output path and lossless array compression.
+hdf5_compression = "lzf"  # "lzf" (fast), "gzip" (smaller), or None (uncompressed)
 output_folder = DATA_ROOT / "Data" / "hologram_sweep"
 output_path = output_folder / "simulation_sweep.h5"
 
@@ -74,7 +75,7 @@ propagation_padding_mode = "edge"  # "edge", "reflect", "symmetric", or "constan
 propagation_absorber_width_px = 64  # 0 disables edge absorption
 propagation_absorber_strength = 6.0  # larger values damp padded-edge wraparound more
 propagation_absorber_profile = "cosine"  # "cosine", "smoothstep", "quadratic", or "linear"
-save_detected_hologram_without_beamstop = True # set True to save an extra detected hologram without the beamstop shadow (for supervised learning or beamstop ablation studies)
+save_detected_hologram_without_beamstop = False # set True to save an extra detected hologram without the beamstop shadow (for supervised learning or beamstop ablation studies)
 use_detector_pixel_footprint = True  # True = average the ideal hologram over each finite detector pixel
 
 
@@ -695,8 +696,10 @@ ranges = HologramPipelineRanges(
 ######################################
 
 
+pipeline_config = config.to_pipeline_config()
+pipeline_config.hdf5_compression = hdf5_compression
 pipeline = HologramPipeline(
-    config=config,
+    config=pipeline_config,
     ranges=ranges,
     output_path=output_path,
     n_samples=nr_simulations,

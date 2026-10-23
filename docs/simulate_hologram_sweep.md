@@ -553,12 +553,13 @@ sample-detector distance `z` is multiplied by
 `(z / sqrt(x**2 + y**2 + z**2))**3`, so off-axis pixels collect fewer photons
 than an on-axis pixel with the same simulated intensity per solid angle.
 
-The normal detected hologram applies the beamstop before readout noise,
+The normal detected hologram applies the beamstop to expected photons before
+photon sampling, charge spreading and response, and therefore before readout noise,
 rounding, thresholding, and frame averaging. To additionally save a detected
 hologram as if no beamstop were present, enable:
 
 ```python
-save_detected_hologram_without_beamstop = True
+save_detected_hologram_without_beamstop = False  # default; set True to enable
 ```
 
 This writes `CR/detected_no_beamstop` and `CL/detected_no_beamstop`. The optional
@@ -1335,3 +1336,44 @@ independent propagation paths. In Jones propagation the CR and CL vectors are
 different even through isotropic layers; sharing their scalar envelope would
 require a separate vector-aware implementation. Merely looking for off-diagonal
 matrix entries is insufficient when other anisotropic optical terms are present.
+
+### Mask reuse and output compression
+
+The physical 3-D aperture mask is constructed once per sample, before the
+helicity loop. Lazy Scalar setup also reuses the aperture-support geometry for
+CR and CL; only their polarization-dependent optical terms differ. A redundant
+pre-loop CR scalar-index preparation has been removed. Geometry caches are
+scoped to the unchanged sample pair and are not serialized.
+
+`HologramPipelineConfig.hdf5_compression` defaults to **`"lzf"`**, a fast lossless
+HDF5 filter. Set it to `"gzip"` for typically smaller files with slower writes,
+or `None` for uncompressed arrays. Existing readers and dataset paths remain
+compatible. The selected filter is recorded in the pipeline configuration.
+The single-experiment GUI exposes the same control under **Output**. The
+independent and hierarchical hologram pipelines share this writer; the separate
+`simulate_experiment` backend retains its own output-compression setting.
+
+A representative pair of 1536×1536 complex64 exit waves took median 1.08 s to
+write with gzip (28.8 MB), 0.20 s with LZF (36.8 MB), and 0.023 s uncompressed
+(37.8 MB), across three local trials. Complete experiment writes also include
+other arrays and metadata, and performance depends on storage and data values.
+
+See [Choosing the HDF5 save mode](hdf5_save_modes.md) for script, command-line
+and GUI controls, storage precision, lossless roundtrip checks and readback.
+
+The optional no-beamstop detected output is disabled by default in both examples
+and the GUI. Set `save_detected_hologram_without_beamstop=True` to generate and
+save it; while disabled, its complementary photon events and image are not computed.
+
+
+The compact Scalar propagation summary also prints one line with **shared prefix**,
+**CR suffix**, **CL suffix**, and **final FFTs** times. For the example recipe,
+the suffix is the final CoXY layer; for other recipes it includes everything
+from the first polarization-dependent layer onward. The prefix is computed
+once, so the cached CL pass records zero prefix computation time. Per-helicity
+values are saved at `metadata/propagator/{CR,CL}/timing_seconds/` under
+`shared_prefix`, `polarization_suffix`, and `farfield`. The propagation-stage
+total additionally includes index preparation, incident-field projection, cache
+checks/copies and orchestration. The final FFTs are still computed separately
+for CR and CL because their magnetic exit fields differ. Cached tree branches
+that do not perform propagation again do not re-report old compute timings.
