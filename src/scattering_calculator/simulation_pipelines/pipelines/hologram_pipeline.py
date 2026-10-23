@@ -1696,7 +1696,6 @@ class HologramPipeline:
              if not isinstance(value, np.ndarray)}, allow_nan=False)
         for key, value in measured.items():
             metadata[f"sample/magnetic_pattern/measurements/{key}"] = np.nan if value is None else value
-        metadata["sample/magnetic_pattern/analysis_mask"] = classification_mask.astype(np.uint8)
         state = domain_analysis["state"]
         for metric in ("stripe_nematic_order", "local_sixfold_order", "sixfold_order", "interior_bubble_count"):
             value = domain_analysis[metric]

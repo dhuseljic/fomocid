@@ -88,7 +88,7 @@ def test_actual_hologram_saves_binary_state_walls_parameters_and_sampling(tmp_pa
         assert len(controls['calibration_history']) == 1
         assert 'trace' in controls and 'calibration_history' in controls
         assert 'binary_pattern' not in meta
-        assert meta['analysis_mask'].ndim == 2
+        assert 'analysis_mask' not in meta
         classification = json.loads(meta['classification_json'][()].decode())
         assert classification['periodic']
         assert not classification['boundary_context_periodic']
@@ -142,11 +142,15 @@ def test_shared_experiment_hdf5_retains_constrained_provenance_and_unit_walls(tm
         assert meta['wall_sigma_px'] == 2
         assert meta['seed'] == 7
         assert 'binary_pattern' not in state
+        assert 'analysis_mask' not in state
         assert 'state' in state['classification']
         assert state['classification/periodic'][()]
         if use_oh:
             from scattering_calculator.sample_generator.domain_analysis import classify_magnetic_domains
-            mask = state['analysis_mask'][()]
+            mask = run.config.aperture.create_supportmask(
+                output_shape=run.config.magnetic_pattern.binary_pattern.shape,
+                output_pixel_size=run.config.simulation.real_space_pixel_size,
+                aperture_types=('OH',)) > 0
             assert np.any(mask) and not np.all(mask)
             expected = classify_magnetic_domains(run.config.magnetic_pattern.binary_pattern, analysis_mask=mask, periodic=True)
             assert state['classification/bubble_count'][()] == expected['bubble_count']

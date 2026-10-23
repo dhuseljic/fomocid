@@ -77,7 +77,7 @@ reciprocal-space extent represented by that grid; values outside it are zero.
 Final acquisition pairs remain `00000`, `00001`, etc., with `CR/ideal`,
 `CR/detected`, `CR/exit_wave` and corresponding CL arrays. Existing loaders and
 [magnetic-pattern analysis](magnetic_pattern_analysis.md) apply unchanged.
-Each leaf retains the generation parameters, OH analysis mask,
+Each leaf retains the generation parameters,
 domain counts, symmetry measurements, actual detector settings and noise timings.
 
 Under each `metadata/hierarchy/`:
@@ -129,5 +129,5 @@ scalar/Jones comparison and the two repository-wide module/function docstring
 contracts. The excluded ML smoke test requires PyTorch, which is unavailable in
 that environment. These are verification limits rather than passing checks.
 
-Binary precursors are used internally for classification but are not saved in
-HDF5. Saved state diagnostics and the wall-smoothed optical field remain available.
+Binary precursors and OH analysis masks are used internally for classification
+but are not saved in HDF5. Saved state diagnostics and the wall-smoothed optical field remain available.

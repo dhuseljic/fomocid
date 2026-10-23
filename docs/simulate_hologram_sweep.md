@@ -920,7 +920,7 @@ The reusable `morphology` descriptor describes the component mixture and can
 therefore differ from `state` (for example, bubbles plus one background).
 
 Under `metadata/sample/magnetic_pattern/`, the file retains `generation_json`
-(including calibration and relaxation traces), `analysis_mask`,
+(including calibration and relaxation traces),
 `classification_json` (including both-polarity component records),
 `measurements_json` and named scalar `measurements/` datasets. Effective physical
 inputs remain under `pattern_config/`. `magnetic_pattern_oh` stores the blurred
@@ -1177,5 +1177,5 @@ For branching multiple energies/masks, camera geometries and detector acquisitio
 from shared upstream results, use the separate
 [hierarchical sweep](hierarchical_hologram_sweep.md).
 
-Binary precursors are used internally for classification but are not saved in
-HDF5. Saved state diagnostics and the wall-smoothed optical field remain available.
+Binary precursors and OH analysis masks are used internally for classification
+but are not saved in HDF5. Saved state diagnostics and the wall-smoothed optical field remain available.

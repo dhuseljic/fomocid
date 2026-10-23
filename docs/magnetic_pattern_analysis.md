@@ -23,7 +23,6 @@ Use these three representations for different analyses:
 
 | Representation | Where, relative to a numeric sample group | Meaning |
 |---|---|---|
-| OH selection | `metadata/sample/magnetic_pattern/analysis_mask` | Mask on the generation grid; true means visible through the object hole. The binary precursor itself is not saved. |
 | Optical pattern | `magnetic_pattern_oh` | Smoothed `mz` multiplied by the OH mask, on a possibly different saved crop. Zero outside OH means masked data, **not** a physical zero-magnetization domain. |
 
 Gaussian blur uses physical `sigma` as a standard deviation, not FWHM. Wall
@@ -184,12 +183,11 @@ def load_magnetic_sample(path, sample_id="00000"):
     with h5py.File(path, "r") as h5:
         g = h5[sample_id]
         meta = g["metadata/sample/magnetic_pattern"]
-        required = ("analysis_mask", "generation_json",
+        required = ("generation_json",
                     "classification_json", "measurements_json")
         missing = [key for key in required if key not in meta]
         if missing:
             raise ValueError(f"{sample_id}: missing magnetic datasets: {missing}")
-        oh = meta["analysis_mask"][()].astype(bool)
         pitch = float(g["metadata/sample/real_space_pixel_size"][()])
         factor = int(g["metadata/sample/effective_oversampling"][()])
         detector_shape = read_scalar(g["metadata/detector/shape"])
@@ -207,8 +205,8 @@ def load_magnetic_sample(path, sample_id="00000"):
 
         optical = g["magnetic_pattern_oh"][()]
         return dict(
-            sample_id=sample_id, oh=oh, optical=optical,
-            pitch_m=pitch, generation_extent_nm=extent(oh.shape, "roi_"),
+            sample_id=sample_id, optical=optical,
+            pitch_m=pitch,
             optical_extent_nm=extent(optical.shape, "saved_roi_"),
             parameters={key: read_scalar(ds) for key, ds in meta["pattern_config"].items()},
             generation=json.loads(meta["generation_json"].asstr()[()]),
@@ -240,9 +238,8 @@ print("Pitch (nm):", sample["pitch_m"] * 1e9)
 ## Plot the field used by the optics
 
 The saved optical array uses `(row=y, column=x)`. Its extent is in nanometres
-relative to the simulation center. The OH analysis mask uses the generation
-grid, which can differ from the saved optical ROI; do not index one with the
-other. Binary precursors and component-label images are not saved.
+relative to the simulation center. Binary precursors, OH analysis masks and
+component-label images are used internally and are not saved.
 
 ```python
 import matplotlib.pyplot as plt
@@ -328,7 +325,7 @@ seed, generation shape and pixel pitch, using the same source revision and
 numerical environment. Thresholding the saved wall-smoothed OH crop cannot
 recover the full periodic geometry used for classification.
 
-Keep the HDF5 alongside exported tables: it contains the selection mask,
+Keep the HDF5 alongside exported tables: it contains the
 realized parameters and diagnostic history. A full source/environment snapshot
 is not embedded in the file. Existing files are not relabelled automatically
 when classification code changes.
@@ -336,6 +333,5 @@ when classification code changes.
 The separate `simulate_experiment` backend uses
 `runs/000000/magnetic_state/` instead of numeric top-level specimen groups. See
 [the backend layout note](constrained_magnetic_domains.md#diagnostics-and-hdf5-provenance)
-for its `parameters_json`, `generation_json`, optional OH
-`analysis_mask`, and named `classification/` datasets. This guide's loader is
+for its `parameters_json`, `generation_json`, and named `classification/` datasets. This guide's loader is
 specifically for paired-CR/CL sweep files.

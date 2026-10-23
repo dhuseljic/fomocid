@@ -441,7 +441,6 @@ def simulate_experiment(config, *, magnetization=None, mask=None):
                                     output_shape=pattern_config.binary_pattern.shape,
                                     output_pixel_size=propagated_config.simulation.real_space_pixel_size,
                                     aperture_types=('OH',)) > 0
-                                state_group.create_dataset('analysis_mask', data=analysis_mask, compression=config.outputs.compression)
                             write_domain_classification(state_group.create_group('classification'),
                                 pattern_config.binary_pattern, analysis_mask=analysis_mask, periodic=True)
                         materials=group.create_group('materials')
