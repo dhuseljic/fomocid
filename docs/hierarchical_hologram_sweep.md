@@ -72,8 +72,8 @@ Variants are independent overrides, not cumulative changes to the previous one.
   CR and CL use adjacent seeds. Keep camera/kernel seeds fixed when you want
   those detector properties shared across acquisitions.
 
-Parameters assigned to the wrong stage are rejected. Shape, recipe, illumination
-and beamstop design come from the parent configuration. Unsupported stage changes
+Parameters assigned to the wrong stage are rejected. Shape, illumination and beamstop design come from the parent configuration.
+The recipe is sampled once through `ranges.recipe` for each independent parent. Unsupported stage changes
 should use a separate run rather than trying to reuse an invalid upstream result.
 Lengths are metres; photon energies are eV. Acquisition dictionaries and response
 callbacks follow [the existing detector model](detector_response.md).
@@ -181,3 +181,38 @@ gaps, while leaf IDs remain consecutive. Rejected proposals bias the accepted
 sample distribution: the proposed detector distance remains uniform from 5 to
 40 cm, but the saved distances are conditioned on grid feasibility. In a tree,
 no leaves are generated until their parent's grid passes this check.
+
+### Random material recipes
+
+Both examples draw a new recipe once per independent experiment or tree parent:
+
+```text
+[Au(t_Au)/Cr(t_Cr)]xN/SiN(t_SiN)/Co(t_Co)/X(t_X)/Y(t_Y)
+```
+
+All thicknesses inside recipe strings are **nanometres**. The shared
+`sample_multilayer_recipe(rng)` sampler uses:
+
+| Parameter | Sampling |
+| --- | --- |
+| `N` | Discrete uniform integer from 5 through 30, inclusive |
+| Total Au/Cr thickness `T` | Uniform from 700 to 3000 nm |
+| `t_Cr`, `t_Au` | `T/(5*N)` and `4*T/(5*N)`, respectively: exactly 4:1 |
+| `t_SiN` | Uniform from 50 to 500 nm |
+| `t_Co`, `t_X`, `t_Y` | Independent uniform draws from 2 to 30 nm |
+| `X`, `Y` | Two distinct elements drawn without replacement from Pt, Al, Ta, Ir, Cu |
+
+Au and Cr remain separate physical layers and the bracket expands to `2*N`
+layers. X and Y are ordered caps after Co. Their material optical constants are
+loaded at the actual branch energy. The Co layer receives the magnetic texture.
+In the tree, all energies, reference-mask designs and acquisitions under a
+parent share its recipe; a new parent gets a fresh recipe. Rejected grid draws
+also resample the recipe with the other parent parameters.
+
+The actual recipe is saved in each leaf at `metadata/sample/recipe`; existing
+sample metadata also retains expanded layer materials and thicknesses. The
+recipe string uses nm while physical layer-thickness metadata uses metres.
+Fixed `config.recipe` remains the fallback: set `ranges.recipe=None` to disable
+recipe variation, or provide a fixed string or callable override. Merely editing
+the fallback string in an example does not disable its `ranges.recipe` sampler.
+The sampler uses the example's seeded NumPy generator for reproducibility.

@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from fomocid import DATA_ROOT
+from scattering_calculator.simulation_pipelines.recipe_sampling import sample_multilayer_recipe
 from scattering_calculator.simulation_pipelines import Uniform
 
 from scattering_calculator.simulation_pipelines.magnetic_parameters import sample_constrained_domain_parameters
@@ -28,6 +29,7 @@ def main():
     saturation_probability = 0.1  # per magnetic parent, inherited by all its leaves
     rng = np.random.default_rng(args.seed)
     config = HologramPipelineConfig(
+        # Fallback; ranges.recipe below samples a new multilayer per parent.
         recipe='Au(100)/SiN(100)/Co(20)', detector_shape=(256, 256),
         detector_distance=.04, xray_energy=778., xray_photon_flux=1e8,
         propagator_method='Scalar', beamstop_method=None, random_seed=args.seed,
@@ -51,7 +53,8 @@ def main():
     total = args.patterns * len(exits) * len(geometries) * len(acquisitions)
     print(f'{args.patterns} patterns -> {total} CR/CL acquisition pairs')
     HierarchicalHologramPipeline(config=config,
-        ranges=HologramPipelineRanges(detector_distance=Uniform(.05, .40), pattern_config=lambda _: sample_constrained_domain_parameters(
+        ranges=HologramPipelineRanges(recipe=lambda _: sample_multilayer_recipe(rng),
+            detector_distance=Uniform(.05, .40), pattern_config=lambda _: sample_constrained_domain_parameters(
             rng, saturation_probability=saturation_probability)),
         output_path=args.output, n_samples=args.patterns, exit_variants=exits,
         geometry_variants=geometries, acquisition_variants=acquisitions).run()

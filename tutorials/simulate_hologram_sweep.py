@@ -18,6 +18,7 @@ import ast
 
 # Imports from our own codebase
 from fomocid import DATA_ROOT
+from scattering_calculator.simulation_pipelines.recipe_sampling import sample_multilayer_recipe
 from scattering_calculator.simulation_pipelines import (
     Uniform,
     Choice,
@@ -37,6 +38,7 @@ from scattering_calculator.simulation_pipelines.magnetic_parameters import (
 nr_simulations = 30  # increase to e.g. 1000 for a full training dataset
 
 # --- Material stack ---
+# Fixed fallback; ranges.recipe below samples a new multilayer per experiment.
 recipe = "[Au(200)Cr(60)]x5/SiN(200)/Pt(10)Al(10)Co(20)"
 
 # simulation sampling options; these can be overridden in the ranges below to create mixed sampling
@@ -634,6 +636,7 @@ def random_artifacts_config(params):
 ######################################
 
 ranges = HologramPipelineRanges(
+    recipe=lambda _: sample_multilayer_recipe(domain_rng),
     # Sweep X-ray energy across the Co L-edge absorption region
     xray_energy=Uniform(775, 795),
     # Move the direct beam away from the exact detector middle by up to

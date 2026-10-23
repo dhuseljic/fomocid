@@ -500,6 +500,9 @@ class HologramPipelineRanges:
     ... )
     """
 
+    # Parent material recipe
+    recipe: str | Choice | Callable[[dict[str, Any]], str] | None = None
+
     # X-ray
     xray_energy: float | Uniform | None = None
     xray_photon_flux: float | Uniform | None = None
@@ -1029,6 +1032,7 @@ class HologramPipeline:
             "detector_center": cfg.detector_center,
             "oversampling": cfg.oversampling,
         }
+        params["recipe"] = _pick(rng.recipe, cfg.recipe, params)
         params["energy"] = _pick(rng.xray_energy, cfg.xray_energy, params)
         params["photon_flux"] = _pick(
             rng.xray_photon_flux, cfg.xray_photon_flux, params
@@ -1517,7 +1521,7 @@ class HologramPipeline:
             dtype=int,
         )
         sample_config = SampleConfig(
-            recipe=cfg.recipe,
+            recipe=p["recipe"],
             sample_shape=sample_shape,
             real_space_pixel_size=real_space_pixel_size,
             xray_config=xray_config,
