@@ -426,6 +426,25 @@ def simulate_experiment(config, *, magnetization=None, mask=None):
                                     part.create_dataset('detector_ideal', data=component.spectral_ideal,
                                                         compression=config.outputs.compression)
                         material_sample = run.spectral_runs[0].sample if hasattr(run,'spectral_runs') else run.sample
+                        pattern_config = run.spectral_runs[0].config.magnetic_pattern if hasattr(run, 'spectral_runs') else run.config.magnetic_pattern
+                        if hasattr(pattern_config, 'generation_metadata'):
+                            from scattering_calculator.sample_generator.domain_analysis import write_domain_classification
+                            state_group = group.create_group('magnetic_state')
+                            state_group.create_dataset('generation_json', data=json.dumps(pattern_config.generation_metadata, allow_nan=False))
+                            state_group.create_dataset('parameters_json', data=json.dumps(pattern_config.resolved_pattern_config(), default=_json_default, allow_nan=False))
+                            state_group.create_dataset('binary_pattern', data=pattern_config.binary_pattern.astype(np.int8), compression=config.outputs.compression)
+                            # Use full periodic geometry for shape and OH overlap only for visibility.
+                            propagated_config = run.spectral_runs[0].config if hasattr(run, 'spectral_runs') else run.config
+                            aperture = propagated_config.aperture
+                            analysis_mask = None
+                            if 'OH' in aperture.aperture_config.get('apertures_type', ()):
+                                analysis_mask = aperture.create_supportmask(
+                                    output_shape=pattern_config.binary_pattern.shape,
+                                    output_pixel_size=propagated_config.simulation.real_space_pixel_size,
+                                    aperture_types=('OH',)) > 0
+                                state_group.create_dataset('analysis_mask', data=analysis_mask, compression=config.outputs.compression)
+                            write_domain_classification(state_group.create_group('classification'),
+                                pattern_config.binary_pattern, analysis_mask=analysis_mask, periodic=True)
                         materials=group.create_group('materials')
                         materials.create_dataset('layer_names',data=material_sample.layer_names,dtype=h5py.string_dtype())
                         materials.create_dataset('thickness_m',data=material_sample.layer_thicknesses)

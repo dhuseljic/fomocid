@@ -405,7 +405,7 @@ class DetectorConfig(_ConfigMixin):
         default_factory=lambda: {
             "sigma_photon": 0.75,
             "photon_n_classes": 1,
-            "photon_n_variants": 30,
+            "photon_n_variants": 10,
             "photon_kernel_size": 9,
             "photon_irregularity": 2.0,
             "regenerate_photon_kernels": True,
@@ -1008,7 +1008,7 @@ class MagneticPatternConfig(_ConfigMixin):
 
     Parameters
     ----------
-    pattern_type_method : {"skyrmion_pattern", "disordered_skyrmion_lattice_pattern", "wavy_stripe_pattern", "binary_labyrinth_pattern", "domain_pattern", "saturated_pattern", "image_pattern"}
+    pattern_type_method : {"skyrmion_pattern", "disordered_skyrmion_lattice_pattern", "wavy_stripe_pattern", "binary_labyrinth_pattern", "domain_pattern", "constrained_domain_pattern", "saturated_pattern", "image_pattern"}
         Which pattern generator function to use.
     shape : tuple of int or None
         2-D array shape ``(Ny, Nx)`` in pixels.
@@ -1022,7 +1022,11 @@ class MagneticPatternConfig(_ConfigMixin):
         are specified in metres and converted to pixels automatically for the
         selected pattern type. ``sigma`` is converted for every generator that
         supports Gaussian domain-wall smoothing, including both skyrmion
-        generators.
+        generators. Constrained patterns use ``characteristic_length`` for the
+        full spacing and optional Gaussian ``sigma`` for optical wall blur,
+        after binary relaxation. They require >=16 pixels per spacing and >=2
+        pixels per positive wall sigma, with >=4 pixels across the conservative
+        minority stripe-width estimate; explicit grids must be refined by the caller.
     pattern_config_length : dict
         Deprecated compatibility dict for physical-length parameters in metres.
         Values are merged into ``pattern_config`` unless the same key is already
@@ -1032,9 +1036,13 @@ class MagneticPatternConfig(_ConfigMixin):
     ----------
     magnetic_pattern : ndarray of shape (Ny, Nx)
         Out-of-plane magnetization map, populated by ``create_pattern()``.
-    pattern_coordinates : ndarray
-        Auxiliary coordinate output from the generator, populated by
-        ``create_pattern()``.
+    pattern_coordinates : ndarray or dict
+        Auxiliary coordinates, or full constrained-generator diagnostics.
+    binary_pattern : ndarray
+        Constrained +/-1 precursor retained before wall blur (runtime attribute).
+    generation_metadata : dict
+        Constrained relaxation, calibration and wall-processing diagnostics
+        (runtime attribute).
     """
 
     pattern_type_method: Literal[
@@ -1102,7 +1110,7 @@ class MagneticPatternConfig(_ConfigMixin):
         from .magnetic_parameters import canonical_parameters
         return canonical_parameters(self.pattern_type_method, self.pattern_config, self.pattern_config_length)
 
-    def create_pattern(self, *, aperture_config=None) -> tuple[np.ndarray, np.ndarray]:
+    def create_pattern(self, *, aperture_config=None, progress_callback=None) -> tuple[np.ndarray, np.ndarray]:
         """Generate the magnetic pattern and store it on the instance.
 
         Physical-length values in ``pattern_config`` are converted to pixel
@@ -1122,6 +1130,9 @@ class MagneticPatternConfig(_ConfigMixin):
         None
             This function takes no explicit input parameters.
         """
+        for attribute in ("binary_pattern", "generation_metadata"):
+            if hasattr(self, attribute):
+                delattr(self, attribute)
         if self.pattern_type_method in ("magnon_wave", "smooth_domains", "neel_lattice"):
             from .experiment import vector_pattern
             self.magnetic_pattern, self.pattern_coordinates = vector_pattern(self)
@@ -1135,7 +1146,7 @@ class MagneticPatternConfig(_ConfigMixin):
         config = generator_parameters(self.pattern_type_method, parameters)
         length_keys_by_method = {
             "domain_pattern": {"period", "sigma"},
-            "constrained_domain_pattern": {"characteristic_length", "disorder_length", "worm_length", "worm_waviness"},
+            "constrained_domain_pattern": {"characteristic_length", "disorder_length", "worm_length", "worm_waviness", "sigma"},
             "wavy_stripe_pattern": {
                 "stripe_width",
                 "sigma",
@@ -1167,11 +1178,43 @@ class MagneticPatternConfig(_ConfigMixin):
             k: (v / self.real_space_pixel_size if k in length_keys and v is not None else v)
             for k, v in config.items()
         }
+        sigma_px = generator_config.pop("sigma", 0.) if self.pattern_type_method == "constrained_domain_pattern" else 0.
+        if self.pattern_type_method == "constrained_domain_pattern":
+            length_px = generator_config.get("characteristic_length", 0.)
+            if length_px < 16:
+                raise ValueError("Constrained domains require at least 16 simulation pixels per characteristic_length; refine the simulation grid")
+            magnetization_target = generator_config.get("target_magnetization", 0.)
+            fraction = 0. if magnetization_target is None else (1 - abs(magnetization_target)) / 2
+            if 0 < fraction and length_px * fraction < 4 - 1e-12:
+                raise ValueError("Constrained minority stripe-width estimate requires at least 4 simulation pixels; refine the simulation grid")
+            if sigma_px is not None and (not np.isfinite(sigma_px) or sigma_px < 0 or 0 < sigma_px < 2):
+                raise ValueError("Domain-wall sigma must be zero or resolved by at least 2 simulation pixels; refine the simulation grid")
+        if self.pattern_type_method == "constrained_domain_pattern":
+            generator_config["progress_callback"] = progress_callback
+            generator_config.setdefault("measure_components", False)
         self.magnetic_pattern, self.pattern_coordinates = pattern_function(
             sz_array=self.shape,
             real_space_pixel_size=self.real_space_pixel_size,
             **generator_config,
         )
+        if self.pattern_type_method == "constrained_domain_pattern":
+            from scipy.ndimage import gaussian_filter
+            from time import perf_counter
+            wall_start = perf_counter()
+            self.binary_pattern = self.magnetic_pattern.copy()
+            self.generation_metadata = self.pattern_coordinates
+            self.generation_metadata["wall_sigma_px"] = float(sigma_px or 0.)
+            self.generation_metadata["wall_sigma_m"] = float(sigma_px or 0.) * self.real_space_pixel_size
+            self.generation_metadata["characteristic_length_px"] = float(generator_config["characteristic_length"])
+            self.generation_metadata["sampling_pixels_per_wall_sigma"] = float(sigma_px or 0.)
+            if sigma_px:
+                self.magnetic_pattern = np.clip(gaussian_filter(self.binary_pattern, sigma_px, mode="wrap"), -1., 1.)
+            self.generation_metadata["mean_mz_after_wall_smoothing"] = float(self.magnetic_pattern.mean())
+            self.generation_metadata["up_fraction_after_wall_smoothing"] = float(np.mean(self.magnetic_pattern > 0))
+            wall_elapsed = perf_counter() - wall_start
+            self.generation_metadata['timings_seconds']['wall_smoothing'] = wall_elapsed
+            if progress_callback is not None:
+                progress_callback(dict(stage='wall smoothing', elapsed_seconds=wall_elapsed))
         return self.magnetic_pattern, self.pattern_coordinates
 
     def plot_pattern(self) -> None:

@@ -55,10 +55,10 @@ def test_ordered_stripe_seed_retains_exact_commensurate_period():
 def test_pipeline_converts_lengths_to_pixels():
     config=sim.MagneticPatternConfig(pattern_type_method='constrained_domain_pattern',
         shape=(48,64),real_space_pixel_size=2e-9,pattern_config=dict(
-            characteristic_length=24e-9,disorder_length=4e-9,
+            characteristic_length=32e-9,disorder_length=4e-9,
             target_magnetization=.4,seed=4,n_steps=40))
     pattern,meta=config.create_pattern()
-    assert meta['characteristic_length']==12.
+    assert meta['characteristic_length']==16.
     assert meta['disorder_length']==2.
     assert abs(pattern.mean()-.4) <= 1/pattern.size
 
@@ -77,7 +77,7 @@ def test_constrained_domains_run_through_saved_experiment(tmp_path):
         simulation=workflow.SimulationConfig(shape=(32,40),real_space_pixel_size=4e-9),
         sample=workflow.SampleConfig(recipe='Co(6)',max_slice_thickness=2e-9),
         magnetic_pattern=workflow.MagneticPatternConfig(pattern_type_method='constrained_domain_pattern',
-            pattern_config=dict(characteristic_length=48e-9,target_magnetization=.4,seed=4,n_steps=50)),
+            pattern_config=dict(characteristic_length=64e-9,target_magnetization=.4,seed=4,n_steps=50)),
         aperture=workflow.FrontApertureConfig(aperture_method=None),
         illumination=workflow.IlluminationConfig(illumination_function=None),
         propagation=workflow.SamplePropagatorConfig(propagator_method='Scalar',propagator_config={'propagate':True}),
@@ -117,7 +117,7 @@ def test_finite_minority_worms_at_strong_net_magnetization(magnetization,count):
 def test_worm_preparation_lengths_are_shared_physical_config_controls():
     config=sim.MagneticPatternConfig(pattern_type_method='constrained_domain_pattern',
         shape=(128,128),real_space_pixel_size=2e-9,pattern_config=dict(
-            characteristic_length=48e-9,target_magnetization=.8,
+            characteristic_length=80e-9,target_magnetization=.8,
             initial_state='worms',initial_order=1.,initial_domain_count=2,
             worm_length=150e-9,worm_waviness=16e-9,
             seed=7,n_steps=20,max_length_iterations=1))
@@ -125,3 +125,79 @@ def test_worm_preparation_lengths_are_shared_physical_config_controls():
     assert metadata['initial_worm_length_px']==pytest.approx(75.)
     assert metadata['initial_worm_waviness_px']==pytest.approx(8.)
     assert metadata['initial_domain_count']==2
+
+
+@pytest.mark.parametrize('preparation', ['random', 'stripes', 'hexagonal', 'worms'])
+def test_free_magnetization_is_measured_without_a_sign_area_target(preparation):
+    pattern, meta = generate((64, 64), 16, target_magnetization=None,
+        initial_state=preparation, initial_order=.5, n_steps=40,
+        max_length_iterations=1, seed=7)
+    assert set(np.unique(pattern)) <= {-1., 1.}
+    assert meta['target_magnetization'] is None
+    assert meta['target_up_pixels'] is None
+    assert not meta['magnetization_constrained']
+    assert meta['mean_mz'] == pytest.approx(pattern.mean())
+    assert meta['up_fraction_measured'] == np.mean(pattern > 0)
+    assert meta['mean_mz'] == pytest.approx(2 * meta['up_fraction_measured'] - 1)
+    assert len(meta['calibration_history']) == 1
+    if preparation == 'random':
+        assert len({row['up_pixels'] for row in meta['trace']}) > 1
+
+
+def test_free_and_fixed_magnetization_modes_remain_reproducible():
+    common = dict(sz_array=(64, 64), characteristic_length=16, n_steps=40,
+                  max_length_iterations=1, seed=7)
+    free, _ = generate(**common, target_magnetization=None)
+    repeated, _ = generate(**common, target_magnetization=None)
+    fixed, meta = generate(**common, target_magnetization=.6)
+    np.testing.assert_array_equal(free, repeated)
+    assert not np.array_equal(free, fixed)
+    assert meta['magnetization_constrained']
+    assert np.count_nonzero(fixed > 0) == meta['target_up_pixels']
+
+
+@pytest.mark.parametrize('shape', [(31, 40), (32, 41), (32, 40)])
+@pytest.mark.parametrize('direction', [0., .37, 1.2])
+def test_real_fft_filter_matches_full_complex_update_including_nyquist(shape, direction):
+    rng = np.random.default_rng(7)
+    field = rng.normal(size=shape)
+    ky = 2*np.pi*np.fft.fftfreq(shape[0])[:, None]
+    kx = 2*np.pi*np.fft.fftfreq(shape[1])[None, :]
+    k = np.hypot(kx, ky)
+    q0 = 2*np.pi/12
+    interaction = (k/q0)**2 - 2*k/q0 + 8*((kx*np.cos(direction)+ky*np.sin(direction))/q0)**2
+    interaction[0, 0] = 0
+    denominator = 1 + .2*(4 + interaction)
+    half_width = shape[1]//2+1
+    multiplier = .5*(1/denominator[:, :half_width] + 1/denominator[np.ix_(
+        (-np.arange(shape[0])) % shape[0], (-np.arange(half_width)) % shape[1])])
+    expected = np.fft.ifft2(np.fft.fft2(field)/denominator).real
+    actual = np.fft.irfft2(np.fft.rfft2(field)*multiplier, s=shape)
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
+def test_lightweight_generator_diagnostics_keep_identical_pattern_and_spacing():
+    controls = dict(sz_array=(64, 64), characteristic_length=16, n_steps=30,
+                    max_length_iterations=1, target_magnetization=None, seed=7)
+    full, full_meta = generate(**controls, measure_components=True)
+    lean, meta = generate(**controls, measure_components=False)
+    np.testing.assert_array_equal(lean, full)
+    assert meta['measured_length_px'] == full_meta['measured_length_px']
+    assert meta['mean_mz'] == full_meta['mean_mz']
+    assert not meta['component_diagnostics']
+    assert 'state' not in meta['measurements']  # Production adds OH-selected state separately.
+
+
+def test_progress_callback_and_timing_records_are_consistent():
+    events = []
+    pattern, meta = generate((32, 40), 16, n_steps=55, max_length_iterations=1,
+        target_magnetization=None, seed=7, progress_callback=events.append)
+    stages = [event['stage'] for event in events]
+    assert stages[0] == 'attempt' and stages[-1] == 'complete'
+    assert 'initialization' in stages and 'measurements' in stages
+    steps = [event['step'] for event in events if event['stage'] == 'relaxation']
+    assert steps[0] == 1 and steps[-1] == meta['steps_completed']
+    assert steps == sorted(set(steps))
+    assert all(value >= 0 and np.isfinite(value) for value in meta['timings_seconds'].values())
+    assert meta['timings_seconds']['relaxation'] >= meta['timings_seconds']['spectral_update']
+    assert len(meta['calibration_history'][0]['timings_seconds']) > 5

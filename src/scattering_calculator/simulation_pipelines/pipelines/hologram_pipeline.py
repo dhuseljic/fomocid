@@ -17,6 +17,7 @@ import numpy as np
 
 config = HologramPipelineConfig(
     recipe="Au(700)/Cr(300)/SiN(200)/Co(90)/Pt(120)/Al(60)",
+    pattern_type="wavy_stripe_pattern",
     pattern_config={
         "angle_stripes": np.pi / 4,
         "period": 40e-9,
@@ -46,6 +47,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
 
+import json
 import h5py
 import numpy as np
 
@@ -194,7 +196,7 @@ class HologramPipelineConfig:
         Beam tilt ``(alpha_y, alpha_x)`` in radians. ``(0, 0)`` keeps normal
         incidence. A scalar value is accepted as an x-direction tilt for
         backward compatibility.
-    pattern_type : {"wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", "saturated_pattern", "skyrmion_pattern", "image_pattern"}
+    pattern_type : {"constrained_domain_pattern", "wavy_stripe_pattern", "binary_labyrinth_pattern", "disordered_skyrmion_lattice_pattern", "saturated_pattern", "skyrmion_pattern", "image_pattern"}
         Which magnetic domain pattern generator to use.
     pattern_config : dict
         Pattern parameters forwarded to the generator. Physical-length entries
@@ -216,6 +218,15 @@ class HologramPipelineConfig:
         the object hole and paste that ROI into a uniform full-field pattern.
         If ``False``, generate the magnetic pattern over the entire sample
         plane. Default ``True``.
+    magnetic_pattern_context_periods : float
+        Extra generated context on each side of the actual OH bounds, in
+        characteristic lengths, plus four wall sigmas. Default 0.5. The box
+        spans at least two characteristic lengths and uses FFT-friendly axes.
+    magnetic_pattern_max_grid_axis : int
+        Allocation limit per full simulation axis for the constrained generator.
+        Actual oversampling increases to resolve characteristic_length by 16
+        pixels, positive wall sigma by 2 pixels and the nonzero minority
+        stripe-width estimate by 4 pixels. Default 4096.
     magnetic_pattern_classification_min_area : int
         Minimum connected-component area in object-hole pixels for a resolved
         stripe or bubble. Smaller components are counted as noise.
@@ -341,13 +352,14 @@ class HologramPipelineConfig:
             "readout_noise_average": 50,
             "detector_threshold": 64e3,
             "counts_per_photon": 100,
+            "nonlinear_response": None,
         }
     )
     artifacts_config: dict = field(
         default_factory=lambda: {
             "sigma_photon": 0.75,
             "photon_n_classes": 1,
-            "photon_n_variants": 30,
+            "photon_n_variants": 10,
             "photon_kernel_size": 9,
             "photon_irregularity": 2.0,
             "regenerate_photon_kernels": True,
@@ -357,6 +369,7 @@ class HologramPipelineConfig:
         default_factory=lambda: {
             "exposure_time": 1.0,
             "number_frames": 1,
+            "acquisition_mode": "accumulated",
             "max_counts_per_image": None,
         }
     )
@@ -418,14 +431,16 @@ class HologramPipelineConfig:
     illumination_alpha_beam: tuple[float, float] | float = (0.0, 0.0)  # rad, (alpha_y, alpha_x)
 
     # Magnetic domain pattern
-    pattern_type: str = "wavy_stripe_pattern"
+    pattern_type: str = "constrained_domain_pattern"
     pattern_config: dict = field(default_factory=dict)
     pattern_config_length: dict = field(default_factory=dict)
     use_roi: bool = True
     magnetic_pattern_use_roi: bool = True
+    magnetic_pattern_max_grid_axis: int = 4096
+    magnetic_pattern_context_periods: float = 0.5
     magnetic_pattern_classification_min_area: int = 9
-    magnetic_pattern_bubble_max_eccentricity: float = 0.85
-    magnetic_pattern_bubble_min_circularity: float = 0.45
+    magnetic_pattern_bubble_max_eccentricity: float = 0.95
+    magnetic_pattern_bubble_min_circularity: float = 0.4
     dielectric_tensor_use_roi: bool = True
     dielectric_tensor_compact: bool = True
     dielectric_tensor_local_k_projection: bool = False
@@ -913,7 +928,7 @@ class HologramPipeline:
             """
             return base_val if range_val is None else _resolve(range_val, params)
 
-        def _sample_dict_with_params(d: dict, params: dict[str, Any]) -> dict:
+        def _sample_dict_with_params(d: dict, params: dict[str, Any], callback_keys=()) -> dict:
             """Sample each value in a nested configuration dictionary.
 
             Parameters
@@ -921,6 +936,9 @@ class HologramPipeline:
             d : dict
                 Dictionary whose values may be fixed values, samplers,
                 callables, or nested dictionaries.
+            callback_keys : tuple of str
+                Physical response functions to preserve rather than invoking
+                them as sweep factories.
             params : dict[str, Any]
                 Parameters already sampled for the current run.
 
@@ -929,17 +947,18 @@ class HologramPipeline:
             sampled : dict
                 Dictionary with all supported values resolved.
             """
-            return {
-                k: (
-                    _sample_dict_with_params(v, params)
-                    if isinstance(v, dict)
-                    else _resolve(v, params)
-                )
-                for k, v in d.items()
-            }
+            sampled = {}
+            for key, value in d.items():
+                if key in callback_keys and callable(value):
+                    sampled[key] = value
+                elif isinstance(value, dict):
+                    sampled[key] = _sample_dict_with_params(value, params, callback_keys)
+                else:
+                    sampled[key] = _resolve(value, params)
+            return sampled
 
         def _merge_dict(
-            range_dict: dict | None, base_dict: dict, params: dict[str, Any]
+            range_dict: dict | None, base_dict: dict, params: dict[str, Any], callback_keys=()
         ) -> dict:
             """Merge sampled dictionary overrides over fixed defaults.
 
@@ -960,9 +979,9 @@ class HologramPipeline:
             if range_dict is not None:
                 if callable(range_dict):
                     resolved = _resolve(range_dict, params)
-                    return _sample_dict_with_params(resolved, params)
+                    return _sample_dict_with_params(resolved, params, callback_keys)
                 merged = dict(base_dict)
-                merged.update(_sample_dict_with_params(range_dict, params))
+                merged.update(_sample_dict_with_params(range_dict, params, callback_keys))
                 return merged
             merged = dict(base_dict)
             return merged
@@ -986,7 +1005,8 @@ class HologramPipeline:
             rng.detector_pixel_size, cfg.detector_pixel_size, params
         )
         params["detector_params"] = _merge_dict(
-            rng.detector_params, cfg.detector_params, params
+            rng.detector_params, cfg.detector_params, params,
+            callback_keys=("counts_per_photon", "nonlinear_response")
         )
         params["detector_params"] = self._normalize_detector_params(
             params["detector_params"],
@@ -997,6 +1017,7 @@ class HologramPipeline:
         )
         params["detector_params"].setdefault("readout_noise_sigma", 3.0)
         params["detector_params"].setdefault("quantum_efficiency", 1.0)
+        params["detector_params"].setdefault("nonlinear_response", None)
         params["artifacts_config"] = _merge_dict(
             rng.artifacts_config, cfg.artifacts_config, params
         )
@@ -1063,6 +1084,11 @@ class HologramPipeline:
                 )
             params["pattern_config"][key] = value
         params["pattern_config_length"] = {}
+        if params["pattern_type"] == "constrained_domain_pattern":
+            params["pattern_config"].setdefault("characteristic_length", 160e-9)
+            params["pattern_config"].setdefault("sigma", 5e-9)
+            params["pattern_config"].setdefault("max_length_iterations", 1)
+            params["pattern_config"].setdefault("target_magnetization", None)
         if cfg.random_seed is not None:
             def _set_seed_if_missing(config_dict: dict, key: str) -> None:
                 """Insert a random seed into a config dictionary when absent.
@@ -1175,6 +1201,7 @@ class HologramPipeline:
         pattern_type: str,
         *,
         enabled: bool = True,
+        padding_m: float = 0.,
     ) -> tuple[tuple[int, int], tuple[slice, slice] | None, tuple[float, float] | None]:
         """Return the shape and insertion slices for an OH-local pattern.
 
@@ -1261,7 +1288,7 @@ class HologramPipeline:
             roughness_scale = 1.0 + max(0.0, 2.0 * float(roughness))
             half_y = radius_y * roughness_scale + 4.0 * sigma_px
             half_x = radius_x * roughness_scale + 4.0 * sigma_px
-            margin = max(50.0, 0.25 * max(half_y, half_x))
+            margin = max(50.0, 0.25 * max(half_y, half_x), padding_m / pixel_size)
             center_y = center_y0 + float(center[0]) / pixel_size
             center_x = center_x0 + float(center[1]) / pixel_size
             y0 = max(0, int(np.floor(center_y - half_y - margin)))
@@ -1287,6 +1314,48 @@ class HologramPipeline:
             (x0 + x1) / 2 - full_shape[1] / 2,
         )
         return roi_shape, slices, coordinate_offset
+
+    @staticmethod
+    def _constrained_domain_roi(oh_mask, pixel_size, characteristic_length, sigma,
+                                context_periods=0.5, *, saturated=False):
+        """Choose a native-resolution periodic generation box around visible OHs.
+
+        Parameters
+        ----------
+        oh_mask : ndarray
+            Actual OH support on the full simulation grid.
+        pixel_size : float
+            Native simulation pitch in metres; never changed by cropping.
+        characteristic_length, sigma : float
+            Physical repeat and Gaussian wall sigma in metres.
+        context_periods : float
+            Additional context per side in repeat lengths, plus four wall sigmas.
+        saturated : bool
+            Uniform states need no texture context or minimum periodic extent.
+
+        Returns
+        -------
+        tuple
+            Generation shape, insertion slices and center offset in pixels.
+        """
+        from scipy.fft import next_fast_len
+        if not np.isfinite(context_periods) or context_periods < 0:
+            raise ValueError("magnetic_pattern_context_periods must be finite and nonnegative")
+        rows, columns = np.nonzero(oh_mask)
+        if not len(rows):
+            raise ValueError("The OH must contain at least one simulation pixel")
+        full_shape = oh_mask.shape
+        margin = 0 if saturated else int(np.ceil((context_periods * characteristic_length + 4 * sigma) / pixel_size))
+        minimum = 8 if saturated else max(8, int(np.ceil(2 * characteristic_length / pixel_size)))
+        slices = []
+        for positions, size in zip((rows, columns), full_shape):
+            low, high = int(positions.min()), int(positions.max()) + 1
+            extent = min(size, next_fast_len(max(minimum, high - low + 2 * margin)))
+            start = max(0, min(size - extent, (low + high - extent) // 2))
+            slices.append(slice(start, start + extent))
+        shape = tuple(s.stop - s.start for s in slices)
+        offset = tuple((s.start + s.stop - size) / 2 for s, size in zip(slices, full_shape))
+        return shape, tuple(slices), offset
 
     # ------------------------------------------------------------------
     # Core simulation — mirrors test.ipynb cell by cell
@@ -1317,18 +1386,18 @@ class HologramPipeline:
             name : str
                 Human-readable stage name.
             start : float
-                Start time from ``time.time()``.
+                Start time from ``time.perf_counter()``.
 
             Returns
             -------
             now : float
-                Current ``time.time()`` value, used as the next stage start.
+                Current ``time.perf_counter()`` value, used as the next stage start.
             """
-            now = time.time()
+            now = time.perf_counter()
             stage_times.append((name, now - start))
             return now
 
-        t_stage = time.time()
+        t_stage = time.perf_counter()
         p = self._sample_params()
         cfg = self.config
         metadata: dict[str, Any] = {}
@@ -1383,10 +1452,19 @@ class HologramPipeline:
             beamstop_config=beamstop_config,
         )
         detector_config.setup()
-        real_space_pixel_size = (
-            detector_config.calc_realspace_resolution(xray_config.beam_params)
-            / cfg.oversampling
-        )
+        detector_resolution = self._sampling_resolution(detector_config, xray_config)
+        effective_oversampling = int(cfg.oversampling)
+        if p["pattern_type"] == "constrained_domain_pattern":
+            # Refine the actual propagation grid, never enlarge a coarse binary bitmap.
+            p["pattern_config"].setdefault("characteristic_length", 160e-9)
+            p["pattern_config"].setdefault("sigma", 5e-9)
+            from ..magnetic_parameters import constrained_sampling_pitch
+            target_pitch = constrained_sampling_pitch(p["pattern_config"])
+            effective_oversampling = max(effective_oversampling, int(np.ceil(detector_resolution / target_pitch)))
+            if effective_oversampling * max(cfg.detector_shape) > cfg.magnetic_pattern_max_grid_axis:
+                raise ValueError(f"Resolved magnetic walls require oversampling={effective_oversampling}, exceeding magnetic_pattern_max_grid_axis={cfg.magnetic_pattern_max_grid_axis}; use a shorter detector distance, wider walls, or an explicitly larger allocation limit")
+        real_space_pixel_size = detector_resolution / effective_oversampling
+        metadata["sample/effective_oversampling"] = effective_oversampling
         metadata.update(beamstop_config.get_metadata(prefix="beamstop/"))
         metadata.update(self._detector_metadata(detector_config))
         t_stage = mark_stage("detector/beamstop", t_stage)
@@ -1395,8 +1473,8 @@ class HologramPipeline:
         sample_shape = np.array(
             [
                 0,
-                cfg.oversampling * cfg.detector_shape[0],
-                cfg.oversampling * cfg.detector_shape[1],
+                effective_oversampling * cfg.detector_shape[0],
+                effective_oversampling * cfg.detector_shape[1],
             ],
             dtype=int,
         )
@@ -1463,13 +1541,21 @@ class HologramPipeline:
         )
 
         # ---- Magnetic pattern config -------------------------------------
-        pattern_shape, pattern_slices, coordinate_offset = self._magnetic_pattern_roi(
-            sample_shape[1:],
-            real_space_pixel_size,
-            p["aperture_config"],
-            p["pattern_type"],
-            enabled=cfg.use_roi and cfg.magnetic_pattern_use_roi,
-        )
+        oh_mask = front_aperture_config.create_supportmask(
+            output_shape=sample_shape[1:], output_pixel_size=real_space_pixel_size,
+            aperture_types=("OH",))
+        if p["pattern_type"] == "constrained_domain_pattern" and cfg.use_roi and cfg.magnetic_pattern_use_roi:
+            controls = p["pattern_config"]
+            pattern_shape, pattern_slices, coordinate_offset = self._constrained_domain_roi(
+                oh_mask, real_space_pixel_size, controls["characteristic_length"],
+                controls.get("sigma") or 0., cfg.magnetic_pattern_context_periods,
+                saturated=controls.get("target_magnetization") in (-1, 1))
+        else:
+            pattern_shape, pattern_slices, coordinate_offset = self._magnetic_pattern_roi(
+                sample_shape[1:], real_space_pixel_size, p["aperture_config"],
+                p["pattern_type"], enabled=cfg.use_roi and cfg.magnetic_pattern_use_roi)
+        metadata["sample/magnetic_pattern/generation_shape_px"] = np.asarray(pattern_shape, dtype=int)
+        metadata["sample/magnetic_pattern/context_periods"] = cfg.magnetic_pattern_context_periods
         _, output_pattern_slices, _ = self._magnetic_pattern_roi(
             sample_shape[1:],
             real_space_pixel_size,
@@ -1491,6 +1577,28 @@ class HologramPipeline:
                         center[0] - pattern_slices[0].start,
                         center[1] - pattern_slices[1].start,
                     )
+        t_stage = mark_stage("magnetic ROI planning", t_stage)
+        def report_magnetic_progress(event):
+            stage = event['stage']
+            if stage == 'attempt':
+                print(f"      attempt {event['attempt']}/{event['max_attempts']}: preferred spacing={event['preferred_length_px']:.2f} px", flush=True)
+            elif stage == 'relaxation':
+                return  # Keep sweep output free of per-iteration progress.
+            elif stage == 'complete':
+                details = event['timings_seconds']
+                print("      relaxation breakdown (included in relaxation): " + ", ".join(
+                    f"{name}={details[name]:.3f}s" for name in
+                    ('local_update', 'spectral_update', 'area_projection', 'convergence_check', 'trace')), flush=True)
+                print(f"      generator total: {event['elapsed_seconds']:.3f}s", flush=True)
+            else:
+                print(f"      {stage}: {event['elapsed_seconds']:.3f}s", flush=True)
+        if self.verbose and p['pattern_type'] == 'constrained_domain_pattern':
+            controls = p['pattern_config']
+            target = controls.get('target_magnetization')
+            print(f"\n    magnetic grid={pattern_shape}, pitch={real_space_pixel_size*1e9:.3f} nm, "
+                  f"spacing={controls['characteristic_length']/real_space_pixel_size:.2f} px, "
+                  f"wall sigma={(controls.get('sigma') or 0.)/real_space_pixel_size:.2f} px, "
+                  f"magnetization={'free' if target is None else target}", flush=True)
         magnetic_pattern_config = MagneticPatternConfig(
             pattern_type_method=p["pattern_type"],
             shape=pattern_shape,
@@ -1498,7 +1606,14 @@ class HologramPipeline:
             pattern_config_length=p["pattern_config_length"],
             pattern_config=pattern_config,
         )
-        magnetic_pattern_config.create_pattern()
+        magnetic_pattern_config = self._generate_pattern(
+            magnetic_pattern_config, report_magnetic_progress if self.verbose else None)
+        t_stage = mark_stage("domain relaxation and walls", t_stage)
+        if hasattr(magnetic_pattern_config, "generation_metadata"):
+            # JSON preserves nested traces, calibration history, None and solver defaults.
+            metadata["sample/magnetic_pattern/generation_json"] = json.dumps(magnetic_pattern_config.generation_metadata, allow_nan=False)
+            metadata["sample/magnetic_pattern/classification_input"] = "binary_before_wall_smoothing"
+            metadata["sample/magnetic_pattern/binary_pattern"] = magnetic_pattern_config.binary_pattern.astype(np.int8)
         magnetic_pattern = np.ones(sample_shape[1:], dtype=np.float64)
         if pattern_slices is None:
             magnetic_pattern = magnetic_pattern_config.magnetic_pattern
@@ -1511,6 +1626,7 @@ class HologramPipeline:
             nr_repeats=sample_shape[0],
         )
         sample_config.assign_magnetic_pattern(magnetization)
+        t_stage = mark_stage("3D magnetization mapping", t_stage)
         magnetic_metadata = magnetic_pattern_config.get_metadata(
             prefix="sample/magnetic_pattern/"
         )
@@ -1542,96 +1658,60 @@ class HologramPipeline:
         metadata["sample/magnetic_pattern/use_roi"] = bool(
             cfg.use_roi and cfg.magnetic_pattern_use_roi
         )
-        t_stage = mark_stage("magnetic pattern", t_stage)
+        t_stage = mark_stage("magnetic metadata", t_stage)
 
         front_aperture_config.setup()
         aperture_mask = front_aperture_config.return_aperture()
         sample_config.assign_aperture_mask(aperture_mask)
-        aperture_material_fraction = np.mean(aperture_mask, axis=0)
-        aperture_types = p["aperture_config"].get("aperture_types", [])
-        aperture_centers = p["aperture_config"].get("aperture_centers", [])
-        aperture_cut_pixels = []
-        for center in aperture_centers:
-            cut_y = int(
-                np.clip(
-                    round(sample_shape[1] / 2 + float(center[0]) / real_space_pixel_size),
-                    0,
-                    sample_shape[1] - 1,
-                )
-            )
-            cut_x = int(
-                np.clip(
-                    round(sample_shape[2] / 2 + float(center[1]) / real_space_pixel_size),
-                    0,
-                    sample_shape[2] - 1,
-                )
-            )
-            aperture_cut_pixels.append((cut_y, cut_x))
-        if False:
-            if aperture_cut_pixels:
-                aperture_yz_cuts = np.stack(
-                    [aperture_mask[:, :, cut_x] for _, cut_x in aperture_cut_pixels]
-                )
-                aperture_xz_cuts = np.stack(
-                    [aperture_mask[:, cut_y, :] for cut_y, _ in aperture_cut_pixels]
-                )
-                metadata["aperture/cut_y_px_all"] = np.asarray(
-                    [cut_y for cut_y, _ in aperture_cut_pixels], dtype=np.int64
-                )
-                metadata["aperture/cut_x_px_all"] = np.asarray(
-                    [cut_x for _, cut_x in aperture_cut_pixels], dtype=np.int64
-                )
-            else:
-                aperture_yz_cuts = np.empty((0, sample_shape[0], sample_shape[1]))
-                aperture_xz_cuts = np.empty((0, sample_shape[0], sample_shape[2]))
-            if "OH" in aperture_types:
-                oh_index = aperture_types.index("OH")
-                oh_center = p["aperture_config"]["aperture_centers"][oh_index]
-            else:
-                oh_center = (0.0, 0.0)
-            aperture_cut_y = int(
-                np.clip(
-                    round(sample_shape[1] / 2 + float(oh_center[0]) / real_space_pixel_size),
-                    0,
-                    sample_shape[1] - 1,
-                )
-            )
-            aperture_cut_x = int(
-                np.clip(
-                    round(sample_shape[2] / 2 + float(oh_center[1]) / real_space_pixel_size),
-                    0,
-                    sample_shape[2] - 1,
-                )
-            )
-            aperture_yz_cut = aperture_mask[:, :, aperture_cut_x]
-            aperture_xz_cut = aperture_mask[:, aperture_cut_y, :]
-            metadata["aperture/cut_y_px"] = aperture_cut_y
-            metadata["aperture/cut_x_px"] = aperture_cut_x
-
         supportmask = front_aperture_config.create_supportmask(
             output_shape=detector_config.detector_layout.detector_shape,
             output_pixel_size=detector_config.detector_layout.real_space_resolution,
         )
-        oh_mask = front_aperture_config.create_supportmask(
-            output_shape=sample_shape[1:],
-            output_pixel_size=sample_config.sample_structure.real_space_pixel_size,
-            aperture_types=("OH",),
-        )
+        aperture_metadata = front_aperture_config.get_metadata(prefix="sample/aperture/")
+        aperture_metadata.pop("sample/aperture/real_space_pixel_size", None)
+        aperture_metadata.pop("sample/aperture/use_roi", None)
+        metadata.update(aperture_metadata)
+        t_stage = mark_stage("front aperture", t_stage)
         magnetic_pattern_oh = magnetic_pattern * oh_mask
+        classification_pattern = magnetic_pattern
+        classification_mask = np.asarray(oh_mask) > 0.5
+        if hasattr(magnetic_pattern_config, "binary_pattern"):
+            classification_pattern = magnetic_pattern_config.binary_pattern
+            if pattern_slices is not None:
+                classification_mask = classification_mask[pattern_slices]
         domain_analysis = classify_magnetic_domains(
-            magnetic_pattern,
-            analysis_mask=np.asarray(oh_mask) > 0.5,
+            classification_pattern,
+            analysis_mask=classification_mask,
             min_area=cfg.magnetic_pattern_classification_min_area,
             max_eccentricity=cfg.magnetic_pattern_bubble_max_eccentricity,
             min_circularity=cfg.magnetic_pattern_bubble_min_circularity,
+            periodic=hasattr(magnetic_pattern_config, "binary_pattern"),
         )
-        state = {
-            "uniform": "saturated",
-            "noise": "saturated",
-            "bubbles": "bubble",
-            "stripes": "stripe",
-            "mixed": "mixed",
-        }[domain_analysis["morphology"]]
+        from scattering_calculator.sample_generator.domain_catalogue import measure_domain_pattern
+        measured = measure_domain_pattern(classification_pattern, classification=domain_analysis)
+        measured["up_fraction_in_oh"] = float(np.mean(classification_pattern[classification_mask] > 0))
+        measured["mean_mz_in_oh"] = float(np.mean(classification_pattern[classification_mask]))
+        metadata["sample/magnetic_pattern/measurements_json"] = json.dumps(measured, allow_nan=False)
+        metadata["sample/magnetic_pattern/classification_json"] = json.dumps(
+            {key: value for key, value in domain_analysis.items()
+             if not isinstance(value, np.ndarray)}, allow_nan=False)
+        for key, value in measured.items():
+            metadata[f"sample/magnetic_pattern/measurements/{key}"] = np.nan if value is None else value
+        metadata["sample/magnetic_pattern/analysis_mask"] = classification_mask.astype(np.uint8)
+        state = domain_analysis["state"]
+        for metric in ("stripe_nematic_order", "local_sixfold_order", "sixfold_order", "interior_bubble_count"):
+            value = domain_analysis[metric]
+            metadata[f"sample/magnetic_pattern/{metric}"] = np.nan if value is None else value
+        for phase in ("positive", "negative", "majority", "minority"):
+            for kind in ("bubble", "stripe", "noise", "boundary_fragment"):
+                key = f"{phase}_{kind}_count"
+                metadata[f"sample/magnetic_pattern/{key}"] = domain_analysis[key]
+        metadata["sample/magnetic_pattern/boundary_fragment_count"] = domain_analysis["boundary_fragment_count"]
+        metadata["sample/magnetic_pattern/classification_method"] = "both_polarities_connected_components_v6"
+        metadata["sample/magnetic_pattern/classification_periodic"] = domain_analysis["periodic"]
+        metadata["sample/magnetic_pattern/classification_geometry"] = (
+            "periodic generation grid; count distinct domains intersecting OH" if domain_analysis["periodic"]
+            else "open simulation grid; count domains intersecting OH")
         metadata["sample/magnetic_pattern/state"] = state
         metadata["sample/magnetic_pattern/bubble_count"] = domain_analysis[
             "bubble_count"
@@ -1665,13 +1745,7 @@ class HologramPipeline:
             metadata["sample/magnetic_pattern/saved_roi_x_stop_px"] = (
                 output_pattern_slices[1].stop
             )
-        aperture_metadata = front_aperture_config.get_metadata(
-            prefix="sample/aperture/"
-        )
-        aperture_metadata.pop("sample/aperture/real_space_pixel_size", None)
-        aperture_metadata.pop("sample/aperture/use_roi", None)
-        metadata.update(aperture_metadata)
-        t_stage = mark_stage("front aperture", t_stage)
+        t_stage = mark_stage("magnetic diagnostics", t_stage)
 
         if cfg.propagator_method == "Scalar":
             sample_config.sample_structure.calculate_final_scalar_refractive_index(
@@ -1747,6 +1821,36 @@ class HologramPipeline:
         metadata["illumination/alpha_beam_rad"] = p["illumination_alpha_beam"]
         t_stage = mark_stage("illumination", t_stage)
 
+        self._process_prepared(h5, idx, p, metadata, stage_times, t_stage, sample_config, illumination_config, detector_config, xray_config, sample_shape, real_space_pixel_size, supportmask, magnetic_pattern_oh, front_aperture_config)
+
+    def _sampling_resolution(self, detector_config, xray_config):
+        """Return the detector-derived resolution used to plan the sample grid."""
+        return detector_config.calc_realspace_resolution(xray_config.beam_params)
+
+    def _generate_pattern(self, pattern_config, callback):
+        """Generate the magnetic texture, including physical wall smoothing."""
+        pattern_config.create_pattern(progress_callback=callback)
+        return pattern_config
+
+    def _setup_propagator(self, propagator_config, pol):
+        """Calculate the sample exit wave and its far-field representation."""
+        propagator_config.setup()
+        return propagator_config
+
+    def _detect_ideal(self, detector_config, propagator_config, pol):
+        """Project a propagated field onto ideal detector pixels."""
+        detector_config.assign_propagated_wavefront(propagator_config)
+        detector_config.detect_hologram()
+
+    def _process_prepared(self, h5, idx, p, metadata, stage_times, t_stage, sample_config, illumination_config, detector_config, xray_config, sample_shape, real_space_pixel_size, supportmask, magnetic_pattern_oh, front_aperture_config):
+        """Propagate and acquire one prepared sample using overridable stages."""
+        def mark_stage(name, start):
+            now = time.perf_counter()
+            stage_times.append((name, now - start))
+            return now
+
+        cfg = self.config
+
         # ---- Hologram simulation loop ------------------------------------
         hologram_config = HologramConfig(
             sample_x=sample_config.sample_structure.x,
@@ -1790,13 +1894,12 @@ class HologramPipeline:
                     "farfield_oversampling": cfg.farfield_oversampling,
                 },
             )
-            propagator_config.setup()
+            propagator_config = self._setup_propagator(propagator_config, pol)
             t_stage = mark_stage(
                 f"{pol} {cfg.propagator_method} propagation", t_stage
             )
 
-            detector_config.assign_propagated_wavefront(propagator_config)
-            detector_config.detect_hologram()
+            self._detect_ideal(detector_config, propagator_config, pol)
             t_stage = mark_stage(f"{pol} detector ideal", t_stage)
 
             hologram_config.add_exit_waves(
@@ -1816,6 +1919,14 @@ class HologramPipeline:
                 source="detected",
             )
             artifact_model = detector_config.hologram_exp
+            noise_timings = getattr(artifact_model, 'noise_timings_seconds', {})
+            for name, seconds in noise_timings.items():
+                metadata[f"detector_response/{pol}/timing_seconds/{name}"] = seconds
+            if self.verbose and noise_timings:
+                print(f"    {pol} detector noise: " + ", ".join(
+                    f"{name}={seconds:.3f}s" for name, seconds in noise_timings.items()), flush=True)
+            metadata[f"detector_response/{pol}/energy_eV"] = float(artifact_model.photon_energy_eV)
+            metadata[f"detector_response/{pol}/counts_per_photon"] = artifact_model._gain_at_energy(artifact_model.photon_energy_eV)
             defect_map = artifact_model.camera_defect_map
             if pol_idx == 0:
                 for defect_name in ("hot", "cold", "flicker"):
@@ -1876,6 +1987,9 @@ class HologramPipeline:
             #aperture_xz_cuts=aperture_xz_cuts,
         )
         mark_stage("hdf5 write", t_stage)
+        timing_group = h5[f"{idx:05d}/metadata"].create_group("timing_seconds")
+        for name, seconds in stage_times:
+            timing_group.create_dataset(name.replace(" ", "_"), data=seconds)
 
         if self.verbose:
             breakdown = ", ".join(
@@ -1905,6 +2019,14 @@ class HologramPipeline:
                     remapped = f"{group}/{key[len(prefix):]}"
                     break
             result[remapped] = value
+        response_parameters = getattr(detector_config, "detector_params", {})
+        for key in ("counts_per_photon", "nonlinear_response"):
+            value = response_parameters.get(key)
+            if callable(value):
+                module = getattr(value, '__module__', type(value).__module__)
+                name = getattr(value, '__qualname__', type(value).__qualname__)
+                result[f"detector_params/{key}"] = f"{module}.{name}"
+        result["detector_response/model"] = "linear" if response_parameters.get("nonlinear_response") is None else "nonlinear"
         return result
 
     @staticmethod

@@ -3,9 +3,10 @@
 from __future__ import annotations
 import numpy as np
 from copy import copy
+from time import perf_counter
 from numpy.typing import ArrayLike, NDArray
 import matplotlib.pyplot as plt
-from scipy import signal
+from scipy import signal, fft
 from scipy.ndimage import gaussian_filter
 from scipy.ndimage import map_coordinates
 
@@ -405,7 +406,7 @@ class detector_hologram:
     DEFAULT_ARTIFACTS_CONFIG = {
         "sigma_photon": 0.75,
         "photon_n_classes": 1,
-        "photon_n_variants": 30,
+        "photon_n_variants": 10,
         "photon_kernel_size": 9,
         "photon_irregularity": 2.0,
         "regenerate_photon_kernels": True,
@@ -1002,15 +1003,19 @@ class detector_hologram:
         total = np.zeros_like(self.hologram_detector, dtype=float)
         unmasked = np.zeros_like(total) if store_no_beamstop else None
         tracks = []
+        summed_timings = {}
         for _ in range(self.number_frames):
             frame.noise_seed = int(rng.integers(0, np.iinfo(np.uint32).max))
             frame.add_noise(
                 apply_beamstop_mask, apply_detector_threshold, store_no_beamstop
             )
+            for name, seconds in frame.noise_timings_seconds.items():
+                summed_timings[name] = summed_timings.get(name, 0.) + seconds
             total += frame.hologram_exp
             tracks.append(frame.cosmic_ray_tracks.copy())
             if store_no_beamstop:
                 unmasked += frame.hologram_exp_no_beamstop
+        self.noise_timings_seconds = summed_timings
         self.hologram_exp = total / self.number_frames
         self.camera_defect_map = frame.camera_defect_map
         self.cosmic_ray_tracks = np.concatenate(tracks, axis=0)
@@ -1052,6 +1057,9 @@ class detector_hologram:
             Stores the frame-averaged acquired image in hologram_exp.
         """
 
+        acquisition_start = perf_counter()
+        timings = dict(expected_photons=0., photon_sampling=0., charge_spreading=0.,
+                       nonlinear_response=0., readout_draw=0., finalization=0., total=0.)
         rng = np.random.default_rng(getattr(self, "noise_seed", None))
         if int(self.number_frames) != self.number_frames or self.number_frames < 1:
             raise ValueError("number_frames must be a positive integer")
@@ -1066,14 +1074,23 @@ class detector_hologram:
             self._acquire_frames(
                 rng, apply_beamstop_mask, apply_detector_threshold, store_no_beamstop
             )
+            self.noise_timings_seconds['total'] = perf_counter() - acquisition_start
             return
 
         # Photon statistics are independent of electronic gain. Each color has
         # its own Poisson realization and ADU/photon before signals are summed.
         signal_adu = np.zeros_like(self.hologram_detector, dtype=float)
-        for gain, expected_photons in self._expected_photon_components():
+        tick = perf_counter()
+        components = self._expected_photon_components()
+        timings['expected_photons'] = perf_counter() - tick
+        for gain, expected_photons in components:
+            tick = perf_counter()
             photons = rng.poisson(expected_photons * self.number_frames).astype(np.int64)
+            timings['photon_sampling'] += perf_counter() - tick
+            tick = perf_counter()
             signal_adu += gain * self._spread_photons(photons, rng)
+            timings['charge_spreading'] += perf_counter() - tick
+        tick = perf_counter()
         if response is not None:
             converted = np.asarray(response(signal_adu.copy() / self.number_frames))
             if np.iscomplexobj(converted):
@@ -1088,7 +1105,9 @@ class detector_hologram:
             if not np.isfinite(converted).all() or np.any(converted < 0):
                 raise ValueError("nonlinear_response must return finite nonnegative ADU")
             signal_adu = converted.copy() * self.number_frames
+        timings['nonlinear_response'] = perf_counter() - tick
         artifact_seed = int(rng.integers(0, np.iinfo(np.uint32).max))
+        tick = perf_counter()
 
         # Draw one readout image and reuse it for the optional unmasked variant.
         readout_noise = 0.0
@@ -1099,6 +1118,7 @@ class detector_hologram:
                 signal_adu.shape,
             )
 
+        timings['readout_draw'] = perf_counter() - tick
         def finalize_detection(image, apply_mask=True, apply_threshold=True):
             """Finish the accumulated exposure using shared readout/artifact draws.
 
@@ -1135,6 +1155,7 @@ class detector_hologram:
             detected[detected < 0] = 0
             return detected
 
+        tick = perf_counter()
         if store_no_beamstop:
             self.hologram_exp_no_beamstop = finalize_detection(
                 signal_adu,
@@ -1147,6 +1168,9 @@ class detector_hologram:
             apply_mask=apply_beamstop_mask,
             apply_threshold=apply_detector_threshold,
         )
+        timings['finalization'] = perf_counter() - tick
+        timings['total'] = perf_counter() - acquisition_start
+        self.noise_timings_seconds = timings
 
     def gnomonic_projection(
         self,
@@ -1421,36 +1445,43 @@ class detector_hologram:
 
         n_classes, n_variants = kernel_bank.shape[:2]
 
-        splatted = np.zeros_like(photon_counts, dtype=np.float64)
-
+        # Convolution is linear: sum variant spectra, then invert just once.
+        # Keep each event's random variant; do not substitute a mean kernel.
+        full_shape = tuple(n + k - 1 for n, k in zip(photon_counts.shape, kernel_bank.shape[-2:]))
+        fft_shape = tuple(fft.next_fast_len(n, real=True) for n in full_shape)
+        spectrum = np.zeros((fft_shape[0], fft_shape[1]//2+1), dtype=np.complex128)
+        counts_image = np.zeros(photon_counts.shape, dtype=np.float64)
+        counts_flat = counts_image.ravel()
+        has_events = False
         for c in range(n_classes):
-            mask = class_map == c
-
-            if not np.any(mask):
-                continue
-
-            class_counts = np.zeros_like(photon_counts, dtype=np.int64)
-            class_counts[mask] = photon_counts[mask]
-
-            if class_counts.sum() == 0:
-                continue
-
-            variant_counts = self.split_counts_into_variants(
-                class_counts,
-                n_variants=n_variants,
-                rng=rng,
-            )
-
-            for v, counts_v in enumerate(variant_counts):
-                if counts_v.sum() == 0:
-                    continue
-
-                kernel = kernel_bank[c, v]
-                kernel = kernel / kernel.sum()
-
-                splatted += signal.fftconvolve(counts_v, kernel, mode="same")
-
-        return splatted
+            # Zero-trial binomials consume no random draws. Keeping active
+            # indices in row-major order preserves the event assignment order.
+            active = np.flatnonzero((class_map == c) & (photon_counts > 0))
+            remaining = photon_counts.ravel()[active].copy()
+            for v in range(n_variants):
+                if not active.size:
+                    break
+                if v == n_variants - 1:
+                    take = remaining
+                else:
+                    take = rng.binomial(remaining, 1.0/(n_variants-v))
+                    remaining -= take
+                if np.any(take):
+                    counts_image.fill(0.)
+                    counts_flat[active] = take
+                    kernel = kernel_bank[c, v]
+                    kernel = kernel / kernel.sum()
+                    spectrum += fft.rfftn(counts_image, fft_shape) * fft.rfftn(kernel, fft_shape)
+                    has_events = True
+                if v != n_variants - 1:
+                    keep = remaining > 0
+                    active, remaining = active[keep], remaining[keep]
+        if not has_events:
+            return counts_image
+        full = fft.irfftn(spectrum, fft_shape)
+        starts = tuple((k-1)//2 for k in kernel_bank.shape[-2:])
+        crop = tuple(slice(start, start+n) for start, n in zip(starts, photon_counts.shape))
+        return full[crop].copy()
 
 
 def add_sensor_artifacts(

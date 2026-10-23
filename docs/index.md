@@ -34,6 +34,8 @@ Start here:
   propagation, and detector q-space projection
 - Read the [hologram sweep reference](simulate_hologram_sweep.md) for scripted
   HDF5 dataset generation
+- Share the [magnetic-pattern analysis guide](magnetic_pattern_analysis.md) for
+  HDF5 loading, units, measured states and analysis examples
 - Use the [configuration reference](configuration.md) when editing YAML configs
 - Browse the [API reference](api.rst) for the reusable package surface
 - See the [roadmap](roadmap.md) for planned extensions
@@ -52,6 +54,7 @@ detector_response
 optical_contrast_formalisms
 light_propagation_modes
 simulate_hologram_sweep
+magnetic_pattern_analysis
 roadmap
 contributing
 api
@@ -60,3 +63,5 @@ api
 - [General magnetic domains and measured parameter atlas](magnetic_domain_catalogue.md)
 
 - [Experimental constrained dipolar domains](constrained_magnetic_domains.md)
+
+- [Hierarchical hologram sweeps with stage reuse](hierarchical_hologram_sweep.md)

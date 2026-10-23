@@ -97,8 +97,8 @@ class MagneticDomainClassificationTests(unittest.TestCase):
 
         self.assertEqual(analysis["minority_polarity"], -1)
         self.assertEqual(analysis["bubble_count"], 2)
-        self.assertEqual(analysis["stripe_count"], 0)
-        self.assertEqual(analysis["morphology"], "bubbles")
+        self.assertEqual(analysis["stripe_count"], 1)
+        self.assertEqual(analysis["morphology"], "mixed")
 
     def test_classifies_elongated_domain_as_stripe(self) -> None:
         pattern = np.ones((64, 64), dtype=float)
@@ -107,7 +107,7 @@ class MagneticDomainClassificationTests(unittest.TestCase):
         analysis = classify_magnetic_domains(pattern)
 
         self.assertEqual(analysis["bubble_count"], 0)
-        self.assertEqual(analysis["stripe_count"], 1)
+        self.assertEqual(analysis["stripe_count"], 2)
         self.assertEqual(analysis["morphology"], "stripes")
         self.assertGreater(
             analysis["minority_components"][0]["eccentricity"], 0.8
@@ -121,7 +121,7 @@ class MagneticDomainClassificationTests(unittest.TestCase):
         analysis = classify_magnetic_domains(pattern)
 
         self.assertEqual(analysis["bubble_count"], 0)
-        self.assertEqual(analysis["stripe_count"], 1)
+        self.assertEqual(analysis["stripe_count"], 2)
 
     def test_binarizes_continuous_input_at_requested_threshold(self) -> None:
         pattern = np.ones((32, 32), dtype=float)

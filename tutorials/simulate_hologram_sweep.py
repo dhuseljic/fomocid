@@ -28,18 +28,16 @@ from scattering_calculator.simulation_pipelines.pipelines import (
     HologramPipelineRanges,
 )
 from scattering_calculator.sample_generator import structures
-from scattering_calculator.sample_generator.domain_phase_space import (
-    balanced_state_schedule,
-    load_or_analyze_domain_phase_space,
-    sample_verified_morphology_region,
+from scattering_calculator.simulation_pipelines.magnetic_parameters import (
+    sample_constrained_domain_parameters, constrained_sampling_pitch,
 )
 
 
 # Number of simulations to run.
-nr_simulations = 7  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 30  # increase to e.g. 1000 for a full training dataset
 
 # --- Material stack ---
-recipe = "[Au(200)Cr(60)]x5/SiN(200)/Pt(10)Al(10)Co(10)"
+recipe = "[Au(200)Cr(60)]x5/SiN(200)/Pt(10)Al(10)Co(20)"
 
 # simulation sampling options; these can be overridden in the ranges below to create mixed sampling
 oversampling=2 # sampling of the sample relative to the dector-based sampling; e.g. oversampling=2 means the sample grid has 2x finer pixel size than the detector-projected pixel size in the sample plane; this is separate from farfield_oversampling, which controls the hologram sampling relative to the detector
@@ -57,6 +55,7 @@ output_path = output_folder / "simulation_sweep.h5"
 pipeline_random_seed = 0  # set to None for non-reproducible random sweeps
 propagator_method = "Scalar"  # "Jones" = full 2-component matrix interaction with beam-direction-projected magnetic contrast; "Scalar" = faster scalar eigenmode approximation
 use_roi = True # set True to use a region of interest around the sample for the whole pipeline, which can greatly speed up simulations with large free-space regions; set False to use the full grid, which can improve accuracy for large beamstop distances or very wide beamstops but uses more memory and computation time
+magnetic_pattern_context_periods = 0.5  # context outside actual OH, per side, in domain spacings; four wall sigmas are added
 dielectric_tensor_use_roi = True # set True to only compute local Jones tensor patches or Scalar refractive-index patches around aperture regions; set False to compute the full dense interaction stack
 dielectric_tensor_compact = True  # Jones: avoid allocating the full dense tensor stack for normal incidence; tilted-beam Jones projection uses a dense tensor
 dielectric_tensor_local_k_projection = False  # Jones only: recompute local k from the Jones-field phase gradient slice by slice, so XMCD follows local m dot k
@@ -109,10 +108,14 @@ detector_params = {
     # Canonical conversion between detector counts and photon events.
     "counts_per_photon": 100,
     "quantum_efficiency": 1.0,
+    # Optional callable F(linear_ADU_per_frame) -> nonlinear_ADU_per_frame.
+    # None keeps the characteristic curve linear; ADC clipping/noise still apply.
+    "nonlinear_response": None,
 }
 # Acquisition timing/frame settings are separate from detector response.
 measurement_config = {
     "number_frames": 1,
+    "acquisition_mode": "accumulated",  # use "per_frame" for explicit per-frame nonlinear statistics
     "max_counts_per_image": 64.3e3,
     "exposure_time": 1e-2,
 }
@@ -120,7 +123,7 @@ measurement_config = {
 artifacts_config = {
     "sigma_photon": 0.75,
     "photon_n_classes": 1,
-    "photon_n_variants": 30,
+    "photon_n_variants": 10,
     "photon_kernel_size": 9,
     "photon_irregularity": 2.0,
     "regenerate_photon_kernels": True,
@@ -165,72 +168,24 @@ beamstop_config = {
 # 03: MAGNETIC PHASE-SPACE PREPARATION
 ######################################
 # --- Magnetic domain pattern ---
-pattern_type = "binary_labyrinth_pattern"
-period = 600e-9  # m; full positive/negative repeat
-sigma = 30e-9  # m
-# Sample every magnetic state from one binary-domain phase space. The
-# target-mean bounds are interpreted as -1 to +1.
-pattern_k0_bounds = (0.1, 1.1)
-pattern_eps_bounds = (0.1, 1.2)
-pattern_target_mean_bounds = (-1.0, 1.0)
-pattern_max_hole_area_px = 9
-pattern_saturation_fraction_threshold = 0.01
-pattern_classification_min_area_px = 9
-pattern_bubble_max_eccentricity = 0.85
-pattern_bubble_min_circularity = 0.45
-# The same grid and classifier used by 03_binary_domain_phase_space.ipynb.
-pattern_phase_space_grid_size = 12
-pattern_phase_space_cache = output_folder / "binary_domain_phase_space_v1.npz"
-# Very small k0 combined with the independently sampled 30--500 nm physical
-# stripe width can demand >10k x >10k adaptive FFT fields. Keep non-saturated
-# production samples in the resolved high-k0 part of the analyzed space.
-pattern_production_k0_bounds = (1.0, 1.1)
-labyrinth_config = {
-    "batch": 1,
-    "H": 100,
-    "W": 100,
-    "n_steps": 50,
-    "region": "custom",
-    "use_gpu": False,
-    "k0": 0.7,
-    "eps": 0.8,
-    "target_mean": 0.0,
-    "noise_amp": 0.0,
-    "quadratic_coefficient": 0.0,
-    "max_hole_area": pattern_max_hole_area_px,
-    "saturation_fraction_threshold": pattern_saturation_fraction_threshold,
-    "domain_conversion": "soft",
-    "softness": 1.0,
-    "auto_size": True,
-    # Fail before allocating a pathological FFT field after adaptive sizing.
-    "max_auto_size": 2048,
-    "max_auto_pixels": 2048**2,
-    "crop_margin": None,
-}
-pattern_config = {
-    'period': period,
-    "sigma": sigma,
-}
-pattern_config.update(labyrinth_config)
-
-# Analyze the inexpensive 128 x 128 generator once. The resulting rich regions
-# guide the much more expensive hologram simulations below.
-phase_space_rng = np.random.default_rng(pipeline_random_seed)
-phase_space = load_or_analyze_domain_phase_space(
-    pattern_phase_space_cache,
-    k0_values=np.linspace(*pattern_k0_bounds, pattern_phase_space_grid_size),
-    eps_values=np.linspace(*pattern_eps_bounds, pattern_phase_space_grid_size),
-    target_mean_values=np.linspace(
-        *pattern_target_mean_bounds, pattern_phase_space_grid_size
-    ),
-    min_area=pattern_classification_min_area_px,
-    max_eccentricity=pattern_bubble_max_eccentricity,
-    min_circularity=pattern_bubble_min_circularity,
-    max_hole_area=pattern_max_hole_area_px,
-    verbose=True,
+# None lets the mean evolve freely. Set a number for a fixed area target.
+# Alternatively set constrain_magnetization=True to sample different numeric targets.
+constrain_magnetization = False
+target_magnetization = None
+pattern_type = "constrained_domain_pattern"
+pattern_config = dict(
+    characteristic_length=600e-9, target_magnetization=target_magnetization,
+    alignment=0., direction=0., disorder=0., disorder_length=30e-9,
+    initial_state="random", initial_order=0., wall_stiffness=2.,
+    n_steps=300, time_step=.2, convergence_tolerance=1e-5,
+    length_tolerance=.15, max_length_iterations=1, sigma=30e-9,
 )
-state_schedule = balanced_state_schedule(nr_simulations, phase_space_rng)
-state_schedule_iterator = iter(state_schedule)
+pattern_classification_min_area_px = 9
+pattern_bubble_max_eccentricity = .95
+pattern_bubble_min_circularity = .4
+# One relaxation run, no retries to hit a measured spacing or state.
+# Classify both polarities and measure achieved properties after generation.
+domain_rng = np.random.default_rng(pipeline_random_seed)
 
 # --- FTH holography mask ---
 aperture_types = ["OH", "RH", "RH"]
@@ -337,6 +292,7 @@ config = ExperimentConfig(
              propagation=SamplePropagatorConfig(propagator_method=propagator_method,propagator_config={
                      'use_roi': use_roi,
                      'magnetic_pattern_use_roi': True,
+                     'magnetic_pattern_context_periods': magnetic_pattern_context_periods,
                      'magnetic_pattern_classification_min_area': pattern_classification_min_area_px,
                      'magnetic_pattern_bubble_max_eccentricity': pattern_bubble_max_eccentricity,
                      'magnetic_pattern_bubble_min_circularity': pattern_bubble_min_circularity,
@@ -383,48 +339,9 @@ config = ExperimentConfig(
 # None                — use the fixed value from HologramPipelineConfig
 
 def random_pattern_config(params):
-    """Sample a balanced saturated, stripe-rich, or bubble-rich state.
-
-    Parameters
-    ----------
-    params : Any
-        Input value for ``params``.
-
-    Returns
-    -------
-    result : Any
-        Return value produced by the function.
-    """
-    period = Uniform(60e-9, 1000e-9).sample()
-    config = {
-        'period': period,
-        "sigma": Uniform(np.minimum(3e-9,0.01*(period / 2)), np.maximum(3e-9,0.12 * (period / 2))).sample(),
-    }
-    config.update(labyrinth_config)
-    target_state = next(state_schedule_iterator)
-    if target_state == "saturated":
-        # target_mean = +/-1 takes the generator's direct saturated fast path.
-        coordinates = {
-            "k0": float(phase_space_rng.uniform(*pattern_k0_bounds)),
-            "eps": float(phase_space_rng.uniform(*pattern_eps_bounds)),
-            "target_mean": float(phase_space_rng.choice((-1.0, 1.0))),
-        }
-    else:
-        coordinates = sample_verified_morphology_region(
-            phase_space, target_state, phase_space_rng,
-            min_area=pattern_classification_min_area_px,
-            max_eccentricity=pattern_bubble_max_eccentricity,
-            min_circularity=pattern_bubble_min_circularity,
-            max_hole_area=pattern_max_hole_area_px,
-            coordinate_bounds={
-                "k0": pattern_production_k0_bounds,
-                "eps": pattern_eps_bounds,
-                "target_mean": pattern_target_mean_bounds,
-            },
-        )
-    config.update(coordinates)
-    config["requested_state"] = target_state
-    return config
+    """Explore constrained-domain controls; measured morphology is an output."""
+    return sample_constrained_domain_parameters(domain_rng,
+        constrain_magnetization=constrain_magnetization, target_magnetization=target_magnetization)
 
 
 def detector_distance_range(params):
@@ -445,12 +362,16 @@ def detector_distance_range(params):
     # already been sampled. It returns either a fixed detector distance or a
     # Uniform range that the pipeline samples immediately.
     wavelength = physics.photon_energy_wavelength(params["energy"])
-    stripe_width = params["pattern_config"]["period"] / 2
+    stripe_width = params["pattern_config"]["characteristic_length"] / 2
     detector_width = params["detector_shape"][0] * params["detector_pixel_size"]
 
     # Upper bound: keep the detector real-space resolution smaller than the
     # sampled texture period. Very long distances are capped at 0.75 m.
-    max_resolution = stripe_width
+    # Resolve the full spacing by >=16 pixels and Gaussian wall sigma by >=2.
+    # This keeps most sweeps at the requested oversampling instead of triggering
+    # the pipeline's automatic refinement and allocation guard.
+    controls = params["pattern_config"]
+    max_resolution = constrained_sampling_pitch(controls) * params["oversampling"]
     maximum_detector_distance = detector_width / (
         2 * np.tan(wavelength / (2 * max_resolution))
     )
@@ -463,7 +384,7 @@ def detector_distance_range(params):
     minimum_detector_distance = detector_width / (
         2 * np.tan(wavelength / (2 * min_resolution))
     )
-    minimum_detector_distance = np.maximum(minimum_detector_distance, 3e-2)
+    minimum_detector_distance = min(max(minimum_detector_distance, 3e-2), maximum_detector_distance)
 
     if maximum_detector_distance <= minimum_detector_distance:
         return minimum_detector_distance
@@ -488,7 +409,7 @@ def random_aperture_config(params):
     # all aperture lists together so their lengths and geometric constraints
     # stay consistent.
     wavelength = physics.photon_energy_wavelength(params["energy"])
-    stripe_width = params["pattern_config"]["period"] / 2
+    stripe_width = params["pattern_config"]["characteristic_length"] / 2
     detector_width = params["detector_shape"][0] * params["detector_pixel_size"]
     detector_distance = params["detector_distance"]
 
@@ -726,7 +647,7 @@ def random_artifacts_config(params):
     return {
         "sigma_photon": Uniform(0.7, 0.9).sample(),
         "photon_n_classes": 1,
-        "photon_n_variants": 30,
+        "photon_n_variants": 10,
         "photon_kernel_size": 9,
         "photon_irregularity": 2.0,
         "regenerate_photon_kernels": True,
@@ -777,13 +698,15 @@ ranges = HologramPipelineRanges(
         "number_frames": int(np.random.randint(1, 21)),
         "max_counts_per_image": Uniform(40_000, 70_000).sample(),
         "exposure_time": measurement_config["exposure_time"],
+        "acquisition_mode": measurement_config["acquisition_mode"],
     },
     detector_params={
         # counts_per_photon belongs to detector_params because it controls the
         # conversion between detector counts and photon events.
         "counts_per_photon": Uniform(80, 220),
+        "nonlinear_response": detector_params["nonlinear_response"],
     },
-    # All states come from the binary-domain k0/eps/target_mean phase space.
+    # All states come from the constrained model; classify the actual output.
     pattern_type=None,
 
     # Generate interdependent magnetic stripe parameters first.
@@ -888,7 +811,7 @@ with h5py.File(output_path, "r") as h5:
     recipe_saved = grp["metadata/sample/recipe"][()].decode()
     #detector_shape_saved = tuple(grp["metadata/detector/shape"][()].astype(int))
     detector_shape_saved = tuple(ast.literal_eval(grp["metadata/detector/shape"][()].decode() if isinstance(grp["metadata/detector/shape"][()], bytes) else grp["metadata/detector/shape"][()]))
-    oversampling_saved = int(h5["_pipeline_config/oversampling"][()])
+    oversampling_saved = int(grp["metadata/sample/effective_oversampling"][()])
     real_space_pixel_size_saved = float(
         grp["metadata/sample/real_space_pixel_size"][()]
     )

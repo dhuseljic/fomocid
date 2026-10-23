@@ -134,3 +134,79 @@ for each acquired exposure. Optional material channels have their own dataset
 hashes. Callback identifiers do not serialize a function's source, closure or
 calibration files: retain the defining script and calibration data with the
 experiment. Nothing executes automatically when saved results are loaded.
+
+## Paired-CR/CL hologram sweep
+
+`tutorials/simulate_hologram_sweep.py` explicitly sets
+`detector_params["nonlinear_response"] = None`: the characteristic curve remains
+linear by default. Scalar or energy-dependent `counts_per_photon` gives ADU per
+detected photon; gain sampling across specimens does not make an individual
+camera response nonlinear. Noise, beamstop attenuation, defects and the final
+ADC threshold still apply with a linear characteristic curve.
+
+Both the fixed detector configuration and `HologramPipelineRanges.detector_params`
+accept the response and gain callbacks directly. They are preserved until
+acquisition, rather than invoked as random-parameter factory functions. To
+choose a different curve per sample, use a sampler such as `Choice` containing
+callbacks or a top-level detector-configuration factory returning a dictionary.
+
+```python
+import numpy as np
+
+# Example only: replace with a calibrated response if enabling nonlinearity.
+def camera_curve(linear_adu):
+    full_scale = 60_000.
+    return full_scale * (-np.expm1(-linear_adu / full_scale))
+
+# Edit the fixed dictionary in simulate_hologram_sweep.py before building config:
+detector_params["nonlinear_response"] = None  # default: retain linear response
+# detector_params["nonlinear_response"] = camera_curve  # optional
+measurement_config["acquisition_mode"] = "accumulated"  # default, fast
+# measurement_config["acquisition_mode"] = "per_frame"  # explicit frame statistics
+```
+
+The sweep carries these settings into the sampled detector/measurement
+configuration. `accumulated` approximates the nonlinear response using the
+average-frame linear ADU; use `per_frame` when the frame-by-frame nonlinear
+statistics are needed. An exposure consists of `number_frames` frames and
+`exposure_time` is per frame. Saved detected arrays are averaged across frames.
+
+For specimen `00000`, read:
+
+| Path under `00000/metadata/` | Meaning |
+|---|---|
+| `detector_params/nonlinear_response` | `"None"` for the default linear response, or the callback's module/qualified name. |
+| `detector_params/counts_per_photon` | Constant ADU/photon gain or callback identifier. |
+| `detector_response/model` | Explicit `linear` or `nonlinear` transfer flag. |
+| `detector_response/CR/energy_eV`, `detector_response/CL/energy_eV` | Physical photon energy used for acquisition. |
+| `detector_response/CR/counts_per_photon`, `detector_response/CL/counts_per_photon` | Gain evaluated at that energy, ADU per detected photon. |
+| `measurement_config/acquisition_mode` | `accumulated` or `per_frame`. |
+| `measurement_config/number_frames`, `measurement_config/exposure_time` | Frame count and seconds per frame. |
+
+The CR/CL fields share one response curve for a specimen. The per-helicity gain
+records are numeric even when a callback is used, so analysis does not need to
+execute it. Callback names do not contain function source, closure parameters
+or calibration tables; share that script/data separately when using a custom
+response. Files produced before these additions may lack `detector_response/`.
+
+The sweep and detector defaults use `photon_n_variants=10`. This controls the
+number of random single-photon kernel variants per spatial response class;
+users can increase it when they need a richer response bank.
+
+Charge spreading preserves individual random photon-response variants while
+streaming their counts through one reusable detector image. Their convolution
+spectra are summed before a single inverse FFT. This avoids storing a full
+image for every variant and preserves the spatial classes, event statistics,
+and convolution edge cropping.
+
+With verbose pipeline output, each polarization prints detector-noise timings
+for expected-photon calculation, photon sampling, charge spreading, nonlinear
+response, readout draws, finalization, and total acquisition. These measurements
+are also saved under
+`00000/metadata/detector_response/{CR,CL}/timing_seconds/`, with keys
+`expected_photons`, `photon_sampling`, `charge_spreading`, `nonlinear_response`,
+`readout_draw`, `finalization`, and `total`. Replace `00000` with the simulation
+index. Finalization includes beamstop masking, sensor artifacts, rounding, ADC
+clipping, and the optional unmasked output. In `per_frame` mode, component times
+are summed over frames; `total` measures the complete acquisition, including
+frame assembly. The total includes the component times; do not add it to them.

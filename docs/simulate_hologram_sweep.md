@@ -16,6 +16,8 @@ For notebook-first learning, use the focused notebooks under `tutorials/`:
   walks through `HologramPipelineConfig`, `HologramPipelineRanges`, running the
   pipeline, reading HDF5 outputs, and visualizing masks, magnetic patterns,
   CR/CL holograms, CR-CL channels, and exit waves.
+- [`22_general_magnetic_domains.ipynb`](../tutorials/22_general_magnetic_domains.ipynb)
+  explores the production domain controls, counts and order diagnostics.
 - [`10_multislice_and_roi_modes.ipynb`](../tutorials/10_multislice_and_roi_modes.ipynb)
   explains `propagate=True/False`, aperture ROI modes, Jones/tensor ROI,
   multislice ROI, padding, absorbers, and recommended operating modes.
@@ -63,8 +65,8 @@ For each sample, the pipeline:
 
 1. Samples the requested random parameters.
 2. Builds the x-ray, detector, beamstop, sample, magnetic pattern, aperture, and illumination configs.
-3. Generates an OH-local magnetic pattern when ROI mode is enabled and cleans
-   tiny enclosed sign holes before domain-wall smoothing.
+3. Generates a resolved binary constrained-domain field, retains the precursor,
+   and applies physical Gaussian wall smoothing on the native simulation grid.
 4. Builds the holography support mask and detector beamstop.
 5. Measures stripe/bubble counts and the
    `stripe`/`bubble`/`mixed`/`saturated` state inside the OH.
@@ -74,7 +76,15 @@ For each sample, the pipeline:
    a compact/dense `(Nz, Ny, Nx)` complex refractive-index stack.
 7. Creates ideal holograms, applies detector effects/noise, and saves everything to HDF5.
 
-Timing for each stage is printed when `verbose=True`.
+Timing for each stage is printed when `verbose=True`. Magnetic generation
+additionally prints the grid/pitch and live step progress, followed by a detailed
+relaxation and wall-processing breakdown. All timings are also saved; see the
+[timing reference](constrained_magnetic_domains.md#timing-and-live-generation-progress). `front aperture` reports
+aperture-stack construction, assignment and detector-grid support generation;
+`magnetic diagnostics` separately reports the OH-selected classification and
+metadata work. Older logs charged both to `front aperture`. Diagnostics reuse
+one component classification; periodic connectivity checks inspect only opposite
+edges rather than sorting label pairs over the full image.
 
 ## Important Controls
 
@@ -146,10 +156,16 @@ The ROI switches do not all mean the same thing, and none of them creates a hard
 zero-valued mask for the exit wave.
 
 `magnetic_pattern_use_roi=True` affects magnetic-pattern generation for the
-binary phase-space texture used by this sweep. The pipeline creates a full magnetic-pattern
+constrained-domain texture used by this sweep. The pipeline creates a full magnetic-pattern
 array initialized to the background value `+1`, generates the texture in a
 padded object-hole bounding box, and pastes the local result into the full
-array. Outside that box, the magnetic texture remains background. This assumes
+array. For the constrained generator, this box follows the actual OH support,
+with half a characteristic length plus four wall sigmas of context on each
+side by default (`magnetic_pattern_context_periods=0.5`), at least two repeat
+lengths per axis, and FFT-friendly dimensions. This avoids solving the texture
+on an unnecessarily large tapered-aperture footprint. The fine simulation pitch
+is preserved. The periodic box size affects the realized texture and is recorded
+with its ROI bounds and generation shape. Outside that box, the magnetic texture remains background. This assumes
 texture outside the object-hole region is irrelevant because it is hidden by the
 front aperture or by object-hole-focused diagnostics.
 
@@ -372,128 +388,67 @@ The previous per-polarization implementation is kept in
 
 ### Magnetic Patterns
 
-The fixed fallback pattern is selected with:
+The sweep uses `pattern_type="constrained_domain_pattern"`, the same constrained
+scalar model explored in Notebook 22. It samples physical spacing, net
+magnetization, alignment and angle, disorder, initial preparation, solver steps,
+calibration controls, wall sigma and seed through
+`sample_constrained_domain_parameters(rng)`.
+
+There are no requested saturated/stripe/bubble handles, phase-space lookup cache
+or balanced morphology quotas. Saturation arises at `target_magnetization=±1`;
+all other state labels come from measured connected-domain topology. By default,
+`target_magnetization=None` lets the net magnetization evolve freely. Set the
+script's `target_magnetization` to a number to constrain it, or set
+`constrain_magnetization=True` with a null target to sample numeric area targets.
+Measured full-box and OH means are saved in every mode. The sweep
+runs one relaxed realization (`max_length_iterations=1`) and measures achieved
+spacing and order afterward. It does not repeatedly regenerate patterns to hit
+target measurements. `characteristic_length` is the preferred model scale;
+`length_target_met` is diagnostic only. The inner relaxation steps still form
+the domain texture, and wall blur is still applied before optical propagation.
 
 ```python
-pattern_type = "binary_labyrinth_pattern"
+pattern_type = "constrained_domain_pattern"
+pattern_config = dict(
+    characteristic_length=600e-9, target_magnetization=0.,
+    alignment=0., disorder=0., initial_state="random", initial_order=0.,
+    n_steps=300, max_length_iterations=1, length_tolerance=.15,
+    sigma=30e-9, seed=7,
+)
 ```
 
-The reusable pattern library also supports:
+Read the [constrained magnetic-domain reference](constrained_magnetic_domains.md#production-hologram-generation)
+for the complete parameter table, shipped sampling distributions, wall treatment,
+resolution limits, state rules, order statistics and HDF5 paths.
 
-- `binary_labyrinth_pattern`: domains generated by the spectral binary-domain
-  helper, rescaled to the requested stripe width.
-- `skyrmion_pattern`: randomly placed circular skyrmions configured with
-  `radius`, `min_separation`, and a target count.
-- `disordered_skyrmion_lattice_pattern`: random non-overlapping irregular
-  skyrmions; `radius` is the average skyrmion core radius.
-- `image_pattern`: magnetic domains loaded from a binary experimental reconstruction.
-- `saturated_pattern`: uniform `mz = +1` or `mz = -1`.
-- `wavy_stripe_pattern`: analytic wavy stripe domains.
-
-The sweep no longer mixes handcrafted pattern families. Every state is produced
-by `binary_labyrinth_pattern` from a sampled point in one phase space:
-
-```python
-pattern_k0_bounds = (0.1, 1.1)
-pattern_eps_bounds = (0.1, 1.2)
-pattern_target_mean_bounds = (-1.0, 1.0)
-```
-
-At startup, the sweep classifies the same regular grid used by
-`03_binary_domain_phase_space.ipynb`. It schedules approximately one
-third direct saturated states, one third points from stripe-rich cells, and one
-third points from bubble-rich cells. Counts differ by at most one when the
-total is not divisible by three. Samples within a rich cell are continuous, so
-they are not restricted to the original grid coordinates.
-
-For production holograms, non-saturated samples use the classified
-`k0=1.0..1.1` portion of the map. Lower `k0` values can be valid in the
-dimensionless tutorial but, when combined with the sweep's independently
-sampled 30--500 nm physical stripe width, can require unsafe intermediate FFT
-fields larger than 10,000 pixels per axis. Saturated samples do not resize and
-may still use the full `k0` range.
-
-The classified map is cached as
-`Data/hologram_sweep/binary_domain_phase_space_v1.npz`. Later sweep runs load
-that file instead of repeating the scan. It is recomputed automatically only
-when the grid or morphology-analysis settings change, or when the cache is
-missing or unreadable.
-
-The requested quota is stored in
-`sample/magnetic_pattern/pattern_config/requested_state`. Stripe, bubble,
-mixed, and saturated labels are still measured independently from the
-generated result inside the object-hole field of view and stored as `state`,
-`bubble_count`, and `stripe_count`. Thus an occasional phase-boundary crossover
-remains visible in the metadata.
-The sweep interprets the phase-space limits as inclusive continuous bounds.
-`target_mean=-1` and `target_mean=+1` allow either polarity to reach
-saturation.
-
-Tiny nested sign holes can be removed before domain-wall smoothing with
-`max_hole_area`. The sweep uses nine final magnetic-pattern pixels. Larger
-nested domains are preserved.
-
-The same cleanup and bounds are used by
-[`03_binary_domain_phase_space.ipynb`](../tutorials/03_binary_domain_phase_space.ipynb):
-
-```python
-pattern_max_hole_area_px = 9
-saturation_fraction_threshold = 0.01
-```
-
-States at or below 1% minority occupancy are collapsed to a clean `-1` or `+1`
-saturated field. Saturation is a fast path: after the initial requested-grid
-probe, the generator returns a uniform array at the requested output shape and
-skips FFT stripe-width measurement, adaptive resizing, interpolation, hole
-cleanup, Gaussian smoothing, and soft conversion. Metadata records
-`saturated_shortcut=True` and `rescale_factor=1`. For non-saturated fields, the cleanup fills only enclosed
-opposite-sign islands no larger than nine pixels, before Gaussian domain-wall
-smoothing.
-
-`sigma` controls Gaussian domain-wall smoothing and is specified in metres in
-pipeline configurations. `MagneticPatternConfig` converts it to pixels before
-calling the selected generator. This conversion and smoothing apply to both
-`skyrmion_pattern` and `disordered_skyrmion_lattice_pattern`, as well as the
-labyrinth, stripe, and image-based generators.
+Binary domains are generated on the native fine simulation grid. Gaussian
+wall blur is then applied using physical `sigma` (metres). Classification uses
+the retained binary precursor rather than the blurred sign boundary. The optics
+uses the smoothed magnetization and the existing transverse wall component.
 
 ### Pattern Size Parameter
 
-`period` is the common full-repeat parameter used by downstream detector
-and aperture range logic:
+`characteristic_length` is the target **full repeat/spacing**, not a stripe width,
+bubble diameter or worm length. `target_magnetization` fixes full-grid sign area when numeric; `None` lets it evolve freely.
+Both achieved spacing and OH-observed occupancy are measured separately.
+All lengths in the pipeline are metres; direct generator calls use pixels.
 
-```python
-period = Uniform(60e-9, 1000e-9).sample()
-```
+To prevent blocky source patterns, the hologram backend raises actual integer
+oversampling to resolve the spacing by at least 16 pixels and positive Gaussian
+wall sigma by at least 2 pixels, plus four pixels across the nonzero conservative
+minority stripe-width estimate. It records per-sample
+`metadata/sample/effective_oversampling`. The script selects detector distances
+with these requirements in mind. If the necessary full-grid axis exceeds
+`magnetic_pattern_max_grid_axis` (default 4096), simulation fails before allocating
+the large grid. It does not silently reduce resolution. Explicit-grid experiments
+must select a sufficiently fine pitch themselves. Refine further to establish
+numerical convergence for a particular sample. Far-field padding does not
+improve the spatial resolution of magnetic walls.
 
-For the phase-space generator it means twice the target single-domain width after
-rescaling. For saturated states it is still sampled so detector and aperture
-geometry can be chosen consistently, but the uniform magnetic pattern ignores
-it.
-
-For `binary_labyrinth_pattern`, `auto_size=True` estimates how much the
-generated labyrinth image will be rescaled to reach the requested stripe width.
-Large final stripes therefore use a smaller generated source field when
-possible, while still regenerating a larger field if the measured FFT stripe
-width would make the scaled image too small to crop safely.
-
-Adaptive resizing is bounded by `max_auto_size` per axis and
-`max_auto_pixels` in total. The sweep defaults both limits to a 2048-by-2048
-source field. If an anomalous FFT stripe-width estimate would exceed either
-limit, pattern generation raises a descriptive `ValueError` before allocating
-the oversized FFT arrays. Increase these limits explicitly only when the
-larger allocation is intentional and the worker memory budget supports it.
-
-The sweep also caps the random OH size relative to the magnetic texture length:
-
-```python
-max_oh_radius_in_texture_widths = 8.0
-max_magnetic_pattern_roi_pixels = 768
-```
-
-This prevents unlucky combinations such as very small magnetic domains inside a
-very large object hole, which can make the OH-local magnetic-pattern ROI large
-and slow to generate. Increase these values when you intentionally want a large
-object hole containing many magnetic domains.
+Legacy pattern types remain available when explicitly selected, including
+`binary_labyrinth_pattern`, `wavy_stripe_pattern`, `skyrmion_pattern`,
+`disordered_skyrmion_lattice_pattern`, `saturated_pattern` and `image_pattern`.
+Their generator-specific controls do not apply to the constrained model.
 
 ### Experimental Image Patterns
 
@@ -751,6 +706,21 @@ These dictionaries configure different stages and should not repeat keys:
 Do not define one parameter in multiple dictionaries. Legacy aliases are
 normalized when unambiguous; conflicting values raise `ValueError`.
 
+### Linear and nonlinear detector response
+
+The sweep explicitly exposes `detector_params["nonlinear_response"] = None`
+and `measurement_config["acquisition_mode"] = "accumulated"`. Keep these defaults
+for linear, fast acquisition. A response callable maps per-frame linear ADU to
+nonlinear ADU; `counts_per_photon` can also be a physical-energy gain callback.
+Both are passed through to the detector, not evaluated as sweep factories.
+Selecting `per_frame` applies response and clipping separately for each frame.
+A linear curve still retains readout noise, defects and ADC clipping.
+
+The HDF5 metadata records `detector_response/model`, callback identifiers and
+actual per-helicity energy/gain values. See the
+[detector-response guide](detector_response.md#paired-cr-cl-hologram-sweep) for
+configuration examples, units, acquisition-mode details and exact HDF5 paths.
+
 ### Measurement Ranges
 
 The sweep randomizes detector acquisition settings:
@@ -917,49 +887,58 @@ The hierarchy follows ownership:
 
 ### OH-local magnetic morphology metadata
 
-After the aperture support is built, the pipeline binarizes the magnetic
-pattern at zero and labels connected components only inside the object-hole
-field of view. The less abundant polarity is treated as the candidate domain
-phase. A resolved, non-boundary component is a bubble when its area is at least
-nine pixels, eccentricity is at most `0.85`, and digital circularity is at least
-`0.45`. Other resolved components are stripe-like. The defaults are configurable
-through `HologramPipelineConfig`.
+The classifier labels connected domains of **both polarities on the full binary
+precursor**, then counts a component once if it intersects the OH. It uses
+pixels outside the aperture to establish shape; a bubble clipped by the OH
+remains a bubble. The constrained generator is periodic, so opposite edges of
+the full generated grid (or generation ROI) are joined before measuring shape.
+A component is counted once only if it has at least one pixel in the OH,
+even when it appears at multiple edges. Entirely hidden domains are excluded
+from counts and order. No clipped-bubble fragments are discarded in this mode.
+`classification_periodic=True` records this convention. Explicit legacy
+nonperiodic patterns retain open-boundary classification.
 
-A single qualifying circular component counts as one bubble. The saved state is:
+Defaults are minimum full component area 9 pixels, maximum eccentricity 0.95
+(approximately 3.2:1 axis ratio), minimum digital circularity 0.4 and eight-neighbor
+connectivity. Other resolved components, including connected majority
+backgrounds, are stripe-like. Noise is counted separately. Positive/negative and
+majority/minority counts are saved alongside their sums.
 
-- `bubble` when there is at least one bubble and no stripe-like component;
-- `stripe` when there is at least one stripe-like component and no bubble;
-- `mixed` when both counts are non-zero;
-- `saturated` when the OH is uniform or contains only sub-resolution noise.
+| Total bubble count B / stripe-like count S | `state` |
+|---|---|
+| B>0, S=1 | `bubble` |
+| B=0, S>1 | `stripe` |
+| B>0, S>1 | `mixed` |
+| B=0, S=1 | `saturated` |
+| B>0, S=0 (background outside OH) | `bubble` |
+| B=0, S=0 | `unresolved` |
 
-Components clipped by the OH boundary are conservatively stripe-like because
-their closed circular shape cannot be established inside the available field
-of view.
+A homogeneous pattern counts as one stripe-like component. A single connected
+labyrinth counts as one domain rather than as multiple branches. Inspect
+`noise_count`/`is_uniform` before equating the state label with exact uniformity.
+The reusable `morphology` descriptor describes the component mixture and can
+therefore differ from `state` (for example, bubbles plus one background).
 
-The same operations are available independently of the pipeline:
+Under `metadata/sample/magnetic_pattern/`, the file retains `generation_json`
+(including calibration and relaxation traces), `binary_pattern`, `analysis_mask`,
+`classification_json` (including both-polarity component records),
+`measurements_json` and named scalar `measurements/` datasets. Effective physical
+inputs remain under `pattern_config/`. `magnetic_pattern_oh` stores the blurred
+optical magnetization, possibly on a different saved ROI.
+
+Order diagnostics include component-axis `stripe_nematic_order` and local/global
+sixfold bubble-center bond order (`local_sixfold_order`, `sixfold_order`). They
+are orientational statistics rather than proofs of crystalline periodicity;
+undefined values are JSON null or numeric NaN. Full definitions, limitations,
+sampling conventions and HDF5 paths are in the
+[domain reference](constrained_magnetic_domains.md#diagnostics-and-hdf5-provenance).
 
 ```python
-from scattering_calculator.sample_generator import (
-    classify_magnetic_domains,
-    fill_small_domain_holes,
-)
-
-cleaned = fill_small_domain_holes(pattern, max_hole_area=9)
-analysis = classify_magnetic_domains(
-    cleaned,
-    analysis_mask=object_hole_mask,
-    min_area=9,
-    max_eccentricity=0.85,
-    min_circularity=0.45,
-)
-
-print(analysis["morphology"])
-print(analysis["bubble_count"], analysis["stripe_count"])
+from scattering_calculator.sample_generator import classify_magnetic_domains
+analysis = classify_magnetic_domains(binary_pattern, analysis_mask=object_hole_mask,
+    min_area=9, max_eccentricity=.95, min_circularity=.4, periodic=True)
+print(analysis["state"], analysis["bubble_count"], analysis["stripe_count"])
 ```
-
-The reusable classifier returns plural morphology names (`bubbles`, `stripes`)
-plus `mixed`, `uniform`, or `noise`. The pipeline maps these to the dataset
-labels `bubble`, `stripe`, `mixed`, and `saturated`.
 
 Polarization datasets:
 
@@ -1006,6 +985,11 @@ Interactive simulations can use
 `tutorials/legacy/ck_interactive_monolith.ipynb` demonstrates this workflow.
 
 ## Reading The HDF5 File
+
+For collaborator analysis, use the [magnetic-pattern analysis guide](magnetic_pattern_analysis.md).
+It provides a loader, physical-coordinate plots, per-specimen CSV export and
+precise definitions of requested versus achieved values, periodic OH-selected
+counts, state labels, component diagnostics, wall smoothing and order statistics.
 
 Basic inspection:
 
@@ -1155,18 +1139,12 @@ Turn off reproducibility:
 pipeline_random_seed = None
 ```
 
-Change the sampled magnetic phase-space bounds:
-
-```python
-pattern_k0_bounds = (0.1, 1.1)
-pattern_eps_bounds = (0.1, 1.2)
-pattern_target_mean_bounds = (-1.0, 1.0)
-```
-
-To generate a fixed phase-space point, replace the three `Uniform(...)` entries
-inside `random_pattern_config` with scalar `k0`, `eps`, and `target_mean`
-values. Keep `pattern_type="binary_labyrinth_pattern"`; the measured state is
-determined after generation rather than selected beforehand.
+Change the sampled domain controls in
+`sample_constrained_domain_parameters(rng)`, or replace `random_pattern_config`
+with a callable returning fixed or sampled constrained-model parameters. For
+example, fix `target_magnetization=-0.6` and vary alignment and disorder; the
+final state is still measured after generation. Keep
+`pattern_type="constrained_domain_pattern"`.
 
 Disable ROI optimizations:
 
@@ -1193,3 +1171,7 @@ detector_pixel_shape = (1300, 1300)
   texture size.
 
 See [shared magnetic controls](experiment_setup.md#shared-magnetic-pattern-controls) for names, units and compatibility aliases.
+
+For branching multiple energies/masks, camera geometries and detector acquisitions
+from shared upstream results, use the separate
+[hierarchical sweep](hierarchical_hologram_sweep.md).

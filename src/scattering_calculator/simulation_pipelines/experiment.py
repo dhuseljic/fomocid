@@ -506,7 +506,10 @@ class ScatteringExperiment:
                 aperture_config=config.aperture.aperture_config)
             if generated.shape == shape:
                 generated = np.stack(
-                    (np.zeros_like(generated), np.zeros_like(generated), generated),
+                    (np.zeros_like(generated),
+                     np.sqrt(np.maximum(0., 1 - generated**2))
+                     if config.magnetic_pattern.pattern_type_method == "constrained_domain_pattern"
+                     else np.zeros_like(generated), generated),
                     axis=-1,
                 )
             if generated.shape != (*shape, 3):

@@ -95,3 +95,76 @@ def aperture_placement_defaults(parameters, aperture, shape, pixel_size):
     diameter = 2 * result["radius"] if "radius" in result else result.get("stripe_width", 0.)
     result.setdefault("placement_radius", radii[index] * max(1., factors[index]) + diameter)
     return result
+
+
+def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, target_magnetization=None):
+    """Sample diverse physical domain controls without requesting state labels.
+
+    Lengths are metres. Preparation and relaxation controls are independent of
+    the measured state. By default target_magnetization=None leaves sign area
+    unconstrained. constrain_magnetization=True samples numeric targets; an
+    explicit numeric target_magnetization fixes the target across samples.
+    Generate one relaxed realization, then measure it; spacing calibration is
+    disabled. Pass a NumPy Generator to make the sweep reproducible.
+    """
+    length = float(rng.uniform(120e-9, 1000e-9))
+    preparation = str(rng.choice(('random', 'stripes', 'hexagonal', 'worms')))
+    magnetization = target_magnetization
+    if magnetization is None and constrain_magnetization:
+        magnetization = float(rng.uniform(-.95, .95))
+        if rng.random() < .1:
+            magnetization = float(rng.choice((-1., 1.)))
+    if magnetization is not None:
+        magnetization = float(magnetization)
+        if not np.isfinite(magnetization) or not -1 <= magnetization <= 1:
+            raise ValueError("target_magnetization must be None or finite in [-1,1]")
+    return dict(
+        characteristic_length=length, target_magnetization=magnetization,
+        alignment=float(rng.choice((0., .5, 2., 8., 24.))),
+        direction=float(rng.uniform(0., np.pi)),
+        disorder=float(rng.uniform(0., .8)),
+        disorder_length=float(rng.uniform(0., .15) * length),
+        initial_state=preparation, initial_order=float(rng.uniform(0., 1.)),
+        initial_domain_count=int(rng.integers(1, 4)),
+        worm_length=float(rng.uniform(1., 4.) * length),
+        worm_waviness=float(rng.uniform(0., .3) * length),
+        wall_stiffness=float(rng.uniform(1., 4.)),
+        n_steps=int(rng.choice((100, 300, 600))),
+        time_step=float(rng.choice((.05, .1, .2))),
+        convergence_tolerance=float(10 ** rng.uniform(-5., -3.)),
+        length_tolerance=.15,  # diagnostic only; no retries to hit a measured spacing
+        max_length_iterations=1,
+        sigma=float(rng.uniform(.025, .06) * length),
+        seed=int(rng.integers(0, 2**31 - 1)),
+    )
+
+
+def constrained_sampling_pitch(parameters):
+    """Return the maximum native pixel pitch for physical constrained controls.
+
+    Parameters
+    ----------
+    parameters : dict
+        Physical characteristic_length, optional sigma and target_magnetization.
+
+    Returns
+    -------
+    float
+        Maximum pitch in metres: 16 pixels per repeat, 2 per positive wall sigma,
+        and 4 across the conservative minority stripe-width estimate. This last
+        estimate is a sampling guard, not a predicted relaxed bubble diameter.
+    """
+    length = float(parameters['characteristic_length'])
+    sigma = float(parameters.get('sigma') or 0.)
+    magnetization = parameters.get('target_magnetization')
+    if not np.isfinite(length) or length <= 0 or not np.isfinite(sigma) or sigma < 0:
+        raise ValueError('characteristic_length must be positive and sigma nonnegative and finite')
+    if magnetization is not None and (not np.isfinite(magnetization) or not -1 <= magnetization <= 1):
+        raise ValueError('target_magnetization must be finite and in [-1,1]')
+    pitch = length / 16
+    if sigma:
+        pitch = min(pitch, sigma / 2)
+    fraction = 0. if magnetization is None else (1 - abs(magnetization)) / 2
+    if fraction > 0:
+        pitch = min(pitch, length * fraction / 4)
+    return pitch
