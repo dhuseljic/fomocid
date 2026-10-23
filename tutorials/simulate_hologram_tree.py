@@ -23,13 +23,16 @@ def main():
     parser.add_argument('--patterns', type=int, default=5)
     parser.add_argument('--output', type=Path, default=DATA_ROOT / 'Data' / 'hologram_tree' / 'simulation_tree.h5')
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--fixed-recipe', action='store_true',
+                        help='Use config.recipe for every parent instead of random stacks')
     args = parser.parse_args()
     if args.patterns < 1:
         parser.error('--patterns must be positive')
+    randomize_recipe = not args.fixed_recipe  # False keeps config.recipe unchanged
     saturation_probability = 0.1  # per magnetic parent, inherited by all its leaves
     rng = np.random.default_rng(args.seed)
     config = HologramPipelineConfig(
-        # Fallback; ranges.recipe below samples a new multilayer per parent.
+        # Fixed recipe used with --fixed-recipe (or randomize_recipe=False).
         recipe='Au(100)/SiN(100)/Co(20)', detector_shape=(256, 256),
         detector_distance=.04, xray_energy=778., xray_photon_flux=1e8,
         propagator_method='Scalar', beamstop_method=None, random_seed=args.seed,
@@ -53,7 +56,8 @@ def main():
     total = args.patterns * len(exits) * len(geometries) * len(acquisitions)
     print(f'{args.patterns} patterns -> {total} CR/CL acquisition pairs')
     HierarchicalHologramPipeline(config=config,
-        ranges=HologramPipelineRanges(recipe=lambda _: sample_multilayer_recipe(rng),
+        ranges=HologramPipelineRanges(
+            recipe=(lambda _: sample_multilayer_recipe(rng)) if randomize_recipe else None,
             detector_distance=Uniform(.05, .40), pattern_config=lambda _: sample_constrained_domain_parameters(
             rng, saturation_probability=saturation_probability)),
         output_path=args.output, n_samples=args.patterns, exit_variants=exits,

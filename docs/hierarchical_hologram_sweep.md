@@ -187,7 +187,7 @@ no leaves are generated until their parent's grid passes this check.
 Both examples draw a new recipe once per independent experiment or tree parent:
 
 ```text
-[Au(t_Au)/Cr(t_Cr)]xN/SiN(t_SiN)/Co(t_Co)/X(t_X)/Y(t_Y)
+[Au(t_Au)Cr(t_Cr)]xN/SiN(t_SiN)/Co(t_Co)X(t_X)Y(t_Y)
 ```
 
 All thicknesses inside recipe strings are **nanometres**. The shared
@@ -195,16 +195,20 @@ All thicknesses inside recipe strings are **nanometres**. The shared
 
 | Parameter | Sampling |
 | --- | --- |
-| `N` | Discrete uniform integer from 5 through 30, inclusive |
+| `N` | Discrete uniform integer from 7 through 15, inclusive |
 | Total Au/Cr thickness `T` | Uniform from 700 to 3000 nm |
 | `t_Cr`, `t_Au` | `T/(5*N)` and `4*T/(5*N)`, respectively: exactly 4:1 |
 | `t_SiN` | Uniform from 50 to 500 nm |
 | `t_Co`, `t_X`, `t_Y` | Independent uniform draws from 2 to 30 nm |
 | `X`, `Y` | Two distinct elements drawn without replacement from Pt, Al, Ta, Ir, Cu |
 
-Au and Cr remain separate physical layers and the bracket expands to `2*N`
-layers. X and Y are ordered caps after Co. Their material optical constants are
-loaded at the actual branch energy. The Co layer receives the magnetic texture.
+Adjacent terms without `/` are merged by the recipe parser. Each AuCr repeat
+is one thickness-weighted effective-medium layer, and CoXY is one merged
+magnetic layer. The stack therefore has `N+2` simulated layers (9–17), including
+SiN. This reduces per-layer work; it approximates the constituents as mixed
+layers rather than resolving separate interfaces. Optical constants are loaded
+at the actual branch energy, and the magnetic contribution follows the Co
+fraction in the merged CoXY layer.
 In the tree, all energies, reference-mask designs and acquisitions under a
 parent share its recipe; a new parent gets a fresh recipe. Rejected grid draws
 also resample the recipe with the other parent parameters.
@@ -213,6 +217,8 @@ The actual recipe is saved in each leaf at `metadata/sample/recipe`; existing
 sample metadata also retains expanded layer materials and thicknesses. The
 recipe string uses nm while physical layer-thickness metadata uses metres.
 Fixed `config.recipe` remains the fallback: set `ranges.recipe=None` to disable
-recipe variation, or provide a fixed string or callable override. Merely editing
-the fallback string in an example does not disable its `ranges.recipe` sampler.
+recipe variation, or provide a fixed string or callable override. In `simulate_hologram_sweep.py`, set `randomize_recipe=False` and edit `recipe`
+to use the same stack for every experiment. In `simulate_hologram_tree.py`,
+pass `--fixed-recipe` to use `config.recipe` for every parent (or set
+`randomize_recipe=False` in the script). Random recipes remain enabled by default.
 The sampler uses the example's seeded NumPy generator for reproducibility.

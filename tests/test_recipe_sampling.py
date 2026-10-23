@@ -19,25 +19,31 @@ def test_sampled_recipe_constraints_and_repeat_expansion():
         n = int(re.search(r'\]x(\d+)', recipe)[1])
         counts.add(n)
         layers = parse_recipe(recipe).layers
-        assert len(layers) == 2*n + 4
-        thicknesses = np.array([layer.thickness for layer in layers])*1e9
-        np.testing.assert_allclose(thicknesses[:2*n:2] / thicknesses[1:2*n:2], 4.)
-        assert 700 <= thicknesses[:2*n].sum() <= 3000
-        assert 50 <= thicknesses[-4] <= 500
-        assert np.all((thicknesses[-3:] >= 2) & (thicknesses[-3:] <= 30))
-        first, second = layers[-2].material, layers[-1].material
+        assert len(layers) == n + 2
+        assert all(layer.is_composite for layer in layers[:n])
+        gold, chromium = layers[0].components
+        assert (gold[0], chromium[0]) == ('Au', 'Cr')
+        np.testing.assert_allclose(gold[1] / chromium[1], 4.)
+        assert 700 <= sum(layer.thickness for layer in layers[:n])*1e9 <= 3000
+        assert layers[n].material == 'SiN'
+        assert 50 <= layers[n].thickness*1e9 <= 500
+        magnetic = layers[-1]
+        assert magnetic.is_composite and len(magnetic.components) == 3
+        assert magnetic.components[0][0] == 'Co'
+        assert all(2 <= thickness*1e9 <= 30 for _, thickness in magnetic.components)
+        first, second = magnetic.components[1][0], magnetic.components[2][0]
         assert first != second
         assert {first, second} <= {'Pt', 'Al', 'Ta', 'Ir', 'Cu'}
         pairs.add((first, second))
-    assert counts == set(range(5, 31))
+    assert counts == set(range(7, 16))
     assert len(pairs) == 20
     assert sample_multilayer_recipe(np.random.default_rng(8)) == sample_multilayer_recipe(np.random.default_rng(8))
 
 
 def test_recipe_varies_between_parents_and_is_saved_for_all_tree_leaves(tmp_path):
     factory = runpy.run_path('tests/test_constrained_pipeline.py')['small_hologram_config']
-    recipes = iter(['Au(10)/SiN(20)/Co(6)/Ta(2)/Ir(3)',
-                    'Au(12)/SiN(25)/Co(8)/Cu(3)/Al(4)'])
+    recipes = iter(['[Au(8)Cr(2)]x7/SiN(20)/Co(6)Ta(2)Ir(3)',
+                    '[Au(12)Cr(3)]x8/SiN(25)/Co(8)Cu(3)Al(4)'])
     path = tmp_path/'recipes.h5'
     HierarchicalHologramPipeline(config=factory(), ranges=HologramPipelineRanges(recipe=lambda _: next(recipes)),
         output_path=path, n_samples=2, verbose=False,
