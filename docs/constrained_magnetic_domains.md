@@ -190,7 +190,7 @@ balanced measured states.
 |---|---|---|
 | `characteristic_length` | uniform 120–1000 nm | Full repeat/spacing; not a domain diameter. |
 | `target_magnetization` | `None` by default; optional numeric fixed target or sampled uniform −0.95–0.95 with 10% replaced by ±1 | Free evolution when null. Numeric targets fix rounded sign area; ±1 generates saturation. |
-| `alignment` | truncated exponential on [0,24], scale 24/7 | Nonnegative directional penalty; larger values favor stripe alignment. |
+| `alignment` | truncated exponential on [0,24], scale 2 | Nonnegative directional penalty; larger values favor stripe alignment. |
 | `direction` | uniform 0–π radians | Stripe axis from +x toward +y. |
 | `disorder` | uniform 0–0.8 | Quenched random-field strength, not detector noise. |
 | `disorder_length` | 0–0.15 × characteristic length | Gaussian disorder correlation sigma; zero permits uncorrelated disorder. |
@@ -491,10 +491,10 @@ The saved generation parameters record the realized target; the measured
 classification is `saturated` with `bubble_count=0`, `stripe_count=1`.
 
 The shared sampler draws `alignment` from a continuous exponential distribution
-with scale 24/7, conditioned on the interval [0,24]. Its density is proportional
-to `exp(-7 * alignment/24)`, falling to about 0.091% of its zero-value
-density at alignment 24. Approximately 69% of draws are below 4, 90% below 8,
-and 97% below 12. About 25.32% are below 1. The median is about 2.37. This
+with scale 2, conditioned on the interval [0,24]. Its density is proportional
+to `exp(-12 * alignment/24)`, falling to about 0.000614% of its zero-value
+density at alignment 24. Approximately 86% of draws are below 4, 98% below 8,
+and 99.75% below 12. About 39.35% are below 1. The median is about 1.39. This
 favors lower values while retaining a tail of stronger alignment. Sampling uses the inverse CDF,
 not clipping, so there is no artificial probability mass at 24 or exactly zero.
 Set a fixed `alignment=0` explicitly when an exactly isotropic penalty is needed.

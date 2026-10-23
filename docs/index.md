@@ -65,3 +65,5 @@ api
 - [Experimental constrained dipolar domains](constrained_magnetic_domains.md)
 
 - [Hierarchical hologram sweeps with stage reuse](hierarchical_hologram_sweep.md)
+
+- [Single-experiment Python desktop GUI](single_experiment_gui.md)

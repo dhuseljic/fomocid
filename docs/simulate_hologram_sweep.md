@@ -1262,12 +1262,15 @@ pass `--fixed-recipe` to use `config.recipe` for every parent (or set
 The sampler uses the example's seeded NumPy generator for reproducibility.
 
 The shared sampler draws `alignment` from a continuous exponential distribution
-with scale 24/7, conditioned on the interval [0,24]. Its density is proportional
-to `exp(-7 * alignment/24)`, falling to about 0.091% of its zero-value
-density at alignment 24. Approximately 69% of draws are below 4, 90% below 8,
-and 97% below 12. About 25.32% are below 1. The median is about 2.37. This
+with scale 2, conditioned on the interval [0,24]. Its density is proportional
+to `exp(-12 * alignment/24)`, falling to about 0.000614% of its zero-value
+density at alignment 24. Approximately 86% of draws are below 4, 98% below 8,
+and 99.75% below 12. About 39.35% are below 1. The median is about 1.39. This
 favors lower values while retaining a tail of stronger alignment. Sampling uses the inverse CDF,
 not clipping, so there is no artificial probability mass at 24 or exactly zero.
 Set a fixed `alignment=0` explicitly when an exactly isotropic penalty is needed.
 These are input statistics; measured order can differ after relaxation and
 accepted-draw statistics can differ after grid-limit rejection.
+
+For interactive configuration and plotting of one experiment at a time, use the
+[desktop simulator](single_experiment_gui.md).

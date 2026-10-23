@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = []
+simulator-gui = ["matplotlib", "scipy", "h5py"]
 docs = [
   "sphinx>=7,<9",
   "myst-parser>=3,<5",

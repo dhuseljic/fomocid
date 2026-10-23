@@ -140,3 +140,6 @@ multislice, physical detector propagation, artifacts, hyperspectral series and
 validation. Start with the [basic FTH notebook](paper/scattering_calculator/notebooks/01_fth_basics.ipynb).
 The earlier paper is preserved in a dated backup; [Tutorial 17](tutorials/17_skyrmion_lattice_ewald_rods.ipynb)
 remains available for skyrmion-lattice Ewald geometry.
+
+For a Python desktop interface to configure and inspect one simulated experiment,
+see the [single-experiment GUI](docs/single_experiment_gui.md).
