@@ -1,4 +1,5 @@
 """Generate parameter sweeps of simulated FTH holograms."""
+from scattering_calculator.simulation_pipelines.energy_sampling import sample_absorption_edge_energy
 from scattering_calculator.simulation_pipelines import (
     ExperimentConfig, ScatteringExperiment, XRayConfig, SimulationConfig,
     SampleConfig, MagneticPatternConfig, FrontApertureConfig, IlluminationConfig,
@@ -643,8 +644,8 @@ def random_artifacts_config(params):
 
 ranges = HologramPipelineRanges(
     recipe=(lambda _: sample_multilayer_recipe(domain_rng)) if randomize_recipe else None,
-    # Sweep X-ray energy across the Co L-edge absorption region
-    xray_energy=Uniform(775, 795),
+    # Co absorption peak +/-2 eV; Gaussian sigma=1 eV, truncated at the limits.
+    xray_energy=lambda _: sample_absorption_edge_energy(domain_rng),
     # Move the direct beam away from the exact detector middle by up to
     # +/-5% of the image size in y and x.
     detector_center=random_detector_center,

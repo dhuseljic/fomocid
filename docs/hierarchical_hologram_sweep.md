@@ -306,3 +306,20 @@ upper bound; it is not a separate initial random draw in this mode.
 Set `magnetic_pattern_distance_min=None` to disable conditional sampling and
 interpret detector_distance as the actual distance; manual GUI experiments use
 that default.
+
+### Energy distribution around the Co absorption peak
+
+Both examples use `sample_absorption_edge_energy(rng)`: a Gaussian centered on
+the maximum of the bundled Co L-edge absorption table (`Co_beta.txt`), with
+underlying sigma **1 eV**, truncated to **peak +/-2 eV** by rejection sampling.
+The present table maximum is **781.13866 eV**, giving bounds **779.13866–783.13866 eV**.
+This uses total absorption beta, not the dichroism maximum or nominal edge onset.
+No out-of-range draw is clipped to an endpoint. Truncation makes the resulting
+standard deviation about 0.880 eV despite the underlying Gaussian sigma of 1 eV.
+
+Sweep energy is drawn once per experiment. Tree energy is drawn once per parent
+and shared across its mask/acquisition branches; the example's fixed 780 eV
+branch override has been removed. The library still supports explicit energy
+branches. The actual simulated energy remains available in each experiment's
+`metadata/xray/energy_eV` dataset. Distance compatibility is evaluated after energy
+sampling, so its wavelength is included in the sampling check.

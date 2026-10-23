@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from fomocid import DATA_ROOT
+from scattering_calculator.simulation_pipelines.energy_sampling import sample_absorption_edge_energy
 from scattering_calculator.simulation_pipelines.recipe_sampling import sample_multilayer_recipe
 from scattering_calculator.simulation_pipelines import Uniform
 
@@ -48,9 +49,8 @@ def main():
         pattern_config={'characteristic_length': 160e-9, 'sigma': 5e-9,
                         'target_magnetization': None, 'max_length_iterations': 1},
     )
-    # L sample/energy branches. OH is unchanged; RH size may vary.
-    exits = [{}, {'xray_energy': 780.,
-                  'aperture_radii': [300e-9, 40e-9, 40e-9]}]
+    # L mask branches share the parent energy; OH is unchanged, RH size varies.
+    exits = [{}, {'aperture_radii': [300e-9, 40e-9, 40e-9]}]
     # Distance is sampled once per parent (4–40 cm, constrained by domains/walls).
     # Every branch below that parent retains its camera geometry and grid.
     geometries = [{}]
@@ -64,6 +64,7 @@ def main():
     HierarchicalHologramPipeline(config=config,
         ranges=HologramPipelineRanges(
             recipe=(lambda _: sample_multilayer_recipe(rng)) if randomize_recipe else None,
+            xray_energy=lambda _: sample_absorption_edge_energy(rng),
             detector_distance=.40, pattern_config=lambda params: sample_sweep_domain_parameters(
             rng, params["experiment_index"], free_probability=free_probability,
             gaussian_probability=gaussian_probability, saturation_probability=saturation_probability)),
