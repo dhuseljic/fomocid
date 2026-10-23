@@ -432,7 +432,6 @@ def simulate_experiment(config, *, magnetization=None, mask=None):
                             state_group = group.create_group('magnetic_state')
                             state_group.create_dataset('generation_json', data=json.dumps(pattern_config.generation_metadata, allow_nan=False))
                             state_group.create_dataset('parameters_json', data=json.dumps(pattern_config.resolved_pattern_config(), default=_json_default, allow_nan=False))
-                            state_group.create_dataset('binary_pattern', data=pattern_config.binary_pattern.astype(np.int8), compression=config.outputs.compression)
                             # Use full periodic geometry for shape and OH overlap only for visibility.
                             propagated_config = run.spectral_runs[0].config if hasattr(run, 'spectral_runs') else run.config
                             aperture = propagated_config.aperture

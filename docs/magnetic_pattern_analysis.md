@@ -23,8 +23,7 @@ Use these three representations for different analyses:
 
 | Representation | Where, relative to a numeric sample group | Meaning |
 |---|---|---|
-| Binary precursor | `metadata/sample/magnetic_pattern/binary_pattern` | ±1 array on the **generation grid**, before wall blur. Use for topology, connected domains and classification. |
-| OH selection | `metadata/sample/magnetic_pattern/analysis_mask` | Same shape as the binary precursor; true means visible through the object hole. Use to select visible domains/pixels. |
+| OH selection | `metadata/sample/magnetic_pattern/analysis_mask` | Mask on the generation grid; true means visible through the object hole. The binary precursor itself is not saved. |
 | Optical pattern | `magnetic_pattern_oh` | Smoothed `mz` multiplied by the OH mask, on a possibly different saved crop. Zero outside OH means masked data, **not** a physical zero-magnetization domain. |
 
 Gaussian blur uses physical `sigma` as a standard deviation, not FWHM. Wall
@@ -185,12 +184,11 @@ def load_magnetic_sample(path, sample_id="00000"):
     with h5py.File(path, "r") as h5:
         g = h5[sample_id]
         meta = g["metadata/sample/magnetic_pattern"]
-        required = ("binary_pattern", "analysis_mask", "generation_json",
+        required = ("analysis_mask", "generation_json",
                     "classification_json", "measurements_json")
         missing = [key for key in required if key not in meta]
         if missing:
             raise ValueError(f"{sample_id}: missing magnetic datasets: {missing}")
-        binary = meta["binary_pattern"][()]
         oh = meta["analysis_mask"][()].astype(bool)
         pitch = float(g["metadata/sample/real_space_pixel_size"][()])
         factor = int(g["metadata/sample/effective_oversampling"][()])
@@ -209,8 +207,8 @@ def load_magnetic_sample(path, sample_id="00000"):
 
         optical = g["magnetic_pattern_oh"][()]
         return dict(
-            sample_id=sample_id, binary=binary, oh=oh, optical=optical,
-            pitch_m=pitch, binary_extent_nm=extent(binary.shape, "roi_"),
+            sample_id=sample_id, oh=oh, optical=optical,
+            pitch_m=pitch, generation_extent_nm=extent(oh.shape, "roi_"),
             optical_extent_nm=extent(optical.shape, "saved_roi_"),
             parameters={key: read_scalar(ds) for key, ds in meta["pattern_config"].items()},
             generation=json.loads(meta["generation_json"].asstr()[()]),
@@ -239,26 +237,20 @@ print("OH mean mz:", sample["measurements"]["mean_mz_in_oh"])
 print("Pitch (nm):", sample["pitch_m"] * 1e9)
 ```
 
-## Plot topology and the field used by the optics
+## Plot the field used by the optics
 
-These arrays use `(row=y, column=x)`. The extents below are in nanometres relative
-to the full simulation center, using the simulator's index-minus-half-size
-convention. The binary generation ROI and saved optical ROI can have different
-shapes/origins. Do not directly multiply or index them against each other.
-`supportmask` is on the detector-derived reconstruction grid and is not a
-replacement for the generation-grid `analysis_mask`.
+The saved optical array uses `(row=y, column=x)`. Its extent is in nanometres
+relative to the simulation center. The OH analysis mask uses the generation
+grid, which can differ from the saved optical ROI; do not index one with the
+other. Binary precursors and component-label images are not saved.
 
 ```python
 import matplotlib.pyplot as plt
 
-fig, axes = plt.subplots(1, 3, figsize=(13, 4), constrained_layout=True)
-images = [sample["binary"], np.ma.masked_where(~sample["oh"], sample["binary"]),
-          sample["optical"]]
-labels = ["Full generated binary field", "Binary field inside OH", "Smoothed mz × OH"]
-extents = [sample["binary_extent_nm"]] * 2 + [sample["optical_extent_nm"]]
-for ax, image, label, extent in zip(axes, images, labels, extents):
-    ax.imshow(image, cmap="RdBu_r", vmin=-1, vmax=1, origin="lower", extent=extent)
-    ax.set(title=label, xlabel="x (nm)", ylabel="y (nm)", facecolor="0.85")
+fig, ax = plt.subplots()
+ax.imshow(sample["optical"], cmap="RdBu_r", vmin=-1, vmax=1,
+          origin="lower", extent=sample["optical_extent_nm"])
+ax.set(title="Smoothed mz × OH", xlabel="x (nm)", ylabel="y (nm)")
 plt.show()
 ```
 
@@ -327,38 +319,23 @@ wall smoothing. These nested values must not be added twice. See
 [timing and progress definitions](constrained_magnetic_domains.md#timing-and-live-generation-progress)
 for all fields and the optional progress callback. Older files may lack timings.
 
-## Reproduce the stored component analysis
+## Reproducing component analysis
 
-If the simulator source is installed/on `PYTHONPATH`, the stored settings can
-rebuild component-label images. Such images are returned by the classifier but
-are not themselves saved in HDF5. Both label images use the generation grid and
-retain full geometry for OH-visible components.
+Use the stored classification and measurement diagnostics directly for analysis.
+The binary precursor and component-label images are not saved. Recomputing
+connected components requires regenerating the precursor with the saved inputs,
+seed, generation shape and pixel pitch, using the same source revision and
+numerical environment. Thresholding the saved wall-smoothed OH crop cannot
+recover the full periodic geometry used for classification.
 
-```python
-from scattering_calculator.sample_generator.domain_analysis import classify_magnetic_domains
-
-c = sample["classification"]
-recomputed = classify_magnetic_domains(
-    sample["binary"], analysis_mask=sample["oh"],
-    threshold=c["classification_threshold"], min_area=c["classification_min_area_px"],
-    max_eccentricity=c["bubble_max_eccentricity"],
-    min_circularity=c["bubble_min_circularity"], connectivity=c["classification_connectivity"],
-    periodic=c["periodic"], boundary_context_periodic=c.get("boundary_context_periodic", False),
-)
-assert (recomputed["bubble_count"], recomputed["stripe_count"]) == (c["bubble_count"], c["stripe_count"])
-positive_labels = recomputed["positive_label_image"]
-negative_labels = recomputed["negative_label_image"]
-```
-
-Keep the original HDF5 alongside exported tables: it contains the precursor,
-selection mask, realized parameters and diagnostic history. To reproduce the
-**generation**, also share the source revision and numerical environment; a full
-source/environment snapshot is not embedded in this file. Existing files are
-not relabelled automatically when classification code changes.
+Keep the HDF5 alongside exported tables: it contains the selection mask,
+realized parameters and diagnostic history. A full source/environment snapshot
+is not embedded in the file. Existing files are not relabelled automatically
+when classification code changes.
 
 The separate `simulate_experiment` backend uses
 `runs/000000/magnetic_state/` instead of numeric top-level specimen groups. See
 [the backend layout note](constrained_magnetic_domains.md#diagnostics-and-hdf5-provenance)
-for its `parameters_json`, `generation_json`, `binary_pattern`, optional OH
+for its `parameters_json`, `generation_json`, optional OH
 `analysis_mask`, and named `classification/` datasets. This guide's loader is
 specifically for paired-CR/CL sweep files.

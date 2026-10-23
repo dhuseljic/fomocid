@@ -920,7 +920,7 @@ The reusable `morphology` descriptor describes the component mixture and can
 therefore differ from `state` (for example, bubbles plus one background).
 
 Under `metadata/sample/magnetic_pattern/`, the file retains `generation_json`
-(including calibration and relaxation traces), `binary_pattern`, `analysis_mask`,
+(including calibration and relaxation traces), `analysis_mask`,
 `classification_json` (including both-polarity component records),
 `measurements_json` and named scalar `measurements/` datasets. Effective physical
 inputs remain under `pattern_config/`. `magnetic_pattern_oh` stores the blurred
@@ -934,10 +934,11 @@ sampling conventions and HDF5 paths are in the
 [domain reference](constrained_magnetic_domains.md#diagnostics-and-hdf5-provenance).
 
 ```python
-from scattering_calculator.sample_generator import classify_magnetic_domains
-analysis = classify_magnetic_domains(binary_pattern, analysis_mask=object_hole_mask,
-    min_area=9, max_eccentricity=.95, min_circularity=.4, periodic=True)
-print(analysis["state"], analysis["bubble_count"], analysis["stripe_count"])
+import json
+import h5py
+with h5py.File("simulation_sweep.h5", "r") as h5:
+    analysis = json.loads(h5["00000/metadata/sample/magnetic_pattern/classification_json"].asstr()[()])
+    print(analysis["state"], analysis["bubble_count"], analysis["stripe_count"])
 ```
 
 Polarization datasets:
@@ -1175,3 +1176,6 @@ See [shared magnetic controls](experiment_setup.md#shared-magnetic-pattern-contr
 For branching multiple energies/masks, camera geometries and detector acquisitions
 from shared upstream results, use the separate
 [hierarchical sweep](hierarchical_hologram_sweep.md).
+
+Binary precursors are used internally for classification but are not saved in
+HDF5. Saved state diagnostics and the wall-smoothed optical field remain available.

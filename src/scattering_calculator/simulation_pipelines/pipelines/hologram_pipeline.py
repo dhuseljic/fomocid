@@ -1613,7 +1613,6 @@ class HologramPipeline:
             # JSON preserves nested traces, calibration history, None and solver defaults.
             metadata["sample/magnetic_pattern/generation_json"] = json.dumps(magnetic_pattern_config.generation_metadata, allow_nan=False)
             metadata["sample/magnetic_pattern/classification_input"] = "binary_before_wall_smoothing"
-            metadata["sample/magnetic_pattern/binary_pattern"] = magnetic_pattern_config.binary_pattern.astype(np.int8)
         magnetic_pattern = np.ones(sample_shape[1:], dtype=np.float64)
         if pattern_slices is None:
             magnetic_pattern = magnetic_pattern_config.magnetic_pattern

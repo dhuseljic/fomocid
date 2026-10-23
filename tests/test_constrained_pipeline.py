@@ -87,16 +87,11 @@ def test_actual_hologram_saves_binary_state_walls_parameters_and_sampling(tmp_pa
         assert not controls['calibration_enabled']
         assert len(controls['calibration_history']) == 1
         assert 'trace' in controls and 'calibration_history' in controls
-        binary = meta['binary_pattern'][()]
-        assert set(np.unique(binary)) <= {-1, 1}
-        assert meta['analysis_mask'].shape == binary.shape
+        assert 'binary_pattern' not in meta
+        assert meta['analysis_mask'].ndim == 2
         classification = json.loads(meta['classification_json'][()].decode())
-        from scattering_calculator.sample_generator.domain_analysis import classify_magnetic_domains
-        expected = classify_magnetic_domains(binary, analysis_mask=meta['analysis_mask'][()] > 0, periodic=True)
         assert classification['periodic']
         assert not classification['boundary_context_periodic']
-        assert classification['bubble_count'] == expected['bubble_count']
-        assert classification['stripe_count'] == expected['stripe_count']
         assert classification['stripe_count'] == meta['stripe_count'][()]
         assert classification['bubble_count'] == meta['bubble_count'][()]
         assert classification['state'] == meta['state'][()].decode()
@@ -146,14 +141,14 @@ def test_shared_experiment_hdf5_retains_constrained_provenance_and_unit_walls(tm
         meta = json.loads(state['generation_json'][()])
         assert meta['wall_sigma_px'] == 2
         assert meta['seed'] == 7
-        assert state['binary_pattern'].shape == (32, 40)
+        assert 'binary_pattern' not in state
         assert 'state' in state['classification']
         assert state['classification/periodic'][()]
         if use_oh:
             from scattering_calculator.sample_generator.domain_analysis import classify_magnetic_domains
             mask = state['analysis_mask'][()]
             assert np.any(mask) and not np.all(mask)
-            expected = classify_magnetic_domains(state['binary_pattern'][()], analysis_mask=mask, periodic=True)
+            expected = classify_magnetic_domains(run.config.magnetic_pattern.binary_pattern, analysis_mask=mask, periodic=True)
             assert state['classification/bubble_count'][()] == expected['bubble_count']
             assert state['classification/stripe_count'][()] == expected['stripe_count']
 

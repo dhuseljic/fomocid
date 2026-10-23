@@ -356,7 +356,6 @@ In the paired-CR/CL hologram file, per-sample group `00000` contains:
 |---|---|
 | `metadata/sample/magnetic_pattern/pattern_config/` | Effective physical generation inputs, in metres/radians/dimensionless units, including the seed. |
 | `metadata/sample/magnetic_pattern/generation_json` | Full generator metadata and nested diagnostics, including effective pixel-unit controls, realized seed, calibration history and relaxation trace. |
-| `metadata/sample/magnetic_pattern/binary_pattern` | ±1 int8 precursor on the generation ROI grid. |
 | `metadata/sample/magnetic_pattern/analysis_mask` | Boolean/uint8 OH selection on the same grid. |
 | `metadata/sample/magnetic_pattern/classification_json` | Scalar classification plus per-component shape/visibility records for both polarities. |
 | `metadata/sample/magnetic_pattern/measurements_json` | Scalar pattern diagnostics, with undefined values represented as JSON null. |
@@ -408,7 +407,7 @@ of crystalline translational symmetry.
 
 The shared `simulate_experiment` backend also saves constrained generation
 provenance under `runs/000000/magnetic_state/`: `parameters_json`,
-`generation_json`, `binary_pattern` and named `classification/` datasets. That
+`generation_json` and named `classification/` datasets. That
 backend also classifies complete periodic components and restricts counts to
 OH intersections when an OH aperture is configured, saving an `analysis_mask`
 on the binary grid. With no OH configured, it measures the full generated field.
@@ -472,3 +471,6 @@ Standalone callers can pass `progress_callback=events.append` to
 to receive the same event dictionaries without terminal output. This callback
 is runtime instrumentation and is not a physical generator parameter or saved
 function. `verbose=False` suppresses pipeline text but retains saved timings.
+
+Binary precursors are used internally for classification but are not saved in
+HDF5. Saved state diagnostics and the wall-smoothed optical field remain available.
