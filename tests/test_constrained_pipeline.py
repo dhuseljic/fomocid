@@ -307,3 +307,14 @@ def test_saturated_sampler_generates_uniform_states_with_both_polarities():
     assert targets == {-1., 1.}
     assert sample_constrained_domain_parameters(rng, saturation_probability=0.)['target_magnetization'] is None
     assert sample_constrained_domain_parameters(rng, saturation_probability=1., target_magnetization=.4)['target_magnetization'] == .4
+
+
+def test_alignment_sampler_is_continuous_with_exponent_minus_four():
+    rng = np.random.default_rng(123)
+    alignment = np.array([sample_constrained_domain_parameters(rng)['alignment']
+                          for _ in range(3000)])
+    assert np.all((alignment > 0) & (alignment < 24))
+    assert len(np.unique(alignment)) == len(alignment)
+    assert 5.1 < alignment.mean() < 6.0
+    assert .47 < np.mean(alignment < 4) < .52
+    assert .72 < np.mean(alignment < 8) < .78

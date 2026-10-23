@@ -222,3 +222,14 @@ to use the same stack for every experiment. In `simulate_hologram_tree.py`,
 pass `--fixed-recipe` to use `config.recipe` for every parent (or set
 `randomize_recipe=False` in the script). Random recipes remain enabled by default.
 The sampler uses the example's seeded NumPy generator for reproducibility.
+
+The shared sampler draws `alignment` from a continuous exponential distribution
+with scale 6, conditioned on the interval [0,24]. Its density is proportional
+to `exp(-4 * alignment/24)`, falling to about 1.83% of its zero-value
+density at alignment 24. Approximately 50% of draws are below 4, 75% below 8,
+and 88% below 12. About 15.64% are below 1. The median is about 4.05. This
+favors lower values while retaining a tail of stronger alignment. Sampling uses the inverse CDF,
+not clipping, so there is no artificial probability mass at 24 or exactly zero.
+Set a fixed `alignment=0` explicitly when an exactly isotropic penalty is needed.
+These are input statistics; measured order can differ after relaxation and
+accepted-draw statistics can differ after grid-limit rejection.
