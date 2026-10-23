@@ -181,7 +181,7 @@ saturation_probability = .04
 target_magnetization = None  # fixed fallback when disabling the range sampler
 pattern_type = "constrained_domain_pattern"
 pattern_config = dict(
-    characteristic_length=600e-9, target_magnetization=target_magnetization,
+    characteristic_length=300e-9, target_magnetization=target_magnetization,
     alignment=0., direction=0., disorder=0., disorder_length=30e-9,
     initial_state="random", initial_order=0., wall_stiffness=2.,
     n_steps=300, time_step=.2, convergence_tolerance=1e-5,
