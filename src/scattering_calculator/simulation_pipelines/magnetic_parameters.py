@@ -107,7 +107,10 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
     explicit numeric target_magnetization fixes the target across samples.
     Otherwise saturation_probability (default 0.1) selects exact +/-1 states
     with equal polarity probabilities, including in free-magnetization mode.
-    Alignment is exactly zero for half the draws; other draws use an exponential
+    Half the draws use a smooth isotropic preparation: random initialization,
+    zero disorder/alignment/order, stiffness 2, 400 steps and time step 0.2.
+    Physical repeat is log-uniform from 64 to 1000 nm, without later resizing.
+    For the remaining diverse preparations, alignment is zero for half the draws; other draws use an exponential
     with scale 0.5 conditioned on [0,24]. Spatial disorder is uniform [0,0.8],
     and initial order uniform [0,1], covering ordered and disordered preparations.
     Generate one relaxed realization, then measure it; spacing calibration is
@@ -115,7 +118,7 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
     """
     if not np.isfinite(saturation_probability) or not 0 <= saturation_probability <= 1:
         raise ValueError("saturation_probability must be finite in [0,1]")
-    length = float(rng.uniform(120e-9, 1000e-9))
+    length = float(np.exp(rng.uniform(np.log(64e-9), np.log(1000e-9))))
     preparation = str(rng.choice(('random', 'stripes', 'hexagonal', 'worms')))
     magnetization = target_magnetization
     if magnetization is None and constrain_magnetization:
@@ -132,7 +135,7 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
     alignment = 0.
     if rng.random() >= .5:
         alignment = float(-.5 * np.log1p(-rng.random() * (-np.expm1(-48.))))
-    return dict(
+    parameters = dict(
         characteristic_length=length, target_magnetization=magnetization,
         alignment=alignment,
         direction=float(rng.uniform(0., np.pi)),
@@ -151,6 +154,13 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
         sigma=float(rng.uniform(.025, .06) * length),
         seed=int(rng.integers(0, 2**31 - 1)),
     )
+    # Notebook 22-style unpinned, isotropic relaxation supports smooth labyrinths.
+    # Keep magnetization/physical spacing independent of this preparation choice.
+    if rng.random() < .5:
+        parameters.update(alignment=0., disorder=0., initial_state='random',
+                          initial_order=0., wall_stiffness=2., n_steps=400,
+                          time_step=.2)
+    return parameters
 
 
 def constrained_sampling_pitch(parameters):
@@ -212,3 +222,42 @@ def sample_sweep_domain_parameters(rng, experiment_index=None, *, free_probabili
     return sample_constrained_domain_parameters(rng,
         constrain_magnetization=mode == 'gaussian', target_magnetization=target,
         saturation_probability=0.)
+
+
+def compatible_detector_distance(distance, minimum, *, wavelength, detector_shape,
+                                 pixel_size, center, target_pitch, max_oversampling,
+                                 ignore_curvature=False, sample_feasible=False):
+    """Find the feasible interval and optionally sample it directly.
+
+    With sample_feasible=True, distance is an upper bound and every draw is
+    uniform over the compatible interval. Otherwise retain feasible distances.
+    Return None if even the minimum distance cannot resolve the sampled texture.
+    Evaluate extrema of the same discrete qx coordinates used by DetectorConfig,
+    without allocating detector-sized arrays during the bounded search.
+    """
+    if not np.isfinite([distance, minimum]).all() or not 0 < minimum <= distance:
+        raise ValueError('Compatible-distance minimum must be positive and no greater than the sampled distance')
+    if max_oversampling < 1:
+        return None
+    x = (np.array([0, detector_shape[1]-1])-center[1])*pixel_size
+    nearest_y = np.clip(np.rint(center[0]), 0, detector_shape[0]-1)
+    y = (np.array([0, detector_shape[0]-1, nearest_y])-center[0])*pixel_size
+
+    def pitch(z):
+        q = x[None, :]/z if ignore_curvature else x[None, :]/np.sqrt(z*z+x[None, :]**2+y[:, None]**2)
+        return wavelength/np.ptp(q)/max_oversampling
+
+    if pitch(distance) <= target_pitch:
+        return float(np.random.uniform(minimum, distance)) if sample_feasible else float(distance)
+    if pitch(minimum) > target_pitch:
+        return None
+    low, high = minimum, distance
+    for _ in range(48):
+        middle = (low+high)/2
+        if pitch(middle) <= target_pitch:
+            low = middle
+        else:
+            high = middle
+    # Keep a tiny margin below the integer oversampling boundary.
+    upper = max(minimum, low*(1-1e-12))
+    return float(np.random.uniform(minimum, upper))

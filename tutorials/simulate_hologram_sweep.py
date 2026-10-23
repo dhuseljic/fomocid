@@ -36,7 +36,7 @@ from scattering_calculator.simulation_pipelines.magnetic_parameters import (
 
 # Number of simulations to run.
 experiment_timeout_seconds = 100.0  # abort slow experiments and continue
-nr_simulations = 30  # increase to e.g. 1000 for a full training dataset
+nr_simulations = 90  # increase to e.g. 1000 for a full training dataset
 
 # --- Material stack ---
 # True samples a new stack per experiment; False uses recipe below unchanged.
@@ -683,8 +683,8 @@ ranges = HologramPipelineRanges(
     artifacts_config=random_artifacts_config,
 
 
-    # Sample once per independent experiment, in metres (5–40 cm).
-    detector_distance=Uniform(.05, .40),
+    # Upper bound: actual distance is sampled from 4 cm to the domain/wall-compatible limit.
+    detector_distance=.40,
     # generating holography masks from reasonable ranges based on the stripe width, xray energy and detector distance
     # you can also choose a uniform distribution or a fixed value
     aperture_config=random_aperture_config,
@@ -699,6 +699,7 @@ ranges = HologramPipelineRanges(
 
 
 pipeline_config = config.to_pipeline_config()
+pipeline_config.magnetic_pattern_distance_min = .04  # conditional distance sampling, minimum 4 cm
 pipeline_config.hdf5_compression = hdf5_compression
 pipeline = HologramPipeline(
     config=pipeline_config,

@@ -37,7 +37,8 @@ def main():
         # Fixed recipe used with --fixed-recipe (or randomize_recipe=False).
         recipe='Au(100)/SiN(100)/Co(20)',
         hdf5_compression=None if args.compression == 'none' else args.compression, detector_shape=(256, 256),
-        detector_distance=.04, xray_energy=778., xray_photon_flux=1e8,
+        magnetic_pattern_distance_min=.04,  # applied once per magnetic parent
+        detector_distance=.05, xray_energy=778., xray_photon_flux=1e8,
         propagator_method='Scalar', beamstop_method=None, random_seed=args.seed,
         beamstop_diffraction=False,  # optional physical-plane stop diffraction
         save_detected_hologram_without_beamstop=False,  # optional extra acquisition disabled
@@ -50,7 +51,7 @@ def main():
     # L sample/energy branches. OH is unchanged; RH size may vary.
     exits = [{}, {'xray_energy': 780.,
                   'aperture_radii': [300e-9, 40e-9, 40e-9]}]
-    # Distance is sampled once per independent parent (5–40 cm), not here.
+    # Distance is sampled once per parent (4–40 cm, constrained by domains/walls).
     # Every branch below that parent retains its camera geometry and grid.
     geometries = [{}]
     # N acquisitions per ideal pair. Defaults retain linear detector response
@@ -63,7 +64,7 @@ def main():
     HierarchicalHologramPipeline(config=config,
         ranges=HologramPipelineRanges(
             recipe=(lambda _: sample_multilayer_recipe(rng)) if randomize_recipe else None,
-            detector_distance=Uniform(.05, .40), pattern_config=lambda params: sample_sweep_domain_parameters(
+            detector_distance=.40, pattern_config=lambda params: sample_sweep_domain_parameters(
             rng, params["experiment_index"], free_probability=free_probability,
             gaussian_probability=gaussian_probability, saturation_probability=saturation_probability)),
         output_path=args.output, n_samples=args.patterns, exit_variants=exits,

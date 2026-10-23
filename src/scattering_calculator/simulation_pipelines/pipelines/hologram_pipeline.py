@@ -92,6 +92,10 @@ class ExperimentTimeoutError(TimeoutError):
     """An isolated experiment exceeded its wall-clock deadline."""
 
 
+class ExperimentWorkerExitError(RuntimeError):
+    """An isolated simulation died without reporting a Python exception."""
+
+
 class MagneticGridLimitError(ValueError):
     """A sampled configuration needs a magnetic grid above the allocation limit."""
 
@@ -239,6 +243,11 @@ class HologramPipelineConfig:
         Actual oversampling increases to resolve characteristic_length by 16
         pixels, positive wall sigma by 2 pixels and the nonzero minority
         stripe-width estimate by 4 pixels. Default 4096.
+    magnetic_pattern_distance_min : float or None
+        Optional shortest allowed detector distance in metres. Sample uniformly
+        between this minimum and the feasible upper limit for the drawn domain
+        spacing and wall width. detector_distance supplies the upper bound.
+        Applied before dependent geometry; None disables conditional sampling.
     magnetic_pattern_classification_min_area : int
         Minimum connected-component area in object-hole pixels for a resolved
         stripe or bubble. Smaller components are counted as noise.
@@ -453,6 +462,7 @@ class HologramPipelineConfig:
     use_roi: bool = True
     magnetic_pattern_use_roi: bool = True
     magnetic_pattern_max_grid_axis: int = 4096
+    magnetic_pattern_distance_min: float | None = None
     magnetic_pattern_context_periods: float = 0.5
     magnetic_pattern_classification_min_area: int = 9
     magnetic_pattern_bubble_max_eccentricity: float = 0.95
@@ -749,6 +759,11 @@ class HologramPipeline:
                             if self.verbose:
                                 print(f"    experiment {i} exceeded {self.experiment_timeout_seconds:g}s; skipped", flush=True)
                             break
+                        except ExperimentWorkerExitError as error:
+                            skipped += 1
+                            if self.verbose:
+                                print(f"    experiment {i}: {error}; skipped", flush=True)
+                            break
                         except MagneticGridLimitError as error:
                             # This guard runs before sample allocation or output.
                             # Do not retry if a custom subclass already wrote data.
@@ -830,8 +845,11 @@ class HologramPipeline:
                         child.join()
                     raise ExperimentTimeoutError()
                 if not receiver.poll():
-                    raise RuntimeError(f'Simulation subprocess exited without a result (code {child.exitcode})')
-                kind, payload = receiver.recv()
+                    raise ExperimentWorkerExitError(f'worker exited without a result (code {child.exitcode})')
+                try:
+                    kind, payload = receiver.recv()
+                except EOFError as error:
+                    raise ExperimentWorkerExitError(f'worker exited without a result (code {child.exitcode})') from error
                 if kind == 'grid':
                     raise MagneticGridLimitError(payload)
                 if kind == 'error':
@@ -1262,6 +1280,24 @@ class HologramPipeline:
         params["detector_distance"] = _pick(
             rng.detector_distance, cfg.detector_distance, params
         )
+        if cfg.magnetic_pattern_distance_min is not None and params["pattern_type"] == "constrained_domain_pattern":
+            from ..magnetic_parameters import constrained_sampling_pitch, compatible_detector_distance
+            from ...utils.physics import photon_energy_wavelength
+            original = float(params["detector_distance"])
+            allowed_oversampling = cfg.magnetic_pattern_max_grid_axis // max(cfg.detector_shape)
+            if int(cfg.oversampling) > allowed_oversampling:
+                raise MagneticGridLimitError("Configured oversampling exceeds the allocation limit even at the minimum distance")
+            distance = compatible_detector_distance(original, cfg.magnetic_pattern_distance_min,
+                wavelength=photon_energy_wavelength(params["energy"]), detector_shape=cfg.detector_shape,
+                pixel_size=params["detector_pixel_size"],
+                center=params["detector_center"] or tuple(np.array(cfg.detector_shape)//2),
+                target_pitch=constrained_sampling_pitch(params["pattern_config"]),
+                max_oversampling=allowed_oversampling,
+                ignore_curvature=params["ignore_flat_detector_curvature"], sample_feasible=True)
+            if distance is None:
+                raise MagneticGridLimitError("Sampled magnetic walls remain unresolved at the minimum detector distance; increase the grid limit or widen the walls")
+            params["detector_distance_original"] = original
+            params["detector_distance"] = distance
         params["illumination_focus_distance"] = _pick(
             rng.illumination_focus_distance,
             cfg.illumination_focus_distance,
@@ -1550,6 +1586,11 @@ class HologramPipeline:
         p = self._sample_params()
         cfg = self.config
         metadata: dict[str, Any] = {}
+        if "detector_distance_original" in p:
+            metadata["detector/sampled_distance_m"] = p["detector_distance_original"]
+            metadata["detector/distance_sampling_upper_m"] = p["detector_distance_original"]
+            metadata["detector/distance_adjusted_for_magnetic_grid"] = bool(p["detector_distance"] != p["detector_distance_original"])
+            metadata["detector/compatible_distance_min_m"] = cfg.magnetic_pattern_distance_min
         t_stage = mark_stage("sample params", t_stage)
 
         # ---- X-ray config ------------------------------------------------
@@ -1857,10 +1898,10 @@ class HologramPipeline:
                 key = f"{phase}_{kind}_count"
                 metadata[f"sample/magnetic_pattern/{key}"] = domain_analysis[key]
         metadata["sample/magnetic_pattern/boundary_fragment_count"] = domain_analysis["boundary_fragment_count"]
-        metadata["sample/magnetic_pattern/classification_method"] = "both_polarities_connected_components_v6"
+        metadata["sample/magnetic_pattern/classification_method"] = "both_polarities_connected_components_v7"
         metadata["sample/magnetic_pattern/classification_periodic"] = domain_analysis["periodic"]
         metadata["sample/magnetic_pattern/classification_geometry"] = (
-            "periodic generation grid; count distinct domains intersecting OH" if domain_analysis["periodic"]
+            "periodic geometry classifies domains; count stripes as connected pieces inside OH" if domain_analysis["periodic"]
             else "open simulation grid; count domains intersecting OH")
         metadata["sample/magnetic_pattern/state"] = state
         metadata["sample/magnetic_pattern/bubble_count"] = domain_analysis[

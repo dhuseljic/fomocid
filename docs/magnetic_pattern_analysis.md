@@ -82,15 +82,16 @@ and `measurements_json`; do not substitute the nested generator measurements.
 Production constrained patterns have periodic boundaries on their **generation
 grid** (the generated ROI when optimization is enabled). Opposite-edge pieces
 are joined and unwrapped before measuring their full shape. Only components
-with at least one pixel in the OH contribute. A component visible in two pieces
-or on opposite edges counts once; entirely hidden domains are excluded.
+with at least one pixel in the OH contribute. A bubble visible in several pieces counts once. A stripe-like component is
+intersected with the OH and each disconnected visible piece counts separately,
+using open boundaries and the same pixel connectivity. Hidden domains are excluded.
 Counts/order are computed on the binary precursor, not on wall-blurred data.
 
 Default classification settings are full area >=9 pixels, eccentricity <=0.95
 (approximately a 3.2:1 ellipse), circularity >=0.4, threshold zero and eight-neighbor
 connectivity. Small components are noise; other resolved non-bubble domains are
 stripe-like. The connected majority background also counts as a stripe-like
-domain. A connected labyrinth is one component, not a count of its branches.
+domain. A labyrinth counts once per connected OH piece, rather than once per branch.
 
 Total counts add both polarities. `positive_*`, `negative_*`, `majority_*` and
 `minority_*` retain separate bubble, stripe and noise counts. Majority/minority
@@ -133,6 +134,12 @@ gallery counts can differ from periodic production counts at the box edges.
 | `local_sixfold_order` | Mean magnitude of six-nearest-bubble bond order, OH-selected centers with periodic distances. Requires at least seven bubbles. |
 | `sixfold_order` | Magnitude after complex averaging, indicating a common hexagonal bond orientation. Differently oriented grains can have high local but lower global order. |
 | `interior_bubble_count` / `measurements.interior_component_count` | Number of bubble centers used for bond-order measurement, not an additional count to add to B. |
+
+`stripe_counting_geometry="open_OH_segments"` identifies this convention (method
+version v7). Each full-domain record includes `visible_stripe_segments`; stripe
+totals sum that field over resolved stripe-like records. Thus stripe totals can
+exceed the number of full-domain records. Shape and order measurements still use
+full domain geometry, and the area cutoff applies before OH clipping.
 
 Per-component entries in `classification_json["components"]` contain:
 

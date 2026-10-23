@@ -124,7 +124,7 @@ def test_oh_selection_does_not_swap_domain_and_background():
     assert result['state'] == 'bubble'
 
 
-def test_stripe_connected_outside_oh_is_counted_once():
+def test_stripe_connected_outside_oh_counts_each_visible_segment():
     pattern = np.ones((96, 96))
     pattern[15:80, 20:25] = -1
     pattern[15:80, 55:60] = -1
@@ -132,8 +132,9 @@ def test_stripe_connected_outside_oh_is_counted_once():
     oh = np.zeros_like(pattern, dtype=bool)
     oh[40:70, 10:70] = True
     result = classify_magnetic_domains(pattern, analysis_mask=oh)
-    assert result['stripe_count'] == 2
-    assert result['minority_stripe_count'] == 1
+    assert result['stripe_count'] == 5
+    assert result['minority_stripe_count'] == 2
+    assert result['majority_stripe_count'] == 3
     assert result['bubble_count'] == 0
 
 
@@ -151,7 +152,7 @@ def test_domains_entirely_outside_oh_are_not_counted(tmp_path):
     with h5py.File(tmp_path / 'masked.h5', 'w') as h5:
         write_domain_classification(h5.create_group('classification'), pattern, analysis_mask=oh)
         assert h5['classification/bubble_count'][()] == 0
-        assert h5['classification'].attrs['method'] == 'both_polarities_connected_components_v6'
+        assert h5['classification'].attrs['method'] == 'both_polarities_connected_components_v7'
 
 
 def test_elliptical_bubble_and_elongated_stripe():
@@ -351,3 +352,17 @@ def test_periodic_bubble_counts_once_only_when_visible_in_oh(visible_sides):
     assert result['components'][0]['area'] > result['components'][0]['visible_area']
     assert result['components'][0]['touches_border']
     assert result['components'][0]['is_bubble']
+
+
+def test_stripe_connected_outside_oh_counts_visible_pieces():
+    pattern = -np.ones((80, 80))
+    pattern[15:22, 5:75] = 1
+    pattern[50:57, 5:75] = 1
+    pattern[15:57, 5:12] = 1  # Connection outside OH.
+    oh = np.zeros_like(pattern, dtype=bool)
+    oh[10:65, 25:65] = True
+    result = classify_magnetic_domains(pattern, analysis_mask=oh, periodic=True)
+    assert result['positive_bubble_count'] == 0
+    assert result['positive_stripe_count'] == 2
+    assert len([c for c in result['components'] if c['polarity'] == 1]) == 1
+    assert result['stripe_counting_geometry'] == 'open_OH_segments'

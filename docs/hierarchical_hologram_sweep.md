@@ -14,15 +14,16 @@ The example creates **30 CR/CL acquisition pairs**: five magnetic patterns × tw
 exit-wave variants × one detector geometry per parent × three acquisitions. Edit the
 `exits`, `geometries` and `acquisitions` lists in that script to change branching.
 `--patterns` counts independent magnetic parents, not final output groups.
-The example samples detector distance uniformly between 5 and 40 cm once per
-independent magnetic parent through `ranges.detector_distance`. All exit-wave
-and acquisition branches under that parent retain its sampled distance and
+The example samples distance conditionally between 4 cm and the feasible
+upper bound (capped at 40 cm) once per independent magnetic parent. All exit-wave
+and acquisition branches under that parent retain its final compatible distance and
 real-space grid; distance is not varied in a sub-loop. Each new parent gets a
 new draw. At 778 eV and 20 um detector pitch, this range gives at least about
-3.98 um of real-space field width, containing the 600 nm OH and reference holes
+3.18 um of real-space field width, containing the 600 nm OH and reference holes
 at 1 um offsets. The earlier 5 mm setting clipped the mask; oversampling alone
 cannot enlarge the field. The independent sweep likewise samples its distance
-once per experiment, using the same uniform 5–40 cm range.
+once per experiment from the same domain-dependent interval within 4–40 cm. See
+[compatible distances](#compatible-distances-for-fine-magnetic-patterns).
 
 The original `simulate_hologram_sweep.py` remains available for independent runs.
 The output path is overwritten when the pipeline runs, like the original sweep.
@@ -185,8 +186,8 @@ record the actual result. Each saved leaf has `metadata/sampling_attempts`.
 Skipped independent-sweep experiments leave gaps in numeric sample IDs; enumerate
 existing numeric groups when loading files. Tree parent IDs can likewise have
 gaps, while leaf IDs remain consecutive. Rejected proposals bias the accepted
-sample distribution: the proposed detector distance remains uniform from 5 to
-40 cm, but the saved distances are conditioned on grid feasibility. In a tree,
+sample distribution: distance is sampled conditionally from 4 cm to the feasible upper limit
+(capped at 40 cm), and remaining impossible draws can still bias saved results. In a tree,
 no leaves are generated until their parent's grid passes this check.
 
 ### Random material recipes
@@ -268,3 +269,40 @@ logging in its dedicated progress pane.
 
 See [Choosing the HDF5 save mode](hdf5_save_modes.md) for script, command-line
 and GUI controls, storage precision, lossless roundtrip checks and readback.
+
+The shared magnetic sampler draws physical repeat lengths log-uniformly from
+64–1000 nm. Half of preparations use the smooth, isotropic Notebook 22-style
+relaxation; the remainder retain varied preparation order and disorder. See the
+[full distributions](constrained_magnetic_domains.md) and the
+[physical beamstop diffraction option](single_experiment_gui.md#physical-beamstop-diffraction-optional),
+which remains disabled by default. Stored morphology uses full periodic geometry
+for bubble/stripe decisions and open OH intersections for stripe counts (v7).
+
+### Compatible distances for fine magnetic patterns
+
+Both examples enable `magnetic_pattern_distance_min=0.04` (metres) and use
+`ranges.detector_distance=0.40` as the upper bound. First draw the physical
+magnetic spacing, wall width and other magnetic controls. Then sample distance
+**uniformly from 4 cm to the smaller of 40 cm and the compatible upper limit**.
+This directly samples the feasible interval, rather than first drawing an
+independent distance and adjusting only failures. Magnetic controls stay intact.
+
+Compatibility uses the actual discrete detector q-span, energy, pixel size,
+detector center, integer oversampling budget and all constraints in
+`constrained_sampling_pitch` (spacing, wall sigma and minority-width estimate).
+Sampling runs before aperture/beamstop callbacks, which see the final distance.
+A tree chooses it once per parent and shares it across every downstream branch.
+The allocation limit still applies: a draw unresolved even at 4 cm is rejected
+and the existing whole-parent retry/skip policy continues. This can leave residual
+selection bias; grids are never silently coarsened.
+
+Final distance and magnetic resolution are correlated. The final distance is
+`metadata/detector/sample_to_detector_distance`. Under `metadata/detector/`,
+`distance_sampling_upper_m` records the input upper bound (40 cm in the examples),
+`compatible_distance_min_m` records the lower bound, and
+`distance_adjusted_for_magnetic_grid` compares the final distance with that
+input upper bound. The legacy `sampled_distance_m` field also records the input
+upper bound; it is not a separate initial random draw in this mode.
+Set `magnetic_pattern_distance_min=None` to disable conditional sampling and
+interpret detector_distance as the actual distance; manual GUI experiments use
+that default.

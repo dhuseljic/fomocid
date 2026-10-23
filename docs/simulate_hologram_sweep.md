@@ -439,8 +439,8 @@ To prevent blocky source patterns, the hologram backend raises actual integer
 oversampling to resolve the spacing by at least 16 pixels and positive Gaussian
 wall sigma by at least 2 pixels, plus four pixels across the nonzero conservative
 minority stripe-width estimate. It records per-sample
-`metadata/sample/effective_oversampling`. The script samples detector distance uniformly from 5 to 40 cm
-(`Uniform(.05, .40)` in metres), once per independent experiment. If the necessary full-grid axis exceeds
+`metadata/sample/effective_oversampling`. The script samples detector distance conditionally between 4 cm and the
+feasible upper bound, capped at 40 cm, once per independent experiment. If the necessary full-grid axis exceeds
 `magnetic_pattern_max_grid_axis` (default 4096), the draw is rejected before
 allocating the large grid. The runner resamples the complete experiment up to
 `max_sampling_attempts=20` times, then skips that experiment and continues. It does not silently reduce resolution. Explicit-grid experiments
@@ -892,12 +892,13 @@ The hierarchy follows ownership:
 ### OH-local magnetic morphology metadata
 
 The classifier labels connected domains of **both polarities on the full binary
-precursor**, then counts a component once if it intersects the OH. It uses
+precursor**, then counts visible bubbles once and disconnected stripe pieces
+inside the OH separately. It uses
 pixels outside the aperture to establish shape; a bubble clipped by the OH
 remains a bubble. The constrained generator is periodic, so opposite edges of
 the full generated grid (or generation ROI) are joined before measuring shape.
-A component is counted once only if it has at least one pixel in the OH,
-even when it appears at multiple edges. Entirely hidden domains are excluded
+Bubble counting joins periodic pieces. Stripe counting uses open connectivity
+after intersecting each full stripe-like domain with the OH. Entirely hidden domains are excluded
 from counts and order. No clipped-bubble fragments are discarded in this mode.
 `classification_periodic=True` records this convention. Explicit legacy
 nonperiodic patterns retain open-boundary classification.
@@ -1222,8 +1223,8 @@ record the actual result. Each saved leaf has `metadata/sampling_attempts`.
 Skipped independent-sweep experiments leave gaps in numeric sample IDs; enumerate
 existing numeric groups when loading files. Tree parent IDs can likewise have
 gaps, while leaf IDs remain consecutive. Rejected proposals bias the accepted
-sample distribution: the proposed detector distance remains uniform from 5 to
-40 cm, but the saved distances are conditioned on grid feasibility. In a tree,
+sample distribution: distance is sampled conditionally from 4 cm to the feasible upper limit
+(capped at 40 cm), and remaining impossible draws can still bias saved results. In a tree,
 no leaves are generated until their parent's grid passes this check.
 
 ### Random material recipes
@@ -1310,7 +1311,10 @@ main dataset is outside that deadline. The constructor accepts another positive
 limit, or `None` to disable isolation/timeouts. This timeout implementation
 requires Unix `fork` support and works with the example's callable samplers;
 parameter draws happen in the parent process so random generators advance even
-when an experiment is killed. Failed runs are not retried after a timeout.
+when an experiment is killed. Failed runs are not retried after a timeout. An isolated worker that exits
+without reporting a Python result (for example a native crash) is also discarded
+and skipped. Ordinary reported Python exceptions still surface so input/programming
+errors are not silently hidden.
 
 Sweep output defaults to major-step timings and total elapsed time
 (`verbose=True, detailed_logging=False`).
@@ -1377,3 +1381,40 @@ total additionally includes index preparation, incident-field projection, cache
 checks/copies and orchestration. The final FFTs are still computed separately
 for CR and CL because their magnetic exit fields differ. Cached tree branches
 that do not perform propagation again do not re-report old compute timings.
+
+The shared magnetic sampler draws physical repeat lengths log-uniformly from
+64–1000 nm. Half of preparations use the smooth, isotropic Notebook 22-style
+relaxation; the remainder retain varied preparation order and disorder. See the
+[full distributions](constrained_magnetic_domains.md) and the
+[physical beamstop diffraction option](single_experiment_gui.md#physical-beamstop-diffraction-optional),
+which remains disabled by default. Stored morphology uses full periodic geometry
+for bubble/stripe decisions and open OH intersections for stripe counts (v7).
+
+### Compatible distances for fine magnetic patterns
+
+Both examples enable `magnetic_pattern_distance_min=0.04` (metres) and use
+`ranges.detector_distance=0.40` as the upper bound. First draw the physical
+magnetic spacing, wall width and other magnetic controls. Then sample distance
+**uniformly from 4 cm to the smaller of 40 cm and the compatible upper limit**.
+This directly samples the feasible interval, rather than first drawing an
+independent distance and adjusting only failures. Magnetic controls stay intact.
+
+Compatibility uses the actual discrete detector q-span, energy, pixel size,
+detector center, integer oversampling budget and all constraints in
+`constrained_sampling_pitch` (spacing, wall sigma and minority-width estimate).
+Sampling runs before aperture/beamstop callbacks, which see the final distance.
+A tree chooses it once per parent and shares it across every downstream branch.
+The allocation limit still applies: a draw unresolved even at 4 cm is rejected
+and the existing whole-parent retry/skip policy continues. This can leave residual
+selection bias; grids are never silently coarsened.
+
+Final distance and magnetic resolution are correlated. The final distance is
+`metadata/detector/sample_to_detector_distance`. Under `metadata/detector/`,
+`distance_sampling_upper_m` records the input upper bound (40 cm in the examples),
+`compatible_distance_min_m` records the lower bound, and
+`distance_adjusted_for_magnetic_grid` compares the final distance with that
+input upper bound. The legacy `sampled_distance_m` field also records the input
+upper bound; it is not a separate initial random draw in this mode.
+Set `magnetic_pattern_distance_min=None` to disable conditional sampling and
+interpret detector_distance as the actual distance; manual GUI experiments use
+that default.

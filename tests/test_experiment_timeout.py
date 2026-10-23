@@ -66,3 +66,44 @@ def test_isolated_tree_retains_leaf_numbering_and_parent_parameters(tmp_path):
         for i in range(4):
             assert h5[f'{i:05d}/metadata/hierarchy/pattern_id'][()] == i//2
             assert h5[f'{i:05d}/metadata/detector/sample_to_detector_distance'][()] == [.005, .006][i//2]
+
+
+class AbruptFirstPipeline(SlowFirstPipeline):
+    """Simulate a native worker crash, with no exception sent through the pipe."""
+    def _simulate_one(self, h5, idx):
+        if idx == 0:
+            import os
+            os._exit(9)
+        super()._simulate_one(h5, idx)
+
+
+def test_abrupt_worker_exit_does_not_kill_sweep(tmp_path):
+    factory = runpy.run_path('tests/test_constrained_pipeline.py')['small_hologram_config']
+    path = tmp_path/'abrupt.h5'
+    AbruptFirstPipeline(config=factory(), ranges=HologramPipelineRanges(), output_path=path,
+        n_samples=2, verbose=False, experiment_timeout_seconds=2).run()
+    with h5py.File(path) as h5:
+        assert '00000' not in h5 and '00001' in h5
+
+
+def test_compatible_distance_is_saved_once_for_all_tree_leaves(tmp_path):
+    from scattering_calculator.simulation_pipelines.pipelines.hierarchical_hologram_pipeline import HierarchicalHologramPipeline
+    factory = runpy.run_path('tests/test_constrained_pipeline.py')['small_hologram_config']
+    output = tmp_path/'compatible-tree.h5'
+    pipeline = HierarchicalHologramPipeline(
+        config=factory(magnetic_pattern_distance_min=.005, magnetic_pattern_max_grid_axis=512),
+        ranges=HologramPipelineRanges(detector_distance=lambda _: .4),
+        output_path=output, n_samples=1, verbose=False, experiment_timeout_seconds=10,
+        acquisition_variants=[{}, {'measurement_config': {'exposure_time': .2}}])
+    pipeline.run()
+    with h5py.File(output) as h5:
+        distances = []
+        for key in ('00000', '00001'):
+            meta = h5[f'{key}/metadata/detector']
+            distances.append(meta['sample_to_detector_distance'][()])
+            assert meta['sampled_distance_m'][()] == .4
+            assert meta['distance_adjusted_for_magnetic_grid'][()]
+            assert meta['compatible_distance_min_m'][()] == .005
+            assert h5[f'{key}/metadata/sampling_attempts'][()] == 1
+        assert .005 <= distances[0] < .4
+        assert distances[0] == distances[1]

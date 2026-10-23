@@ -413,7 +413,10 @@ class SimulatorApp:
         text = value if isinstance(value, str) else repr(value)
         variable = self.tk.StringVar(value=text)
         choices = ('True', 'False') if isinstance(value, bool) else CHOICES.get(path[-1])
-        if choices:
+        if path[-1] == 'beamstop_diffraction':
+            control = self.ttk.Checkbutton(row, text='Propagate through physical beamstop plane',
+                variable=variable, onvalue='True', offvalue='False')
+        elif choices:
             control = self.ttk.Combobox(row, textvariable=variable, values=choices, state='readonly')
         else:
             control = self.ttk.Entry(row, textvariable=variable)

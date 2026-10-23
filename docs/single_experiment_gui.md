@@ -160,3 +160,28 @@ simulation rather than rewriting the previous result.
 
 See [Choosing the HDF5 save mode](hdf5_save_modes.md) for script, command-line
 and GUI controls, storage precision, lossless roundtrip checks and readback.
+
+### Physical beamstop diffraction (optional)
+
+In **Beamstop**, enable **Propagate through physical beamstop plane**
+(`beamstop_diffraction=True`). It is disabled by default in the GUI and both
+example pipelines. `bs_detector_distance` is the gap from the stop to the camera;
+its physical radius is specified in metres. For sample-to-camera distance D
+and gap d, the stop plane is at D-d. The ordinary geometric model magnifies
+its radius on the camera by D/(D-d).
+
+The optional mode propagates the complex exit wave to the stop plane, applies
+amplitude transmission `sqrt(1-opacity)`, and propagates to the camera, retaining
+edge diffraction. It evaluates the equivalent Babinet correction (unobstructed
+field minus propagated blocked field), avoiding an artificial finite open-window
+aperture. Exact-distance Rayleigh–Sommerfeld propagation retains curvature and
+obliquity instead of a paraxial expansion. Photon noise is applied afterward;
+the stop is not applied a second time.
+
+Set `beamstop_diffraction_shape` and `beamstop_diffraction_pixel_size` to cover
+the entire stop/wire and resolve propagation phase. Invalid coverage or sampling
+is rejected; compare results with finer pitch and a larger grid before analysis.
+This direct quadrature mode can be very expensive for X-ray geometries and
+large detectors. It is a reference option, not a speed optimization. It does not
+support flattened-detector curvature, projection-energy overrides, or additional
+no-beamstop outputs. Keep those options disabled when enabling diffraction.

@@ -24,6 +24,7 @@ class DomainComponent:
     touches_border: bool
     is_bubble: bool
     is_boundary_fragment: bool
+    visible_stripe_segments: int = 1
 
 
 def _component_perimeter(mask: NDArray[np.bool_]) -> float:
@@ -108,8 +109,8 @@ def classify_magnetic_domains(
 
     The input is binarized at ``threshold`` and connected components are
     segmented over the full simulation grid. ``analysis_mask`` (the OH) selects
-    which domains to count: any component with at least one visible pixel is
-    included once. Shape, area cutoff and order measurements use the full
+    which domains to count. Visible bubbles count once; stripe-like domains
+    contribute one count per connected piece inside the OH (open boundaries). Shape, area cutoff and order measurements use the full
     component, including pixels outside the OH. Both polarities contribute to
     the totals, including a connected majority background. Per-polarity and
     majority/minority counts are also returned. The minority polarity is
@@ -250,6 +251,9 @@ def classify_magnetic_domains(
                     touches_border=touches_border,
                     is_bubble=is_bubble,
                     is_boundary_fragment=boundary_fragment,
+                    visible_stripe_segments=(int(ndimage.label(
+                        component_mask & field_of_view, structure=structure)[1])
+                        if analysis_mask is not None and not is_bubble else 1),
                 )
             )
 
@@ -273,6 +277,7 @@ def classify_magnetic_domains(
         "components": [asdict(component) for component in components],
         "minority_components": [asdict(component) for component in minority_components],
 
+        "stripe_counting_geometry": "open_OH_segments" if analysis_mask is not None else "full_components",
         "periodic": periodic,
         "boundary_context_periodic": boundary_context_periodic,
         "is_uniform": positive_fraction in (0.0, 1.0),
@@ -287,7 +292,8 @@ def _state_descriptors(result, min_area, threshold, max_eccentricity, min_circul
         phase = [c for c in result["components"] if c["polarity"] == polarity]
         resolved = [c for c in phase if c["area"] >= min_area or result["is_uniform"]]
         result[f"{prefix}_bubble_count"] = sum(c["is_bubble"] for c in resolved)
-        result[f"{prefix}_stripe_count"] = sum(not c["is_bubble"] and not c["is_boundary_fragment"] for c in resolved)
+        result[f"{prefix}_stripe_count"] = sum(c["visible_stripe_segments"] for c in resolved
+            if not c["is_bubble"] and not c["is_boundary_fragment"])
         result[f"{prefix}_boundary_fragment_count"] = sum(c["is_boundary_fragment"] for c in resolved)
         result[f"{prefix}_noise_count"] = len(phase) - len(resolved)
     for kind in ("bubble", "stripe", "noise", "boundary_fragment"):
@@ -356,7 +362,7 @@ def write_domain_classification(group, pattern, **classification_options):
     chooses the group path; arrays and component tables are not duplicated.
     """
     result = classify_magnetic_domains(pattern, **classification_options)
-    group.attrs["method"] = "both_polarities_connected_components_v6"
+    group.attrs["method"] = "both_polarities_connected_components_v7"
     group.attrs["boundary_convention"] = "full simulation shapes; count OH intersections; " + ("periodic outer grid" if result["periodic"] else "open outer grid")
     for name, value in result.items():
         if name in {"binary_pattern", "minority_label_image", "positive_label_image", "negative_label_image", "components", "minority_components"}:

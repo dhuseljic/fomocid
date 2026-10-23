@@ -312,16 +312,23 @@ def test_saturated_sampler_generates_uniform_states_with_both_polarities():
 def test_sweep_sampler_keeps_weak_alignment_and_a_broad_order_range():
     rng = np.random.default_rng(123)
     samples = [sample_constrained_domain_parameters(rng) for _ in range(3000)]
-    alignment = np.array([sample['alignment'] for sample in samples])
+    lengths = np.array([sample['characteristic_length'] for sample in samples])
+    assert np.all((lengths >= 64e-9) & (lengths <= 1000e-9))
+    # Equal log intervals, including fine domains, receive equal draw probability.
+    assert .46 < np.mean(lengths < np.sqrt(64e-9 * 1000e-9)) < .54
+    smooth = [s for s in samples if s['disorder'] == 0.]
+    assert .46 < len(smooth) / len(samples) < .54
+    assert all(s['alignment'] == s['initial_order'] == 0. and
+               s['initial_state'] == 'random' and s['wall_stiffness'] == 2. and
+               s['n_steps'] == 400 and s['time_step'] == .2 for s in smooth)
+    diverse = [s for s in samples if s['disorder'] != 0.]
+    alignment = np.array([s['alignment'] for s in diverse])
     assert np.all((alignment >= 0) & (alignment < 24))
-    assert .46 < np.mean(alignment == 0) < .54
-    assert .20 < alignment.mean() < .30
-    assert .90 < np.mean(alignment < 1) < .96
-    assert all(0 <= sample['disorder'] <= .8 for sample in samples)
-    assert .09 < np.mean([sample['disorder'] < .1 for sample in samples]) < .16
-    assert all(0 <= sample['initial_order'] <= 1 for sample in samples)
-    assert .21 < np.mean([sample['initial_order'] > .75 for sample in samples]) < .29
-    assert .21 < np.mean([sample['initial_order'] < .25 for sample in samples]) < .29
+    assert .44 < np.mean(alignment == 0) < .56
+    assert .19 < alignment.mean() < .31
+    assert all(0 <= s['disorder'] <= .8 for s in diverse)
+    assert .20 < np.mean([s['initial_order'] > .75 for s in diverse]) < .30
+    assert .20 < np.mean([s['initial_order'] < .25 for s in diverse]) < .30
 
 
 def test_sweep_magnetization_mixture_has_free_gaussian_and_saturated_draws():
@@ -390,3 +397,65 @@ def test_compression_modes_roundtrip_identical_arrays_and_dtypes(tmp_path):
                 for name in names:
                     assert current[name].dtype == arrays[name].dtype
                     np.testing.assert_array_equal(current[name], arrays[name])
+
+
+@pytest.mark.parametrize('center,flat', [((31.2, 42.7), False), ((-2., 90.), False), ((31.2, 42.7), True)])
+def test_compatible_distance_uses_exact_detector_sampling(center, flat):
+    from scattering_calculator.simulation_pipelines.magnetic_parameters import compatible_detector_distance
+    from scattering_calculator.simulation_pipelines.simulation_configuration import DetectorConfig, XRayConfig
+    from scattering_calculator.utils.physics import photon_energy_wavelength
+    beam = XRayConfig(energy=780., photon_flux=1.)
+    beam.setup()
+    def resolution(distance):
+        detector = DetectorConfig(shape=(64, 80), pixel_size=13.5e-6,
+            detector_center=center, sample_to_detector_distance=distance,
+            ignore_flat_detector_curvature=flat)
+        detector.setup()
+        return detector.calc_realspace_resolution(beam.beam_params)
+    target = resolution(.1)/4
+    settings = dict(wavelength=photon_energy_wavelength(780.), detector_shape=(64, 80),
+        pixel_size=13.5e-6, center=center, target_pitch=target,
+        max_oversampling=4, ignore_curvature=flat)
+    for _ in range(10):
+        actual = compatible_detector_distance(.4, .05, **settings)
+        assert .05 <= actual <= .1*(1+1e-10)
+        assert resolution(actual)/4 <= target
+    assert compatible_detector_distance(.05, .05, **settings) == .05
+    assert compatible_detector_distance(.4, .2, **settings) is None
+
+
+def test_distance_adjustment_precedes_aperture_sampling_and_preserves_texture():
+    controls = dict(characteristic_length=160e-9, sigma=5e-9, seed=3,
+                    target_magnetization=.2, n_steps=20, max_length_iterations=1)
+    cfg = small_hologram_config(magnetic_pattern_distance_min=.005,
+                               magnetic_pattern_max_grid_axis=512)
+    seen = []
+    pipeline = HologramPipeline(config=cfg, ranges=HologramPipelineRanges(
+        detector_distance=lambda _: .4, pattern_config=lambda _: controls.copy(),
+        aperture_config=lambda p: seen.append(p['detector_distance']) or {}),
+        output_path='/tmp/unused-compatible-distance.h5', n_samples=1, verbose=False)
+    params = pipeline._sample_params()
+    assert .005 <= params['detector_distance'] < .4
+    assert params['detector_distance_original'] == .4
+    assert seen == [params['detector_distance']]
+    assert params['pattern_config'] == controls
+
+
+def test_conditional_distance_samples_full_feasible_interval(monkeypatch):
+    from scattering_calculator.simulation_pipelines.magnetic_parameters import compatible_detector_distance
+    intervals = []
+    def midpoint(low, high):
+        intervals.append((low, high))
+        return (low+high)/2
+    monkeypatch.setattr(np.random, 'uniform', midpoint)
+    settings = dict(wavelength=1.6e-9, detector_shape=(256, 256), pixel_size=20e-6,
+                    center=(128, 128), max_oversampling=16, sample_feasible=True)
+    # With broad domains, use the entire requested interval even though 40 cm fits.
+    distance = compatible_detector_distance(.4, .04, target_pitch=1e-6, **settings)
+    assert intervals[-1] == (.04, .4)
+    assert distance == pytest.approx(.22)
+    # Narrow walls shrink the upper bound without altering their requested pitch.
+    fine = compatible_detector_distance(.4, .04, target_pitch=2e-9, **settings)
+    assert intervals[-1][0] == .04
+    assert .04 < intervals[-1][1] < .4
+    assert .04 < fine < distance

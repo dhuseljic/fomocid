@@ -188,7 +188,7 @@ balanced measured states.
 
 | Control | Sweep distribution | Meaning / constraint |
 |---|---|---|
-| `characteristic_length` | uniform 120–1000 nm | Full repeat/spacing; not a domain diameter. |
+| `characteristic_length` | log-uniform 64–1000 nm | Full repeat/spacing; not a domain diameter. |
 | `target_magnetization` | Sweep: 48% None, 48% truncated Gaussian (mean 0, FWHM 0.5, bounds ±0.9), 4% ±1 | Free evolution when null. Numeric targets fix rounded sign area; ±1 generates saturation. |
 | `alignment` | 50% zero; otherwise truncated exponential on [0,24], scale 0.5 | Nonnegative directional penalty; larger values favor stripe alignment. |
 | `direction` | uniform 0–π radians | Stripe axis from +x toward +y. |
@@ -207,6 +207,16 @@ balanced measured states.
 | `max_length_iterations` | fixed 1 | One generated realization; no measured-spacing feedback. |
 | `sigma` | 0.025–0.06 × characteristic length | Gaussian domain-wall blur standard deviation, not FWHM or wall stiffness. |
 | `seed` | integer draw | Reproducible field, preparation and disorder realization. |
+
+Half of production draws use a smooth, isotropic preparation matching the
+Notebook 22 length gallery: `initial_state="random"`, `initial_order=0`,
+`alignment=0`, `disorder=0`, `wall_stiffness=2`, `n_steps=400`, `time_step=0.2`.
+The other half use the diverse preparation distributions in the table above.
+The target-magnetization mixture and sampled physical length apply to both.
+These are preparation probabilities, not guaranteed final morphology fractions.
+Log-uniform spacing gives equal probability to equal size ratios and includes
+finer stripes; near zero magnetization their width is approximately half a repeat.
+There is no post-generation resizing that cancels this physical size distribution.
 
 Defaults for a fixed generator call remain in the generator's Python signature.
 A bare hologram pipeline supplies `characteristic_length=160e-9` and `sigma=5e-9`
@@ -290,14 +300,15 @@ reproducibility. Use the measured state and achieved spacing from the new box.
 ### Measured magnetic state
 
 Classification uses both positive and negative connected domains, counting a
-component **once if any pixel intersects the OH**. All shape measurements use
+visible bubbles once and each connected stripe-like piece inside the OH separately. All shape measurements use
 its full available simulation/generation extent outside the OH. Components
 entirely outside the OH are excluded. The majority background counts too.
 
 Production constrained-domain simulations use `periodic=True`: connected
 components crossing opposite edges of the **generation grid** are joined,
-unwrapped and classified as complete domains. A domain with visible pixels on
-both sides still counts once. Its full periodic area determines the size cutoff;
+unwrapped and classified as complete domains. Bubble components count once even if their OH intersection is disconnected.
+Stripe-like components are intersected with the OH and relabeled with open
+boundaries: each disconnected visible piece counts separately. Its full periodic area determines the size cutoff;
 any nonzero OH intersection makes it visible. Entirely hidden domains do not
 contribute to counts or orientational order. Both polarities are included.
 
@@ -326,7 +337,7 @@ actual hologram specimen selection.
 
 Resolved, closed components passing the eccentricity and circularity criteria
 are bubbles; all other resolved components are stripe-like. A connected
-labyrinth counts as one component, not as a count of its branches. Counts depend
+labyrinth counts once per connected OH intersection, not once per branch. Counts depend
 on field of view, resolution and thresholds.
 
 For total bubbles B and stripe-like domains S:
@@ -513,3 +524,32 @@ wall widths and other physical controls are unchanged. These are input statistic
 not guarantees of measured disorder after relaxation. Grid-limit rejection can
 change their distribution among saved experiments. The GUI retains its explicit
 single-experiment controls; these distributions apply to the dataset samplers.
+
+### Compatible distances for fine magnetic patterns
+
+Both examples enable `magnetic_pattern_distance_min=0.04` (metres) and use
+`ranges.detector_distance=0.40` as the upper bound. First draw the physical
+magnetic spacing, wall width and other magnetic controls. Then sample distance
+**uniformly from 4 cm to the smaller of 40 cm and the compatible upper limit**.
+This directly samples the feasible interval, rather than first drawing an
+independent distance and adjusting only failures. Magnetic controls stay intact.
+
+Compatibility uses the actual discrete detector q-span, energy, pixel size,
+detector center, integer oversampling budget and all constraints in
+`constrained_sampling_pitch` (spacing, wall sigma and minority-width estimate).
+Sampling runs before aperture/beamstop callbacks, which see the final distance.
+A tree chooses it once per parent and shares it across every downstream branch.
+The allocation limit still applies: a draw unresolved even at 4 cm is rejected
+and the existing whole-parent retry/skip policy continues. This can leave residual
+selection bias; grids are never silently coarsened.
+
+Final distance and magnetic resolution are correlated. The final distance is
+`metadata/detector/sample_to_detector_distance`. Under `metadata/detector/`,
+`distance_sampling_upper_m` records the input upper bound (40 cm in the examples),
+`compatible_distance_min_m` records the lower bound, and
+`distance_adjusted_for_magnetic_grid` compares the final distance with that
+input upper bound. The legacy `sampled_distance_m` field also records the input
+upper bound; it is not a separate initial random draw in this mode.
+Set `magnetic_pattern_distance_min=None` to disable conditional sampling and
+interpret detector_distance as the actual distance; manual GUI experiments use
+that default.
