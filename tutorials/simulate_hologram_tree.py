@@ -39,6 +39,7 @@ def main():
         hdf5_compression=None if args.compression == 'none' else args.compression, detector_shape=(256, 256),
         detector_distance=.04, xray_energy=778., xray_photon_flux=1e8,
         propagator_method='Scalar', beamstop_method=None, random_seed=args.seed,
+        beamstop_diffraction=False,  # optional physical-plane stop diffraction
         save_detected_hologram_without_beamstop=False,  # optional extra acquisition disabled
         aperture_radii=[300e-9, 30e-9, 30e-9],
         aperture_centers=[(0., 0.), (1e-6, 0.), (0., 1e-6)],

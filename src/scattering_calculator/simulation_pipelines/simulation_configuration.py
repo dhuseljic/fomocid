@@ -214,7 +214,7 @@ class BeamstopConfig(_ConfigMixin):
     bs_method : {"circular"} or None
         Shape of the beamstop. ``None`` creates an empty (transparent) beamstop.
     bs_detector_distance : float
-        Distance from sample to beamstop plane in metres.
+        Distance from beamstop plane to camera in metres (sample-to-stop = sample-to-camera minus this gap).
     bs_center : tuple of int
         Beamstop centre position in pixels (row, col).
     bs_config : dict
@@ -444,6 +444,9 @@ class DetectorConfig(_ConfigMixin):
     projection_energy: float | None = None  # eV; coordinate convention only, None follows source
     analyzer_angle: float | None = None  # rad, +x towards +y; None disables it
     save_detected_hologram_without_beamstop: bool = False
+    beamstop_diffraction: bool = False
+    beamstop_diffraction_shape: tuple[int, int] = (128, 128)
+    beamstop_diffraction_pixel_size: float | None = None
 
     def __post_init__(self) -> None:
         """Handle the internal post init operation.
@@ -540,7 +543,7 @@ class DetectorConfig(_ConfigMixin):
         """
         self.propagator = samplepropagationconfig
         self.wavefront = self.propagator.return_wavefront()
-        if self.detector_propagation_method == "rayleigh_sommerfeld":
+        if self.beamstop_diffraction or self.detector_propagation_method == "rayleigh_sommerfeld":
             self.exit_wavefield_intensity = np.sum(np.abs(self._detector_exit_field()) ** 2)
             return
         exit_wavefield = self.propagator.return_scalar_wavefield()
@@ -607,7 +610,9 @@ class DetectorConfig(_ConfigMixin):
         # Gain uses physical energy, independently of a detector-coordinate override.
         self.hologram_exp.photon_energy_eV = getattr(
             self.propagator.IlluminationConfig.beam_params, "energy", None)
-        if self.detector_propagation_method == "rayleigh_sommerfeld":
+        if self.beamstop_diffraction:
+            self._detect_beamstop_diffraction(self.propagator.IlluminationConfig.beam_params)
+        elif self.detector_propagation_method == "rayleigh_sommerfeld":
             self._detect_rayleigh_sommerfeld(self.propagator.IlluminationConfig.beam_params)
         else:
             self.hologram_exp.gnomonic_projection(
@@ -695,6 +700,43 @@ class DetectorConfig(_ConfigMixin):
         )
         self.hologram_intensity = np.sum(self.hologram_exp.hologram_detector)
 
+    def _detect_beamstop_diffraction(self, beam_params):
+        """Compute physical-plane stop diffraction before photon acquisition."""
+        from scattering_calculator.beam_propagator.beamstop_diffraction import stop_plane_mask, propagate_with_stop
+        if self.ignore_flat_detector_curvature or self.projection_energy is not None:
+            raise ValueError('Beamstop diffraction requires physical detector geometry and source energy')
+        if self.beamstop_config is None:
+            raise ValueError('Beamstop diffraction requires beamstop_config with a physical gap')
+        opacity, pitch, sx, sy, z, gap = stop_plane_mask(self, beam_params.wavelength)
+        if self.propagator.propagator_method == 'Stokes':
+            fields = [mode.exit_wave for mode in self.wavefront._coherent_modes]
+        else:
+            fields = [self.wavefront.exit_wave]
+        n = max(1, int(self.detector_pixel_footprint_samples)) if self.use_detector_pixel_footprint else 1
+        offsets = ((np.arange(n)+.5)/n-.5)*self.pixel_size
+        intensity = np.zeros(self.shape)
+        for field in fields:
+            if self.analyzer_angle is not None:
+                from .experiment import analyze_jones
+                if field.ndim == 2:
+                    field = field[..., None]*light_beam.polarization_vector(beam_params.pol)
+                field = analyze_jones(field, self.analyzer_angle)
+            for oy in offsets:
+                for ox in offsets:
+                    wave = propagate_with_stop(field,
+                        self.propagator.SampleConfig.real_space_pixel_size, beam_params.wavelength,
+                        self.sample_to_detector_distance, self.detector_layout.detx+ox,
+                        self.detector_layout.dety+oy, opacity, pitch, sx, sy, z, gap)
+                    power = np.abs(wave)**2
+                    if power.ndim > 2:
+                        power = power.sum(axis=tuple(range(2, power.ndim)))
+                    intensity += power
+        self.hologram_exp.hologram_detector = intensity/n**2*(
+            self.pixel_size/self.propagator.SampleConfig.real_space_pixel_size)**2
+        # The beamstop already acts on the field. Never attenuate photons twice.
+        self.hologram_exp.beamstop = None
+        self.hologram_intensity = float(self.hologram_exp.hologram_detector.sum())
+
     def return_ideal_hologram(self) -> np.ndarray:
         """Return the ideal (noise-free, artifact-free) hologram as a 2-D array.
 
@@ -734,6 +776,8 @@ class DetectorConfig(_ConfigMixin):
         result : np.ndarray
             Return value produced by the function.
         """
+        if self.beamstop_diffraction and (store_no_beamstop or not apply_beamstop_mask):
+            raise ValueError('Physical beamstop diffraction cannot be undone at acquisition; disable the extra no-beamstop output')
         self.hologram_exp.add_noise(
             apply_beamstop_mask=apply_beamstop_mask,
             apply_detector_threshold=apply_detector_threshold,

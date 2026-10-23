@@ -75,6 +75,7 @@ propagation_padding_mode = "edge"  # "edge", "reflect", "symmetric", or "constan
 propagation_absorber_width_px = 64  # 0 disables edge absorption
 propagation_absorber_strength = 6.0  # larger values damp padded-edge wraparound more
 propagation_absorber_profile = "cosine"  # "cosine", "smoothstep", "quadratic", or "linear"
+beamstop_diffraction = False  # optional physical-plane diffraction; default unchanged
 save_detected_hologram_without_beamstop = False # set True to save an extra detected hologram without the beamstop shadow (for supervised learning or beamstop ablation studies)
 use_detector_pixel_footprint = True  # True = average the ideal hologram over each finite detector pixel
 
@@ -329,7 +330,8 @@ config = ExperimentConfig(
                  use_detector_pixel_footprint=use_detector_pixel_footprint,
                  detector_pixel_footprint_samples=detector_pixel_footprint_samples,
                  ignore_flat_detector_curvature=ignore_flat_detector_curvature if detector_propagation_method == 'fraunhofer' else False,
-                 save_detected_hologram_without_beamstop=save_detected_hologram_without_beamstop),
+                 save_detected_hologram_without_beamstop=save_detected_hologram_without_beamstop,
+                 beamstop_diffraction=beamstop_diffraction),
              beamstop=BeamstopConfig(bs_method=beamstop_method,bs_detector_distance=beamstop_distance,bs_config=beamstop_config),
              energies_eV=(x_ray_energy,),
          )

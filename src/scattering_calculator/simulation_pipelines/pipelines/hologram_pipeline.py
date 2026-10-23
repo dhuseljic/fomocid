@@ -396,6 +396,9 @@ class HologramPipelineConfig:
     beamstop_distance: float = 0.001  # m
     beamstop_config: dict = field(default_factory=dict)
     save_detected_hologram_without_beamstop: bool = False
+    beamstop_diffraction: bool = False
+    beamstop_diffraction_shape: tuple[int, int] = (128, 128)
+    beamstop_diffraction_pixel_size: float | None = None
 
     # FTH holography mask
     aperture_method: str | None = "FTH_circular"
@@ -1595,6 +1598,9 @@ class HologramPipeline:
             detector_pixel_footprint_samples=p["detector_pixel_footprint_samples"],
             ignore_flat_detector_curvature=p["ignore_flat_detector_curvature"],
             detector_propagation_method=p["detector_propagation_method"],
+            beamstop_diffraction=cfg.beamstop_diffraction,
+            beamstop_diffraction_shape=cfg.beamstop_diffraction_shape,
+            beamstop_diffraction_pixel_size=cfg.beamstop_diffraction_pixel_size,
             beamstop_config=beamstop_config,
         )
         detector_config.setup()
