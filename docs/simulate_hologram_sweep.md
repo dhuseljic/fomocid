@@ -1224,7 +1224,11 @@ Both examples draw a new recipe once per independent experiment or tree parent:
 [Au(t_Au)Cr(t_Cr)]xN/SiN(t_SiN)/Co(t_Co)X(t_X)Y(t_Y)
 ```
 
-All thicknesses inside recipe strings are **nanometres**. The shared
+All thicknesses inside recipe strings are **nanometres**, formatted to one
+decimal place (for example `24.9`). Cr is quantized to 0.1 nm and Au is four
+times that value, preserving the 4:1 ratio and 700–3000 nm stack bounds. Other
+thicknesses are rounded to 0.1 nm. The distributions below describe the
+continuous draws before this quantization. The shared
 `sample_multilayer_recipe(rng)` sampler uses:
 
 | Parameter | Sampling |
@@ -1258,10 +1262,10 @@ pass `--fixed-recipe` to use `config.recipe` for every parent (or set
 The sampler uses the example's seeded NumPy generator for reproducibility.
 
 The shared sampler draws `alignment` from a continuous exponential distribution
-with scale 6, conditioned on the interval [0,24]. Its density is proportional
-to `exp(-4 * alignment/24)`, falling to about 1.83% of its zero-value
-density at alignment 24. Approximately 50% of draws are below 4, 75% below 8,
-and 88% below 12. About 15.64% are below 1. The median is about 4.05. This
+with scale 24/7, conditioned on the interval [0,24]. Its density is proportional
+to `exp(-7 * alignment/24)`, falling to about 0.091% of its zero-value
+density at alignment 24. Approximately 69% of draws are below 4, 90% below 8,
+and 97% below 12. About 25.32% are below 1. The median is about 2.37. This
 favors lower values while retaining a tail of stronger alignment. Sampling uses the inverse CDF,
 not clipping, so there is no artificial probability mass at 24 or exactly zero.
 Set a fixed `alignment=0` explicitly when an exactly isotropic penalty is needed.

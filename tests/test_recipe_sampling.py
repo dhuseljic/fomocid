@@ -16,6 +16,8 @@ def test_sampled_recipe_constraints_and_repeat_expansion():
     counts, pairs = set(), set()
     for _ in range(300):
         recipe = sample_multilayer_recipe(rng)
+        assert all(re.fullmatch(r'\d+\.\d', value)
+                   for value in re.findall(r'\(([^)]+)\)', recipe))
         n = int(re.search(r'\]x(\d+)', recipe)[1])
         counts.add(n)
         layers = parse_recipe(recipe).layers
@@ -30,7 +32,7 @@ def test_sampled_recipe_constraints_and_repeat_expansion():
         magnetic = layers[-1]
         assert magnetic.is_composite and len(magnetic.components) == 3
         assert magnetic.components[0][0] == 'Co'
-        assert all(2 <= thickness*1e9 <= 30 for _, thickness in magnetic.components)
+        assert all(2 - 1e-10 <= thickness*1e9 <= 30 + 1e-10 for _, thickness in magnetic.components)
         first, second = magnetic.components[1][0], magnetic.components[2][0]
         assert first != second
         assert {first, second} <= {'Pt', 'Al', 'Ta', 'Ir', 'Cu'}

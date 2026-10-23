@@ -106,7 +106,7 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
     explicit numeric target_magnetization fixes the target across samples.
     Otherwise saturation_probability (default 0.1) selects exact +/-1 states
     with equal polarity probabilities, including in free-magnetization mode.
-    Alignment follows an exponential with scale 6, conditioned on [0,24];
+    Alignment follows an exponential with scale 24/7, conditioned on [0,24];
     there is no point mass at exactly zero or at the upper bound.
     Generate one relaxed realization, then measure it; spacing calibration is
     disabled. Pass a NumPy Generator to make the sweep reproducible.
@@ -126,7 +126,7 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
             raise ValueError("target_magnetization must be None or finite in [-1,1]")
     return dict(
         characteristic_length=length, target_magnetization=magnetization,
-        alignment=float(-6. * np.log1p(-rng.random() * (-np.expm1(-4.)))),
+        alignment=float(-(24. / 7.) * np.log1p(-rng.random() * (-np.expm1(-7.)))),
         direction=float(rng.uniform(0., np.pi)),
         disorder=float(rng.uniform(0., .8)),
         disorder_length=float(rng.uniform(0., .15) * length),
