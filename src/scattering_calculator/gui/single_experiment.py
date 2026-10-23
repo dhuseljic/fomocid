@@ -79,7 +79,7 @@ class SaturatingResponse:
 def simulate_to_file(config, output_path):
     """Run exactly the selected experiment without resampling or coarsening."""
     HologramPipeline(config=config, ranges=HologramPipelineRanges(),
-        output_path=output_path, n_samples=1, verbose=True, max_sampling_attempts=1).run()
+        output_path=output_path, n_samples=1, verbose=True, max_sampling_attempts=1, detailed_logging=True).run()
     with h5py.File(output_path, 'a') as h5:
         if '00000' not in h5:
             raise ValueError('The selected grid exceeds the allocation limit. Choose a shorter '

@@ -171,7 +171,7 @@ class HierarchicalHologramPipeline(HologramPipeline):
                 leaf_metadata['hierarchy/acquisition_variant_json'] = json.dumps(acquisition, default=str)
                 leaf_metadata['hierarchy/reused_exit_wave'] = geometry_index > 0 or acquisition_index > 0
                 leaf_metadata['hierarchy/reused_ideal_hologram'] = acquisition_index > 0
-                if self.verbose:
+                if self.verbose and self.detailed_logging:
                     print(f'    leaf {self._leaf_index:05d}: pattern={parent}, exit={exit_index}, '
                           f'geometry={geometry_index}, acquisition={acquisition_index}', flush=True)
                 super()._process_prepared(h5, self._leaf_index, p, leaf_metadata,

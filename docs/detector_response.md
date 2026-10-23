@@ -199,7 +199,7 @@ spectra are summed before a single inverse FFT. This avoids storing a full
 image for every variant and preserves the spatial classes, event statistics,
 and convolution edge cropping.
 
-With verbose pipeline output, each polarization prints detector-noise timings
+With `verbose=True, detailed_logging=True`, each polarization prints detector-noise timings
 for expected-photon calculation, photon sampling, charge spreading, nonlinear
 response, readout draws, finalization, and total acquisition. These measurements
 are also saved under

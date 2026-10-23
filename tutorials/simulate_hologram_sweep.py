@@ -30,11 +30,12 @@ from scattering_calculator.simulation_pipelines.pipelines import (
 )
 from scattering_calculator.sample_generator import structures
 from scattering_calculator.simulation_pipelines.magnetic_parameters import (
-    sample_constrained_domain_parameters, constrained_sampling_pitch,
+    sample_sweep_domain_parameters, constrained_sampling_pitch,
 )
 
 
 # Number of simulations to run.
+experiment_timeout_seconds = 100.0  # abort slow experiments and continue
 nr_simulations = 30  # increase to e.g. 1000 for a full training dataset
 
 # --- Material stack ---
@@ -171,10 +172,10 @@ beamstop_config = {
 # 03: MAGNETIC PHASE-SPACE PREPARATION
 ######################################
 # --- Magnetic domain pattern ---
-# None lets the mean evolve freely. Set a number for a fixed area target.
-# Alternatively set constrain_magnetization=True to sample different numeric targets.
-saturation_probability = 0.1  # fraction of independent magnetic parents
-constrain_magnetization = False
+# True + None samples targets uniformly in [-0.85, 0.85].
+# False + None allows free evolution; a numeric target fixes ordinary runs.
+saturation_interval = 20  # every twentieth requested experiment is saturated
+constrain_magnetization = True
 target_magnetization = None
 pattern_type = "constrained_domain_pattern"
 pattern_config = dict(
@@ -344,9 +345,9 @@ config = ExperimentConfig(
 
 def random_pattern_config(params):
     """Explore constrained-domain controls; measured morphology is an output."""
-    return sample_constrained_domain_parameters(domain_rng,
+    return sample_sweep_domain_parameters(domain_rng, params["experiment_index"],
         constrain_magnetization=constrain_magnetization, target_magnetization=target_magnetization,
-        saturation_probability=saturation_probability)
+        saturation_interval=saturation_interval)
 
 
 def random_aperture_config(params):
@@ -698,7 +699,9 @@ pipeline = HologramPipeline(
     ranges=ranges,
     output_path=output_path,
     n_samples=nr_simulations,
+    experiment_timeout_seconds=experiment_timeout_seconds,
     verbose=True,
+    detailed_logging=False,  # True restores stage and generator timing details
 )
 
 pipeline.run()
@@ -725,7 +728,11 @@ PLOT_FIGSIZE_APERTURE = (11, 6.5)
 PLOT_FIGSIZE_RECONSTRUCTION = (9, 7)
 
 with h5py.File(output_path, "r") as h5:
-    grp = h5["00000"]
+    sample_ids = sorted(key for key in h5 if key.isdigit())
+    if not sample_ids:
+        raise SystemExit("No experiments completed; there are no results to plot.")
+    displayed_sample_id = sample_ids[0]
+    grp = h5[displayed_sample_id]
     if False:
         print(f"File contains {nr_simulations} simulations.")
         print(f"Top-level keys: {list(h5.keys())}\n")
@@ -903,7 +910,7 @@ rows_spec = [
 ]
 
 fig1, axes1 = plt.subplots(4, 3, figsize=PLOT_FIGSIZE_MAIN, constrained_layout=True)
-fig1.suptitle("Simulation 00000 — CR, CL, CR−CL difference", fontsize=13)
+fig1.suptitle(f"Simulation {displayed_sample_id} — CR, CL, CR−CL difference", fontsize=13)
 
 for row_idx, (cr_d, cl_d, cmap, label, cbar_label) in enumerate(rows_spec):
     diff = cr_d - cl_d
@@ -1026,7 +1033,7 @@ fig3, axes3 = plt.subplots(
     constrained_layout=True,
 )
 fig3.suptitle(
-    "FTH reconstruction — ideal CR−CL difference (simulation 00000)", fontsize=12
+    f"FTH reconstruction — ideal CR−CL difference (simulation {displayed_sample_id})", fontsize=12
 )
 
 for ax, (data, title, cmap, vmin, vmax, cbar_label) in zip(axes3.flat, rec_panels):

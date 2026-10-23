@@ -189,13 +189,13 @@ balanced measured states.
 | Control | Sweep distribution | Meaning / constraint |
 |---|---|---|
 | `characteristic_length` | uniform 120–1000 nm | Full repeat/spacing; not a domain diameter. |
-| `target_magnetization` | `None` by default; optional numeric fixed target or sampled uniform −0.95–0.95 with 10% replaced by ±1 | Free evolution when null. Numeric targets fix rounded sign area; ±1 generates saturation. |
-| `alignment` | truncated exponential on [0,24], scale 2 | Nonnegative directional penalty; larger values favor stripe alignment. |
+| `target_magnetization` | Sweep: uniform −0.85–0.85, every 20th requested parent ±1; low-level generator accepts `None` | Free evolution when null. Numeric targets fix rounded sign area; ±1 generates saturation. |
+| `alignment` | 50% zero; otherwise truncated exponential on [0,24], scale 0.5 | Nonnegative directional penalty; larger values favor stripe alignment. |
 | `direction` | uniform 0–π radians | Stripe axis from +x toward +y. |
-| `disorder` | uniform 0–0.8 | Quenched random-field strength, not detector noise. |
+| `disorder` | uniform 0.3–1.2 | Quenched random-field strength, not detector noise. |
 | `disorder_length` | 0–0.15 × characteristic length | Gaussian disorder correlation sigma; zero permits uncorrelated disorder. |
 | `initial_state` | random, stripes, hexagonal, worms | Initial preparation; does not fix final topology. |
-| `initial_order` | uniform 0–1 | Blend of ordered preparation with random initialization. |
+| `initial_order` | uniform 0–0.35 | Blend of ordered preparation with random initialization. |
 | `initial_domain_count` | integers 1–3 | Worm seed count; only used for worm preparation. |
 | `worm_length` | 1–4 × characteristic length | Initial worm centerline length, not relaxed length. |
 | `worm_waviness` | 0–0.3 × characteristic length | Initial worm bending amplitude. |
@@ -417,7 +417,7 @@ records described above.
 
 ### Timing and live generation progress
 
-With `HologramPipeline(verbose=True)` (the sweep default), the terminal reports
+With `HologramPipeline(verbose=True, detailed_logging=True)`, the terminal reports
 magnetic details **while a specimen is being generated**, rather than only at
 the end of optical propagation:
 
@@ -478,25 +478,35 @@ but are not saved in HDF5. Saved state diagnostics and the wall-smoothed optical
 
 ### Occasional saturated parents
 
-Both sweep scripts expose `saturation_probability=0.1`. For each independent
-magnetic parent, the shared sampler selects an exactly uniform state with 10%
-probability, choosing `target_magnetization=-1` or `+1` with equal probability.
-Other parents follow the selected free or constrained magnetization mode. An
-explicit numeric `target_magnetization` takes precedence over this sampling.
-Set the probability to zero to disable it or one to generate only saturation.
-This is random sampling, so a short sweep can contain no saturated parents.
-In the hierarchical sweep, the draw happens once per magnetic parent; its
-energy, mask, geometry and acquisition branches all inherit that same state.
-The saved generation parameters record the realized target; the measured
-classification is `saturated` with `bubble_count=0`, `stripe_count=1`.
+Both sweep scripts use the shared scheduled sampler: ordinary requested parents
+receive `target_magnetization` uniformly from **−0.85 to +0.85**. Every **20th**
+parent (20, 40, 60, …) instead receives exactly −1 or +1 with equal polarity
+probability, producing a simple uniform saturated state (`B=0`, `S=1`).
+`saturation_interval=20` controls the schedule. Grid retries retain the same
+parent index and do not consume schedule slots. Tree branches inherit the
+parent's target and do not increment the schedule. The schedule counts requested
+parents, not successful saved groups; a skipped/timed-out parent can therefore
+remove its scheduled saturated state from the output.
 
-The shared sampler draws `alignment` from a continuous exponential distribution
-with scale 2, conditioned on the interval [0,24]. Its density is proportional
-to `exp(-12 * alignment/24)`, falling to about 0.000614% of its zero-value
-density at alignment 24. Approximately 86% of draws are below 4, 98% below 8,
-and 99.75% below 12. About 39.35% are below 1. The median is about 1.39. This
-favors lower values while retaining a tail of stronger alignment. Sampling uses the inverse CDF,
-not clipping, so there is no artificial probability mass at 24 or exactly zero.
-Set a fixed `alignment=0` explicitly when an exactly isotropic penalty is needed.
-These are input statistics; measured order can differ after relaxation and
-accepted-draw statistics can differ after grid-limit rejection.
+The independent sweep uses `constrain_magnetization=True` and
+`target_magnetization=None` to select uniform ordinary targets. Set the former
+to False for free ordinary runs or supply a numeric target for fixed ordinary
+runs; scheduled saturation still takes precedence. The lower-level generator
+and single-experiment GUI continue to support `None` for free evolution.
+Realized targets and measured magnetization remain in the usual HDF5 metadata.
+
+
+
+The shared sweep sampler favors disordered magnetic patterns:
+
+- Half of alignment draws are exactly **zero**, removing the preferred-axis penalty.
+- The other half use an exponential of scale **0.5**, truncated to [0,24].
+  Overall mean alignment is about 0.25; approximately 93% of draws are below 1.
+- Quenched spatial `disorder` is uniform from **0.3 to 1.2**.
+- `initial_order` is uniform from **0 to 0.35**, weakening ordered starting patterns.
+
+Directions remain uniform in [0,π). Saturation scheduling, target magnetization,
+wall widths and other physical controls are unchanged. These are input statistics,
+not guarantees of measured disorder after relaxation. Grid-limit rejection can
+change their distribution among saved experiments. The GUI retains its explicit
+single-experiment controls; these distributions apply to the dataset samplers.

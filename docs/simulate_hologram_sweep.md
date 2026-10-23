@@ -76,7 +76,9 @@ For each sample, the pipeline:
    a compact/dense `(Nz, Ny, Nx)` complex refractive-index stack.
 7. Creates ideal holograms, applies detector effects/noise, and saves everything to HDF5.
 
-Timing for each stage is printed when `verbose=True`. Magnetic generation
+By default, `verbose=True` prints experiment progress, a compact list of major-stage timings, the total
+experiment time, skip/rejection notices, and the final summary. Set `detailed_logging=True` to
+print per-stage timings. Magnetic generation
 additionally prints the grid/pitch and live step progress, followed by a detailed
 relaxation and wall-processing breakdown. All timings are also saved; see the
 [timing reference](constrained_magnetic_domains.md#timing-and-live-generation-progress). `front aperture` reports
@@ -396,10 +398,11 @@ calibration controls, wall sigma and seed through
 
 There are no requested saturated/stripe/bubble handles, phase-space lookup cache
 or balanced morphology quotas. Saturation arises at `target_magnetization=±1`;
-all other state labels come from measured connected-domain topology. By default,
-`target_magnetization=None` lets the net magnetization evolve freely. Set the
-script's `target_magnetization` to a number to constrain it, or set
-`constrain_magnetization=True` with a null target to sample numeric area targets.
+all other state labels come from measured connected-domain topology. The script
+now defaults to uniform numeric targets from −0.85 to +0.85, with scheduled
+saturation every 20th requested parent. Set `constrain_magnetization=False`
+and `target_magnetization=None` for free ordinary runs, or supply a fixed
+numeric target.
 Measured full-box and OH means are saved in every mode. The sweep
 runs one relaxed realization (`max_length_iterations=1`) and measures achieved
 spacing and order afterward. It does not repeatedly regenerate patterns to hit
@@ -1183,17 +1186,24 @@ but are not saved in HDF5. Saved state diagnostics and the wall-smoothed optical
 
 ### Occasional saturated parents
 
-Both sweep scripts expose `saturation_probability=0.1`. For each independent
-magnetic parent, the shared sampler selects an exactly uniform state with 10%
-probability, choosing `target_magnetization=-1` or `+1` with equal probability.
-Other parents follow the selected free or constrained magnetization mode. An
-explicit numeric `target_magnetization` takes precedence over this sampling.
-Set the probability to zero to disable it or one to generate only saturation.
-This is random sampling, so a short sweep can contain no saturated parents.
-In the hierarchical sweep, the draw happens once per magnetic parent; its
-energy, mask, geometry and acquisition branches all inherit that same state.
-The saved generation parameters record the realized target; the measured
-classification is `saturated` with `bubble_count=0`, `stripe_count=1`.
+Both sweep scripts use the shared scheduled sampler: ordinary requested parents
+receive `target_magnetization` uniformly from **−0.85 to +0.85**. Every **20th**
+parent (20, 40, 60, …) instead receives exactly −1 or +1 with equal polarity
+probability, producing a simple uniform saturated state (`B=0`, `S=1`).
+`saturation_interval=20` controls the schedule. Grid retries retain the same
+parent index and do not consume schedule slots. Tree branches inherit the
+parent's target and do not increment the schedule. The schedule counts requested
+parents, not successful saved groups; a skipped/timed-out parent can therefore
+remove its scheduled saturated state from the output.
+
+The independent sweep uses `constrain_magnetization=True` and
+`target_magnetization=None` to select uniform ordinary targets. Set the former
+to False for free ordinary runs or supply a numeric target for fixed ordinary
+runs; scheduled saturation still takes precedence. The lower-level generator
+and single-experiment GUI continue to support `None` for free evolution.
+Realized targets and measured magnetization remain in the usual HDF5 metadata.
+
+
 
 ### Rejecting oversized parameter draws
 
@@ -1261,16 +1271,46 @@ pass `--fixed-recipe` to use `config.recipe` for every parent (or set
 `randomize_recipe=False` in the script). Random recipes remain enabled by default.
 The sampler uses the example's seeded NumPy generator for reproducibility.
 
-The shared sampler draws `alignment` from a continuous exponential distribution
-with scale 2, conditioned on the interval [0,24]. Its density is proportional
-to `exp(-12 * alignment/24)`, falling to about 0.000614% of its zero-value
-density at alignment 24. Approximately 86% of draws are below 4, 98% below 8,
-and 99.75% below 12. About 39.35% are below 1. The median is about 1.39. This
-favors lower values while retaining a tail of stronger alignment. Sampling uses the inverse CDF,
-not clipping, so there is no artificial probability mass at 24 or exactly zero.
-Set a fixed `alignment=0` explicitly when an exactly isotropic penalty is needed.
-These are input statistics; measured order can differ after relaxation and
-accepted-draw statistics can differ after grid-limit rejection.
+The shared sweep sampler favors disordered magnetic patterns:
+
+- Half of alignment draws are exactly **zero**, removing the preferred-axis penalty.
+- The other half use an exponential of scale **0.5**, truncated to [0,24].
+  Overall mean alignment is about 0.25; approximately 93% of draws are below 1.
+- Quenched spatial `disorder` is uniform from **0.3 to 1.2**.
+- `initial_order` is uniform from **0 to 0.35**, weakening ordered starting patterns.
+
+Directions remain uniform in [0,π). Saturation scheduling, target magnetization,
+wall widths and other physical controls are unchanged. These are input statistics,
+not guarantees of measured disorder after relaxation. Grid-limit rejection can
+change their distribution among saved experiments. The GUI retains its explicit
+single-experiment controls; these distributions apply to the dataset samplers.
+
 
 For interactive configuration and plotting of one experiment at a time, use the
 [desktop simulator](single_experiment_gui.md).
+
+### Experiment timeout
+
+The example sets `experiment_timeout_seconds=100.0` next to the simulation count.
+Each experiment runs in an isolated process with a temporary output file. If it
+exceeds 100 seconds, the child is stopped, all its temporary data is deleted,
+and the sweep moves to the next experiment. Completed experiments remain intact.
+No partial group or per-experiment timeout record is saved. Only successful
+results are copied into the main HDF5 file. The existing summary counts reflect
+how many experiments completed or were skipped. Numeric experiment IDs can have
+gaps; the example plots the first completed group and exits cleanly if none
+completed.
+
+The deadline covers computation and temporary output, including all grid-retry
+attempts for that experiment. Copying a completed temporary result into the
+main dataset is outside that deadline. The constructor accepts another positive
+limit, or `None` to disable isolation/timeouts. This timeout implementation
+requires Unix `fork` support and works with the example's callable samplers;
+parameter draws happen in the parent process so random generators advance even
+when an experiment is killed. Failed runs are not retried after a timeout.
+
+Sweep output defaults to major-step timings and total elapsed time
+(`verbose=True, detailed_logging=False`).
+Set `detailed_logging=True` to restore generator, detector and stage breakdowns.
+All timing diagnostics are still saved in HDF5. The desktop GUI enables detailed
+logging in its dedicated progress pane.

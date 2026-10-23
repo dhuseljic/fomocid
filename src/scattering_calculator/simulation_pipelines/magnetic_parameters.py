@@ -106,8 +106,9 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
     explicit numeric target_magnetization fixes the target across samples.
     Otherwise saturation_probability (default 0.1) selects exact +/-1 states
     with equal polarity probabilities, including in free-magnetization mode.
-    Alignment follows an exponential with scale 2, conditioned on [0,24];
-    there is no point mass at exactly zero or at the upper bound.
+    Alignment is exactly zero for half the draws; other draws use an exponential
+    with scale 0.5 conditioned on [0,24]. Spatial disorder is uniform [0.3,1.2],
+    and initial order uniform [0,0.35], favoring less ordered preparations.
     Generate one relaxed realization, then measure it; spacing calibration is
     disabled. Pass a NumPy Generator to make the sweep reproducible.
     """
@@ -117,20 +118,23 @@ def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, 
     preparation = str(rng.choice(('random', 'stripes', 'hexagonal', 'worms')))
     magnetization = target_magnetization
     if magnetization is None and constrain_magnetization:
-        magnetization = float(rng.uniform(-.95, .95))
+        magnetization = float(rng.uniform(-.85, .85))
     if target_magnetization is None and rng.random() < saturation_probability:
         magnetization = float(rng.choice((-1., 1.)))
     if magnetization is not None:
         magnetization = float(magnetization)
         if not np.isfinite(magnetization) or not -1 <= magnetization <= 1:
             raise ValueError("target_magnetization must be None or finite in [-1,1]")
+    alignment = 0.
+    if rng.random() >= .5:
+        alignment = float(-.5 * np.log1p(-rng.random() * (-np.expm1(-48.))))
     return dict(
         characteristic_length=length, target_magnetization=magnetization,
-        alignment=float(-2. * np.log1p(-rng.random() * (-np.expm1(-12.)))),
+        alignment=alignment,
         direction=float(rng.uniform(0., np.pi)),
-        disorder=float(rng.uniform(0., .8)),
+        disorder=float(rng.uniform(.3, 1.2)),
         disorder_length=float(rng.uniform(0., .15) * length),
-        initial_state=preparation, initial_order=float(rng.uniform(0., 1.)),
+        initial_state=preparation, initial_order=float(rng.uniform(0., .35)),
         initial_domain_count=int(rng.integers(1, 4)),
         worm_length=float(rng.uniform(1., 4.) * length),
         worm_waviness=float(rng.uniform(0., .3) * length),
@@ -174,3 +178,35 @@ def constrained_sampling_pitch(parameters):
     if fraction > 0:
         pitch = min(pitch, length * fraction / 4)
     return pitch
+
+
+def sample_sweep_domain_parameters(rng, experiment_index, *, constrain_magnetization=True,
+                                   target_magnetization=None, saturation_interval=20):
+    """Sample targets uniformly in [-0.85,0.85], saturating every twentieth parent.
+
+    Parameters
+    ----------
+    rng : numpy.random.Generator
+        Reproducible parent parameter generator.
+    experiment_index : int
+        Zero-based requested experiment/parent index, unchanged on grid retries.
+    constrain_magnetization : bool
+        Sample a numeric target unless a fixed target is provided. Default True.
+    target_magnetization : float or None
+        Optional fixed nonsaturated-run target; None uses the selected mode.
+    saturation_interval : int
+        Every Nth requested parent is uniform +/-1, with equal polarity chances.
+
+    Returns
+    -------
+    dict
+        Physical generation parameters. Saturation overrides the normal target
+        on scheduled parents. Branches do not increment the schedule.
+    """
+    if saturation_interval < 1 or int(saturation_interval) != saturation_interval:
+        raise ValueError('saturation_interval must be a positive integer')
+    if (experiment_index + 1) % saturation_interval == 0:
+        target_magnetization = float(rng.choice((-1., 1.)))
+    return sample_constrained_domain_parameters(rng,
+        constrain_magnetization=constrain_magnetization,
+        target_magnetization=target_magnetization, saturation_probability=0.)

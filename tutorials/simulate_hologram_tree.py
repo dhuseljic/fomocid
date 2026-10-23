@@ -12,7 +12,7 @@ from fomocid import DATA_ROOT
 from scattering_calculator.simulation_pipelines.recipe_sampling import sample_multilayer_recipe
 from scattering_calculator.simulation_pipelines import Uniform
 
-from scattering_calculator.simulation_pipelines.magnetic_parameters import sample_constrained_domain_parameters
+from scattering_calculator.simulation_pipelines.magnetic_parameters import sample_sweep_domain_parameters
 from scattering_calculator.simulation_pipelines.pipelines.hologram_pipeline import HologramPipelineConfig, HologramPipelineRanges
 from scattering_calculator.simulation_pipelines.pipelines.hierarchical_hologram_pipeline import HierarchicalHologramPipeline
 
@@ -29,7 +29,7 @@ def main():
     if args.patterns < 1:
         parser.error('--patterns must be positive')
     randomize_recipe = not args.fixed_recipe  # False keeps config.recipe unchanged
-    saturation_probability = 0.1  # per magnetic parent, inherited by all its leaves
+    saturation_interval = 20  # every twentieth parent; inherited by all its leaves
     rng = np.random.default_rng(args.seed)
     config = HologramPipelineConfig(
         # Fixed recipe used with --fixed-recipe (or randomize_recipe=False).
@@ -58,8 +58,8 @@ def main():
     HierarchicalHologramPipeline(config=config,
         ranges=HologramPipelineRanges(
             recipe=(lambda _: sample_multilayer_recipe(rng)) if randomize_recipe else None,
-            detector_distance=Uniform(.05, .40), pattern_config=lambda _: sample_constrained_domain_parameters(
-            rng, saturation_probability=saturation_probability)),
+            detector_distance=Uniform(.05, .40), pattern_config=lambda params: sample_sweep_domain_parameters(
+            rng, params["experiment_index"], saturation_interval=saturation_interval)),
         output_path=args.output, n_samples=args.patterns, exit_variants=exits,
         geometry_variants=geometries, acquisition_variants=acquisitions).run()
 

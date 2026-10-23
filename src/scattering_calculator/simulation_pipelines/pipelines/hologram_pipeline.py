@@ -43,6 +43,10 @@ pipeline.run()
 from __future__ import annotations
 
 import time
+import multiprocessing as mp
+import tempfile
+import traceback
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -82,6 +86,10 @@ def _beam_direction_for_projected_jones(
     if np.allclose(direction, np.array([0.0, 0.0, 1.0]), atol=1e-14, rtol=0.0):
         return None
     return direction
+
+
+class ExperimentTimeoutError(TimeoutError):
+    """An isolated experiment exceeded its wall-clock deadline."""
 
 
 class MagneticGridLimitError(ValueError):
@@ -635,6 +643,8 @@ class HologramPipeline:
         n_samples: int,
         verbose: bool = True,
         max_sampling_attempts: int = 20,
+        experiment_timeout_seconds: float | None = None,
+        detailed_logging: bool = False,
     ) -> None:
         """Store pipeline configuration and output settings.
 
@@ -653,6 +663,12 @@ class HologramPipeline:
         max_sampling_attempts : int
             Maximum draws per parent when magnetic grids exceed the allocation
             limit. Exhausted parents are skipped; other errors still propagate.
+        experiment_timeout_seconds : float or None
+            Wall-clock limit per independent experiment/tree parent, including
+            grid retries. None disables isolation and the timeout. Unix only.
+        detailed_logging : bool
+            Print stage and generator timing details when verbose is True.
+            False keeps only experiment progress, skips, and the final summary.
 
         Returns
         -------
@@ -665,9 +681,16 @@ class HologramPipeline:
         self.output_path = Path(output_path)
         self.n_samples = n_samples
         self.verbose = verbose
+        self.detailed_logging = detailed_logging
         if not isinstance(max_sampling_attempts, int) or max_sampling_attempts < 1:
             raise ValueError("max_sampling_attempts must be a positive integer")
         self.max_sampling_attempts = max_sampling_attempts
+        if experiment_timeout_seconds is not None:
+            if not np.isfinite(experiment_timeout_seconds) or experiment_timeout_seconds <= 0:
+                raise ValueError('experiment_timeout_seconds must be finite and positive or None')
+            if 'fork' not in mp.get_all_start_methods():
+                raise ValueError('Experiment timeouts currently require Unix fork support')
+        self.experiment_timeout_seconds = experiment_timeout_seconds
 
     # ------------------------------------------------------------------
     # Public API
@@ -698,6 +721,7 @@ class HologramPipeline:
             with h5py.File(self.output_path, "w") as h5:
                 self._write_pipeline_config(h5)
                 for i in range(self.n_samples):
+                    self._experiment_index = i
                     if self.verbose:
                         print(
                             f"  [{i + 1:>{width}}/{self.n_samples}] Simulating...",
@@ -706,9 +730,19 @@ class HologramPipeline:
                         )
                     t0 = time.time()
                     existing = set(h5)
+                    deadline = (time.monotonic() + self.experiment_timeout_seconds
+                                if self.experiment_timeout_seconds is not None else None)
                     for attempt in range(1, self.max_sampling_attempts + 1):
                         try:
-                            self._simulate_one(h5, i)
+                            if deadline is None:
+                                self._simulate_one(h5, i)
+                            else:
+                                self._simulate_with_timeout(h5, i, deadline)
+                        except ExperimentTimeoutError:
+                            skipped += 1
+                            if self.verbose:
+                                print(f"    experiment {i} exceeded {self.experiment_timeout_seconds:g}s; skipped", flush=True)
+                            break
                         except MagneticGridLimitError as error:
                             # This guard runs before sample allocation or output.
                             # Do not retry if a custom subclass already wrote data.
@@ -716,14 +750,15 @@ class HologramPipeline:
                                 raise
                             rejected += 1
                             if self.verbose:
-                                print(f"\n    rejected draw {attempt}/{self.max_sampling_attempts}: {error}", flush=True)
+                                reason = str(error) if self.detailed_logging else "magnetic grid exceeds allocation limit"
+                                print(f"\n    rejected draw {attempt}/{self.max_sampling_attempts}: {reason}; resampling", flush=True)
                         else:
                             completed += 1
                             for key in set(h5) - existing:
                                 if key.isdigit():
                                     h5[f"{key}/metadata"].create_dataset('sampling_attempts', data=attempt)
                             if self.verbose:
-                                print(f"done ({time.time() - t0:.1f} s)")
+                                print(f"    Total: {time.time() - t0:.2f} s")
                             break
                     else:
                         skipped += 1
@@ -743,6 +778,69 @@ class HologramPipeline:
                 f"Pipeline complete: {completed}/{self.n_samples} configurations ({skipped} skipped) in "
                 f"{elapsed:.1f} s → {self.output_path}"
             )
+
+    def _simulate_with_timeout(self, h5, idx, deadline):
+        """Run one frozen parameter draw in a disposable process and HDF5 file.
+
+        Only complete child results are copied into the dataset. Killing a slow
+        child therefore cannot leave a half-written experiment in the main file.
+        The deadline is shared by all grid-rejection attempts for this parent.
+        """
+        # Sample in the parent so closures/NumPy Generators advance even if the
+        # child is killed. The tree uses this draw for all its downstream leaves.
+        parameters = HologramPipeline._sample_params(self)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ExperimentTimeoutError()
+        child_seed = int(np.random.randint(0, 2**31-1))
+        h5.flush()
+        context = mp.get_context('fork')
+        receiver, sender = context.Pipe(duplex=False)
+        with tempfile.TemporaryDirectory(prefix='fomocid-experiment-') as folder:
+            stage_path = Path(folder) / 'experiment.h5'
+            def execute():
+                try:
+                    self._frozen_parameters = parameters
+                    np.random.seed(child_seed)
+                    with h5py.File(stage_path, 'w') as stage:
+                        self._simulate_one(stage, idx)
+                    sender.send(('done', getattr(self, '_leaf_index', None)))
+                except MagneticGridLimitError as error:
+                    sender.send(('grid', str(error)))
+                except Exception:
+                    sender.send(('error', traceback.format_exc()))
+                finally:
+                    sender.close()
+            child = context.Process(target=execute)
+            child.start()
+            sender.close()
+            try:
+                child.join(max(0., deadline - time.monotonic()))
+                if child.is_alive():
+                    child.terminate()
+                    child.join(2.)
+                    if child.is_alive():
+                        child.kill()
+                        child.join()
+                    raise ExperimentTimeoutError()
+                if not receiver.poll():
+                    raise RuntimeError(f'Simulation subprocess exited without a result (code {child.exitcode})')
+                kind, payload = receiver.recv()
+                if kind == 'grid':
+                    raise MagneticGridLimitError(payload)
+                if kind == 'error':
+                    raise RuntimeError('Simulation subprocess failed:\n' + payload)
+                with h5py.File(stage_path, 'r') as stage:
+                    for key in stage:
+                        stage.copy(key, h5)
+                if payload is not None:
+                    self._leaf_index = payload
+            finally:
+                if child.is_alive():
+                    child.terminate()
+                    child.join()
+                receiver.close()
+                child.close()
 
     def write_precomputed_result(
         self,
@@ -925,6 +1023,8 @@ class HologramPipeline:
         params : dict[str, Any]
             Fully resolved parameters for one simulated sample.
         """
+        if hasattr(self, "_frozen_parameters"):
+            return deepcopy(self._frozen_parameters)
         cfg = self.config
         rng = self.ranges
 
@@ -1028,6 +1128,7 @@ class HologramPipeline:
             return merged
 
         params: dict[str, Any] = {
+            "experiment_index": getattr(self, "_experiment_index", 0),
             "detector_shape": cfg.detector_shape,
             "detector_center": cfg.detector_center,
             "oversampling": cfg.oversampling,
@@ -1634,7 +1735,7 @@ class HologramPipeline:
                 print(f"      generator total: {event['elapsed_seconds']:.3f}s", flush=True)
             else:
                 print(f"      {stage}: {event['elapsed_seconds']:.3f}s", flush=True)
-        if self.verbose and p['pattern_type'] == 'constrained_domain_pattern':
+        if self.verbose and self.detailed_logging and p['pattern_type'] == 'constrained_domain_pattern':
             controls = p['pattern_config']
             target = controls.get('target_magnetization')
             print(f"\n    magnetic grid={pattern_shape}, pitch={real_space_pixel_size*1e9:.3f} nm, "
@@ -1649,7 +1750,7 @@ class HologramPipeline:
             pattern_config=pattern_config,
         )
         magnetic_pattern_config = self._generate_pattern(
-            magnetic_pattern_config, report_magnetic_progress if self.verbose else None)
+            magnetic_pattern_config, report_magnetic_progress if self.verbose and self.detailed_logging else None)
         t_stage = mark_stage("domain relaxation and walls", t_stage)
         if hasattr(magnetic_pattern_config, "generation_metadata"):
             # JSON preserves nested traces, calibration history, None and solver defaults.
@@ -1962,7 +2063,7 @@ class HologramPipeline:
             noise_timings = getattr(artifact_model, 'noise_timings_seconds', {})
             for name, seconds in noise_timings.items():
                 metadata[f"detector_response/{pol}/timing_seconds/{name}"] = seconds
-            if self.verbose and noise_timings:
+            if self.verbose and self.detailed_logging and noise_timings:
                 print(f"    {pol} detector noise: " + ", ".join(
                     f"{name}={seconds:.3f}s" for name, seconds in noise_timings.items()), flush=True)
             metadata[f"detector_response/{pol}/energy_eV"] = float(artifact_model.photon_energy_eV)
@@ -2031,7 +2132,34 @@ class HologramPipeline:
         for name, seconds in stage_times:
             timing_group.create_dataset(name.replace(" ", "_"), data=seconds)
 
-        if self.verbose:
+        if self.verbose and not self.detailed_logging:
+            major = {}
+            for name, elapsed in stage_times:
+                if name in ('sample params', 'xray', 'detector/beamstop', 'sample setup'):
+                    label = 'Experiment setup'
+                elif name in ('magnetic ROI planning', 'domain relaxation and walls',
+                              '3D magnetization mapping', 'magnetic metadata'):
+                    label = 'Magnetic pattern'
+                elif name == 'front aperture':
+                    label = 'Aperture construction'
+                elif name == 'magnetic diagnostics':
+                    label = 'Magnetic state measurements'
+                elif name in ('scalar refractive index setup', 'dielectric tensor', 'illumination'):
+                    label = 'Optical response and illumination'
+                elif name.endswith(' propagation'):
+                    label = 'Exit-wave propagation (CR + CL)'
+                elif name.endswith('detector ideal'):
+                    label = 'Ideal holograms (CR + CL)'
+                elif name.endswith('detector noise'):
+                    label = 'Detector acquisition (CR + CL)'
+                else:
+                    label = 'Save results' if name == 'hdf5 write' else name
+                major[label] = major.get(label, 0.) + elapsed
+            print()
+            for label, elapsed in major.items():
+                print(f"    {label}: {elapsed:.2f} s", flush=True)
+
+        if self.verbose and self.detailed_logging:
             breakdown = ", ".join(
                 f"{name}: {elapsed:.2f}s" for name, elapsed in stage_times
             )

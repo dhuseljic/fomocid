@@ -271,7 +271,7 @@ def test_nonlinear_sweep_response_and_energy_gain_are_applied_and_recorded(tmp_p
 def test_verbose_pipeline_reports_magnetic_details_and_saves_timings(tmp_path, capsys):
     path = tmp_path / 'timed.h5'
     HologramPipeline(config=small_hologram_config(), ranges=HologramPipelineRanges(),
-        output_path=path, n_samples=1, verbose=True).run()
+        output_path=path, n_samples=1, verbose=True, detailed_logging=True).run()
     output = capsys.readouterr().out
     assert 'RMS update=' not in output
     assert 'relaxation 1/' not in output
@@ -309,12 +309,44 @@ def test_saturated_sampler_generates_uniform_states_with_both_polarities():
     assert sample_constrained_domain_parameters(rng, saturation_probability=1., target_magnetization=.4)['target_magnetization'] == .4
 
 
-def test_alignment_sampler_is_continuous_with_exponent_minus_twelve():
+def test_sweep_sampler_favors_isotropic_disordered_preparations():
     rng = np.random.default_rng(123)
-    alignment = np.array([sample_constrained_domain_parameters(rng)['alignment']
-                          for _ in range(3000)])
-    assert np.all((alignment > 0) & (alignment < 24))
-    assert len(np.unique(alignment)) == len(alignment)
-    assert 1.8 < alignment.mean() < 2.2
-    assert .84 < np.mean(alignment < 4) < .89
-    assert .97 < np.mean(alignment < 8) < .995
+    samples = [sample_constrained_domain_parameters(rng) for _ in range(3000)]
+    alignment = np.array([sample['alignment'] for sample in samples])
+    assert np.all((alignment >= 0) & (alignment < 24))
+    assert .46 < np.mean(alignment == 0) < .54
+    assert .20 < alignment.mean() < .30
+    assert .90 < np.mean(alignment < 1) < .96
+    assert all(.3 <= sample['disorder'] <= 1.2 for sample in samples)
+    assert all(0 <= sample['initial_order'] <= .35 for sample in samples)
+
+
+def test_sweep_targets_are_uniform_with_every_twentieth_parent_saturated():
+    from scattering_calculator.simulation_pipelines.magnetic_parameters import sample_sweep_domain_parameters
+    rng = np.random.default_rng(31)
+    targets = np.array([sample_sweep_domain_parameters(rng, i)['target_magnetization']
+                        for i in range(2000)])
+    saturated = np.arange(1, 2001) % 20 == 0
+    assert np.all(np.abs(targets[saturated]) == 1)
+    assert set(targets[saturated]) == {-1., 1.}
+    ordinary = targets[~saturated]
+    assert np.all((ordinary >= -.85) & (ordinary <= .85))
+    assert abs(ordinary.mean()) < .04
+    assert .46 < np.mean(ordinary < 0) < .54
+    # A retry keeps the scheduled parent saturated rather than consuming a slot.
+    assert abs(sample_sweep_domain_parameters(rng, 19)['target_magnetization']) == 1
+
+
+def test_default_progress_omits_stage_details_but_saves_timings(tmp_path, capsys):
+    path = tmp_path/'concise.h5'
+    HologramPipeline(config=small_hologram_config(), ranges=HologramPipelineRanges(),
+        output_path=path, n_samples=1, verbose=True).run()
+    output = capsys.readouterr().out
+    assert 'Simulating...' in output and 'Total:' in output and 'Pipeline complete' in output
+    for label in ['Experiment setup:', 'Magnetic pattern:', 'Aperture construction:',
+                  'Exit-wave propagation (CR + CL):', 'Detector acquisition (CR + CL):', 'Save results:']:
+        assert label in output
+    for text in ['relaxation breakdown', 'detector noise:', 'magnetic grid=', 'timing:', 'generator total']:
+        assert text not in output
+    with h5py.File(path) as h5:
+        assert h5['00000/metadata/timing_seconds/domain_relaxation_and_walls'][()] >= 0
