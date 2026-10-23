@@ -147,3 +147,8 @@ tolerance when optional length calibration uses more than one attempt. Hidden
 entries do not need validation and their backend defaults remain available.
 Old stripe-generator waviness controls are not included. These display changes
 do not remove supported options from the Python API.
+
+The default lazy Scalar backend reuses the nonmagnetic propagation prefix across
+CR and CL, then propagates the magnetic suffix separately. This optimization
+also applies to the independent and hierarchical sweep backends; see
+[shared propagation](simulate_hologram_sweep.md#shared-nonmagnetic-scalar-propagation).

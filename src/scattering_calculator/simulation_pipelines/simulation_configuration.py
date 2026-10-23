@@ -2463,6 +2463,7 @@ class SamplePropagatorConfig(_ConfigMixin):
             propagate=bool(self.propagator_config.get("propagate", False)),
             scalar_apply_zero_order_phase=scalar_apply_zero_order_phase,
             layer_callback=self.propagator_config.get("layer_callback"),
+            prefix_cache=self.propagator_config.get("scalar_prefix_cache"),
             propagation_padding_px=int(
                 self.propagator_config.get("propagation_padding_px", 0)
             ),

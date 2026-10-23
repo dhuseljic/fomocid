@@ -160,6 +160,7 @@ class scalar_wavefronts:
         farfield_oversampling=1,
         farfield_background_scalar=None,
         layer_callback=None,
+        prefix_cache=None,
     ):
         self.polarization = light_beam.polarization_vector(beam_parameters.pol)
         self.E_in = self._as_scalar_field(E_in, self.polarization)
@@ -188,6 +189,7 @@ class scalar_wavefronts:
             ),
             scalar_apply_zero_order_phase=scalar_apply_zero_order_phase,
             layer_callback=layer_callback,
+            prefix_cache=prefix_cache,
         )
         self.exit_wave_for_farfield = self._build_farfield_exit_wave(
             self.exit_wave,
@@ -271,6 +273,7 @@ class scalar_wavefronts:
         multislice_propagation_roi_merge_overlaps=True,
         scalar_apply_zero_order_phase=True,
         layer_callback=None,
+        prefix_cache=None,
     ):
         """Propagate; optionally call ``layer_callback(iz, field)`` post-material.
 
@@ -306,7 +309,40 @@ class scalar_wavefronts:
         if E_in.shape != tuple(stack_shape[1:3]):
             raise ValueError("E_in and propagation stack must have matching (Ny, Nx).")
 
-        for iz, dz in enumerate(thicknesses):
+        start_layer = 0
+        cache_key = None
+        self.reused_prefix_layers = 0
+        # Cache lifetime is one unchanged sample/polarization pair. Only the
+        # lazy stack exposes enough material information to prove isotropy.
+        if prefix_cache is not None and layer_callback is None and isinstance(
+                refractive_index_stack, LazyScalarRefractiveIndexStack):
+            stack = refractive_index_stack
+            magnetic = np.flatnonzero((np.abs(stack.n_circ) > stack.tol) |
+                                      (np.abs(stack.n_lin) > stack.tol))
+            prefix_length = int(magnetic[0]) if magnetic.size else len(thicknesses)
+            cache_key = (prefix_length, tuple(np.asarray(thicknesses)), wavelength, pixel_size,
+                propagate, propagation_padding_px, propagation_padding_mode,
+                propagation_absorber_width_px, propagation_absorber_strength,
+                propagation_absorber_profile, multislice_propagation_roi,
+                multislice_propagation_roi_padding_px, multislice_propagation_roi_merge_overlaps,
+                scalar_apply_zero_order_phase, repr(self.aperture_support_regions),
+                id(stack.mask), repr(stack.support_objects),
+                stack.base_index[:prefix_length].tobytes())
+            if (prefix_length > 0 and prefix_cache.get('key') == cache_key
+                    and np.array_equal(E_in, prefix_cache['incident'])):
+                E_in = prefix_cache['field'].copy()
+                start_layer = prefix_length
+                self.reused_prefix_layers = prefix_length
+            elif prefix_length > 0:
+                prefix_cache.clear()
+                prefix_cache.update(key=cache_key, incident=E_in.copy())
+            else:
+                cache_key = None
+
+        for iz in range(start_layer, len(thicknesses)):
+            if cache_key is not None and iz == prefix_length and 'field' not in prefix_cache:
+                prefix_cache['field'] = E_in.copy()
+            dz = thicknesses[iz]
             if use_index_stack:
                 if compact_index_stack:
                     E_in = self.apply_compact_index_slice(
@@ -367,6 +403,8 @@ class scalar_wavefronts:
                 k0 = 2 * np.pi / wavelength
                 E_in = E_in * np.exp(-1j * k0 * float(dz))
 
+        if cache_key is not None and 'field' not in prefix_cache:
+            prefix_cache['field'] = E_in.copy()
         return E_in
 
     @staticmethod

@@ -1314,3 +1314,22 @@ Sweep output defaults to major-step timings and total elapsed time
 Set `detailed_logging=True` to restore generator, detector and stage breakdowns.
 All timing diagnostics are still saved in HDF5. The desktop GUI enables detailed
 logging in its dedicated progress pane.
+
+### Shared nonmagnetic Scalar propagation
+
+For the default lazy Scalar backend, a paired CR/CL calculation reuses the
+common isotropic prefix. AuCr and SiN are propagated once; the calculation
+splits before the first layer with a nonzero circular or linear anisotropic
+optical channel (CoXY in the example recipe). Each helicity still computes its
+own magnetic suffix, final far-field transform, ideal projection and acquisition.
+Free-space diffraction or longitudinal phase between the common layers is part
+of the reused field. Incident fields, material prefix and propagation settings
+must match; otherwise reuse is skipped. The cache is restricted to the current
+unchanged sample pair and is never written to HDF5. Per-helicity counters are
+saved at `metadata/propagator/{CR,CL}/reused_prefix_layers`.
+
+Dense/non-lazy Scalar stacks, per-layer callbacks, Jones and Stokes retain their
+independent propagation paths. In Jones propagation the CR and CL vectors are
+different even through isotropic layers; sharing their scalar envelope would
+require a separate vector-aware implementation. Merely looking for off-diagonal
+matrix entries is insufficient when other anisotropic optical terms are present.

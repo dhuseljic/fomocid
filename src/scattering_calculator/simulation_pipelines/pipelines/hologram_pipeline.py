@@ -1001,7 +1001,7 @@ class HologramPipeline:
             {
                 key: value
                 for key, value in propagator_config.propagator_config.items()
-                if key != "propagator_method"
+                if key not in {"propagator_method", "scalar_prefix_cache"}
             }
         )
         return {f"propagator_config/{key}": value for key, value in values.items()}
@@ -1999,6 +1999,7 @@ class HologramPipeline:
             detector_layout=detector_config.detector_layout,
         )
 
+        scalar_prefix_cache = {}
         base_noise_seed = detector_config.detector_params.get("noise_seed")
         for pol_idx, pol in enumerate(self._POLARIZATIONS):
             if base_noise_seed is not None:
@@ -2012,6 +2013,7 @@ class HologramPipeline:
                 IlluminationConfig=illumination_config,
                 propagator_method=cfg.propagator_method,
                 propagator_config={
+                    "scalar_prefix_cache": scalar_prefix_cache,
                     "propagator_method": cfg.propagator_method,
                     "propagate": cfg.propagate,
                     "jones_apply_zero_order_phase": cfg.jones_apply_zero_order_phase,
@@ -2040,6 +2042,8 @@ class HologramPipeline:
                 f"{pol} {cfg.propagator_method} propagation", t_stage
             )
 
+            metadata[f"propagator/{pol}/reused_prefix_layers"] = int(getattr(
+                propagator_config.return_wavefront(), "reused_prefix_layers", 0))
             self._detect_ideal(detector_config, propagator_config, pol)
             t_stage = mark_stage(f"{pol} detector ideal", t_stage)
 
