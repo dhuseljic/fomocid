@@ -437,8 +437,8 @@ To prevent blocky source patterns, the hologram backend raises actual integer
 oversampling to resolve the spacing by at least 16 pixels and positive Gaussian
 wall sigma by at least 2 pixels, plus four pixels across the nonzero conservative
 minority stripe-width estimate. It records per-sample
-`metadata/sample/effective_oversampling`. The script selects detector distances
-with these requirements in mind. If the necessary full-grid axis exceeds
+`metadata/sample/effective_oversampling`. The script samples detector distance uniformly from 5 to 40 cm
+(`Uniform(.05, .40)` in metres), once per independent experiment. If the necessary full-grid axis exceeds
 `magnetic_pattern_max_grid_axis` (default 4096), simulation fails before allocating
 the large grid. It does not silently reduce resolution. Explicit-grid experiments
 must select a sufficiently fine pitch themselves. Refine further to establish

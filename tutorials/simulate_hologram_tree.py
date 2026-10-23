@@ -40,7 +40,7 @@ def main():
     # L sample/energy branches. OH is unchanged; RH size may vary.
     exits = [{}, {'xray_energy': 780.,
                   'aperture_radii': [300e-9, 40e-9, 40e-9]}]
-    # Distance is sampled once per independent parent (40–60 mm), not here.
+    # Distance is sampled once per independent parent (5–40 cm), not here.
     # Every branch below that parent retains its camera geometry and grid.
     geometries = [{}]
     # N acquisitions per ideal pair. Defaults retain linear detector response
@@ -51,7 +51,7 @@ def main():
     total = args.patterns * len(exits) * len(geometries) * len(acquisitions)
     print(f'{args.patterns} patterns -> {total} CR/CL acquisition pairs')
     HierarchicalHologramPipeline(config=config,
-        ranges=HologramPipelineRanges(detector_distance=Uniform(.04, .06), pattern_config=lambda _: sample_constrained_domain_parameters(
+        ranges=HologramPipelineRanges(detector_distance=Uniform(.05, .40), pattern_config=lambda _: sample_constrained_domain_parameters(
             rng, saturation_probability=saturation_probability)),
         output_path=args.output, n_samples=args.patterns, exit_variants=exits,
         geometry_variants=geometries, acquisition_variants=acquisitions).run()

@@ -346,53 +346,6 @@ def random_pattern_config(params):
         saturation_probability=saturation_probability)
 
 
-def detector_distance_range(params):
-    """Choose a detector-distance range from sampled energy and stripe width.
-
-    Parameters
-    ----------
-    params : Any
-        Input value for ``params``.
-
-    Returns
-    -------
-    result : Any
-        Return value produced by the function.
-    """
-    # This function is called once per simulated sample after x-ray energy,
-    # detector pixel size, detector shape, and pattern_config have
-    # already been sampled. It returns either a fixed detector distance or a
-    # Uniform range that the pipeline samples immediately.
-    wavelength = physics.photon_energy_wavelength(params["energy"])
-    stripe_width = params["pattern_config"]["characteristic_length"] / 2
-    detector_width = params["detector_shape"][0] * params["detector_pixel_size"]
-
-    # Upper bound: keep the detector real-space resolution smaller than the
-    # sampled texture period. Very long distances are capped at 0.75 m.
-    # Resolve the full spacing by >=16 pixels and Gaussian wall sigma by >=2.
-    # This keeps most sweeps at the requested oversampling instead of triggering
-    # the pipeline's automatic refinement and allocation guard.
-    controls = params["pattern_config"]
-    max_resolution = constrained_sampling_pitch(controls) * params["oversampling"]
-    maximum_detector_distance = detector_width / (
-        2 * np.tan(wavelength / (2 * max_resolution))
-    )
-    maximum_detector_distance = np.minimum(maximum_detector_distance, 75e-2)
-
-    # Lower bound: keep the field of view large enough to contain several
-    # texture periods. Very short distances are clipped at 0.03 m.
-    min_fov = 10 * stripe_width
-    min_resolution = min_fov / params["detector_shape"][0]
-    minimum_detector_distance = detector_width / (
-        2 * np.tan(wavelength / (2 * min_resolution))
-    )
-    minimum_detector_distance = min(max(minimum_detector_distance, 3e-2), maximum_detector_distance)
-
-    if maximum_detector_distance <= minimum_detector_distance:
-        return minimum_detector_distance
-    return Uniform(minimum_detector_distance, maximum_detector_distance)
-
-
 def random_aperture_config(params):
     """Generate one random OH/RH holography mask from sampled geometry.
 
@@ -407,7 +360,7 @@ def random_aperture_config(params):
         Return value produced by the function.
     """
     # This function is also called once per simulated sample, after
-    # detector_distance_range has already chosen a detector distance. It returns
+    # The parent sampler has already chosen a detector distance. It returns
     # all aperture lists together so their lengths and geometric constraints
     # stay consistent.
     wavelength = physics.photon_energy_wavelength(params["energy"])
@@ -721,9 +674,8 @@ ranges = HologramPipelineRanges(
     artifacts_config=random_artifacts_config,
 
 
-    # generating detector distances from reasonable ranges based on the stripe width and xray energy
-    # you can also choose a uniform distribution or a fixed value
-    detector_distance=detector_distance_range,
+    # Sample once per independent experiment, in metres (5–40 cm).
+    detector_distance=Uniform(.05, .40),
     # generating holography masks from reasonable ranges based on the stripe width, xray energy and detector distance
     # you can also choose a uniform distribution or a fixed value
     aperture_config=random_aperture_config,
