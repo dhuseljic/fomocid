@@ -22,6 +22,7 @@ def main():
     args = parser.parse_args()
     if args.patterns < 1:
         parser.error('--patterns must be positive')
+    saturation_probability = 0.1  # per magnetic parent, inherited by all its leaves
     rng = np.random.default_rng(args.seed)
     config = HologramPipelineConfig(
         recipe='Au(100)/SiN(100)/Co(20)', detector_shape=(256, 256),
@@ -47,7 +48,8 @@ def main():
     total = args.patterns * len(exits) * len(geometries) * len(acquisitions)
     print(f'{args.patterns} patterns -> {total} CR/CL acquisition pairs')
     HierarchicalHologramPipeline(config=config,
-        ranges=HologramPipelineRanges(pattern_config=lambda _: sample_constrained_domain_parameters(rng)),
+        ranges=HologramPipelineRanges(pattern_config=lambda _: sample_constrained_domain_parameters(
+            rng, saturation_probability=saturation_probability)),
         output_path=args.output, n_samples=args.patterns, exit_variants=exits,
         geometry_variants=geometries, acquisition_variants=acquisitions).run()
 

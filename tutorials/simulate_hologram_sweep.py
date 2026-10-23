@@ -170,6 +170,7 @@ beamstop_config = {
 # --- Magnetic domain pattern ---
 # None lets the mean evolve freely. Set a number for a fixed area target.
 # Alternatively set constrain_magnetization=True to sample different numeric targets.
+saturation_probability = 0.1  # fraction of independent magnetic parents
 constrain_magnetization = False
 target_magnetization = None
 pattern_type = "constrained_domain_pattern"
@@ -341,7 +342,8 @@ config = ExperimentConfig(
 def random_pattern_config(params):
     """Explore constrained-domain controls; measured morphology is an output."""
     return sample_constrained_domain_parameters(domain_rng,
-        constrain_magnetization=constrain_magnetization, target_magnetization=target_magnetization)
+        constrain_magnetization=constrain_magnetization, target_magnetization=target_magnetization,
+        saturation_probability=saturation_probability)
 
 
 def detector_distance_range(params):

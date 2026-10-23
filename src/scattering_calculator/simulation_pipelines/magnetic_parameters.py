@@ -97,23 +97,27 @@ def aperture_placement_defaults(parameters, aperture, shape, pixel_size):
     return result
 
 
-def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, target_magnetization=None):
+def sample_constrained_domain_parameters(rng, *, constrain_magnetization=False, target_magnetization=None, saturation_probability=.1):
     """Sample diverse physical domain controls without requesting state labels.
 
     Lengths are metres. Preparation and relaxation controls are independent of
     the measured state. By default target_magnetization=None leaves sign area
     unconstrained. constrain_magnetization=True samples numeric targets; an
     explicit numeric target_magnetization fixes the target across samples.
+    Otherwise saturation_probability (default 0.1) selects exact +/-1 states
+    with equal polarity probabilities, including in free-magnetization mode.
     Generate one relaxed realization, then measure it; spacing calibration is
     disabled. Pass a NumPy Generator to make the sweep reproducible.
     """
+    if not np.isfinite(saturation_probability) or not 0 <= saturation_probability <= 1:
+        raise ValueError("saturation_probability must be finite in [0,1]")
     length = float(rng.uniform(120e-9, 1000e-9))
     preparation = str(rng.choice(('random', 'stripes', 'hexagonal', 'worms')))
     magnetization = target_magnetization
     if magnetization is None and constrain_magnetization:
         magnetization = float(rng.uniform(-.95, .95))
-        if rng.random() < .1:
-            magnetization = float(rng.choice((-1., 1.)))
+    if target_magnetization is None and rng.random() < saturation_probability:
+        magnetization = float(rng.choice((-1., 1.)))
     if magnetization is not None:
         magnetization = float(magnetization)
         if not np.isfinite(magnetization) or not -1 <= magnetization <= 1:

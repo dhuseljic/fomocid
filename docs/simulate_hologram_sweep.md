@@ -1179,3 +1179,17 @@ from shared upstream results, use the separate
 
 Binary precursors and OH analysis masks are used internally for classification
 but are not saved in HDF5. Saved state diagnostics and the wall-smoothed optical field remain available.
+
+### Occasional saturated parents
+
+Both sweep scripts expose `saturation_probability=0.1`. For each independent
+magnetic parent, the shared sampler selects an exactly uniform state with 10%
+probability, choosing `target_magnetization=-1` or `+1` with equal probability.
+Other parents follow the selected free or constrained magnetization mode. An
+explicit numeric `target_magnetization` takes precedence over this sampling.
+Set the probability to zero to disable it or one to generate only saturation.
+This is random sampling, so a short sweep can contain no saturated parents.
+In the hierarchical sweep, the draw happens once per magnetic parent; its
+energy, mask, geometry and acquisition branches all inherit that same state.
+The saved generation parameters record the realized target; the measured
+classification is `saturated` with `bubble_count=0`, `stripe_count=1`.

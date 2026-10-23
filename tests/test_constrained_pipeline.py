@@ -44,7 +44,8 @@ def test_diverse_sampler_is_reproducible_without_requested_state():
     samples = [sample_constrained_domain_parameters(first) for _ in range(100)]
     assert samples == [sample_constrained_domain_parameters(second) for _ in range(100)]
     assert {s['initial_state'] for s in samples} == {'random', 'stripes', 'hexagonal', 'worms'}
-    assert all(s['target_magnetization'] is None for s in samples)
+    assert all(s['target_magnetization'] in (None, -1., 1.) for s in samples)
+    assert {s['target_magnetization'] for s in samples} == {None, -1., 1.}
     assert all('requested_state' not in s and 'k0' not in s for s in samples)
     assert all(s['max_length_iterations'] == 1 for s in samples)
 
@@ -285,3 +286,23 @@ def test_verbose_pipeline_reports_magnetic_details_and_saves_timings(tmp_path, c
         assert generation['timings_seconds']['wall_smoothing'] >= 0
         assert not generation['component_diagnostics']
         assert 'state' in json.loads(h5['00000/metadata/sample/magnetic_pattern/classification_json'][()])
+
+
+def test_saturated_sampler_generates_uniform_states_with_both_polarities():
+    from scattering_calculator.sample_generator.domain_analysis import classify_magnetic_domains
+    rng = np.random.default_rng(42)
+    targets = set()
+    for _ in range(10):
+        controls = sample_constrained_domain_parameters(rng, saturation_probability=1.)
+        target = controls['target_magnetization']
+        targets.add(target)
+        cfg = MagneticPatternConfig(pattern_type_method='constrained_domain_pattern',
+            shape=(32, 32), real_space_pixel_size=4e-9,
+            pattern_config={**controls, 'characteristic_length': 128e-9, 'sigma': 8e-9})
+        smooth, _ = cfg.create_pattern()
+        np.testing.assert_allclose(smooth, target)
+        state = classify_magnetic_domains(cfg.binary_pattern, periodic=True)
+        assert (state['state'], state['bubble_count'], state['stripe_count']) == ('saturated', 0, 1)
+    assert targets == {-1., 1.}
+    assert sample_constrained_domain_parameters(rng, saturation_probability=0.)['target_magnetization'] is None
+    assert sample_constrained_domain_parameters(rng, saturation_probability=1., target_magnetization=.4)['target_magnetization'] == .4
